@@ -440,13 +440,20 @@ model Favorito {
 // ─────────────── ADOPCIÓN ───────────────
 
 model Solicitud {
-  id              Int       @id @default(autoincrement()) @map("solicitud_id")
-  motivacion      String    @map("solicitud_motivacion")
-  fechaRespuesta  DateTime? @map("solicitud_fecha_respuesta")
-  comentario      String?   @map("solicitud_comentario")
-  publicacionId   Int       @map("publicacion_id")
-  usuarioId       Int       @map("usuario_id")
-  tipoSolicitudId Int       @map("tipo_solicitud_id")
+  id             Int       @id @default(autoincrement()) @map("solicitud_id")
+  motivacion     String    @map("solicitud_motivacion")
+  fechaRespuesta DateTime? @map("solicitud_fecha_respuesta")
+  comentario     String?   @map("solicitud_comentario")
+
+  // Período ofrecido cuando el tipo es "Transito". Nulos en una solicitud de adopción:
+  // no hay período que declarar. Van en Solicitud y no en Hogar porque son de ESTA
+  // solicitud — el hogar es el perfil del usuario y lo comparten todas.
+  fechaInicioTransito DateTime? @map("solicitud_fecha_inicio_transito")
+  fechaFinTransito    DateTime? @map("solicitud_fecha_fin_transito")
+
+  publicacionId   Int @map("publicacion_id")
+  usuarioId       Int @map("usuario_id")
+  tipoSolicitudId Int @map("tipo_solicitud_id")
 
   usuarioAlta         Int       @map("solicitud_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("solicitud_fecha_alta")
@@ -691,12 +698,29 @@ model Notificacion {
 // Perfil extendido de Usuario, no un rol/módulo separado (ver ROADMAP.md).
 
 model Hogar {
-  id                   Int       @id @default(autoincrement()) @map("hogar_id")
-  direccion            String    @map("hogar_direccion")
-  tienePatio           Boolean   @default(false) @map("hogar_tiene_patio")
-  tieneMascotas        Boolean   @default(false) @map("hogar_tiene_mascotas")
+  id        Int    @id @default(autoincrement()) @map("hogar_id")
+  direccion String @map("hogar_direccion")
+
+  /// Derivado de `espacioExterior`: verdadero para "Patio" y "Jardin". Se mantiene porque
+  /// es el campo del diagrama de clases; la respuesta real del formulario es la otra.
+  tienePatio Boolean @default(false) @map("hogar_tiene_patio")
+
+  /// "Balcon" | "Patio" | "Jardin" | "Ninguno" (GUI-7.1.1 paso 2).
+  espacioExterior String? @map("hogar_espacio_exterior")
+
+  tieneMascotas Boolean @default(false) @map("hogar_tiene_mascotas")
+  /// Texto libre que solo se pide cuando `tieneMascotas` es verdadero.
+  detalleMascotas String? @map("hogar_detalle_mascotas")
+
+  tieneNinios       Boolean @default(false) @map("hogar_tiene_ninios")
+  experienciaPrevia Boolean @default(false) @map("hogar_experiencia_previa")
+
+  /// Tope del rango elegido en el formulario: 4 ("menos de 4"), 8 ("entre 4 y 8") o 12 ("más de 8").
+  horasSolo Int? @map("hogar_horas_solo")
+
   descripcion          String?   @map("hogar_descripcion")
-  tipoVivienda         String?   @map("hogar_tipo_vivienda") // sin valores confirmados en el doc
+  /// "Casa" | "Departamento" | "Otro" (el documento fuente no fijaba valores).
+  tipoVivienda         String?   @map("hogar_tipo_vivienda")
   inicioDisponibilidad DateTime? @map("hogar_inicio_disponibilidad")
   finDisponibilidad    DateTime? @map("hogar_fin_disponibilidad")
   imagenUrl            String?   @map("hogar_imagen_url")
