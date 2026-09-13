@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
 import {
+  booleanoOpcionalSchema,
+  booleanoSchema,
   decimalSchema,
   fechaPasadaSchema,
   idSchema,
@@ -31,12 +33,6 @@ export const ambitoMascotasSchema = z
   .optional()
   .default('PERSONAL');
 
-/** Llega como texto desde un form multipart: 'true'/'false' además de booleano. */
-const booleanoSchema = z
-  .union([z.boolean(), z.string()])
-  .optional()
-  .transform((valor) => valor === true || valor === 'true');
-
 /** Campos que piden por igual el formulario del adoptante y el del refugio. */
 const camposBase = {
   nombre: textoSchema({ ...LIMITES.mascota.nombre, etiqueta: 'El nombre' }),
@@ -46,7 +42,7 @@ const camposBase = {
   tamanio: z.enum(TAMANIOS, { required_error: 'El tamaño es obligatorio' }),
   especieId: idSchema('La especie'),
   razaId: idSchema('La raza'),
-  castrado: booleanoSchema,
+  castrado: booleanoSchema(),
   descripcion: textoOpcionalSchema({
     max: LIMITES.mascota.descripcion.max,
     etiqueta: 'La descripción',
@@ -76,16 +72,6 @@ export const crearMascotaSchema = z.discriminatedUnion('actor', [
 export type CrearMascotaDto = z.infer<typeof crearMascotaSchema>;
 
 /**
- * En la edición un campo ausente significa "no lo toques", así que `castrado` no puede
- * usar `booleanoSchema`: ese colapsa `undefined` a `false` y apagaría la castración sin
- * que nadie la haya tocado.
- */
-const booleanoOpcionalSchema = z
-  .union([z.boolean(), z.string()])
-  .optional()
-  .transform((valor) => (valor === undefined ? undefined : valor === true || valor === 'true'));
-
-/**
  * Edición parcial (HU-6.2): todos los campos son opcionales y solo se escriben los que
  * llegaron. El estado queda deliberadamente afuera — HU-6.2 habla del perfil y no hay
  * reglas de transición documentadas, así que cambiarlo es otra HU.
@@ -101,7 +87,7 @@ export const editarMascotaSchema = z
       .optional(),
     especieId: idSchema('La especie').optional(),
     razaId: idSchema('La raza').optional(),
-    castrado: booleanoOpcionalSchema,
+    castrado: booleanoOpcionalSchema(),
     descripcion: textoOpcionalSchema({
       max: LIMITES.mascota.descripcion.max,
       etiqueta: 'La descripción',

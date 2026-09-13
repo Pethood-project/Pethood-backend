@@ -20,15 +20,30 @@ function favorito(id = 1, fechaAlta = FECHA_AGREGADO) {
   return { id, usuarioId: USUARIO, mascotaId: MASCOTA, fechaAlta };
 }
 
-/** Fila del listado tal como la devuelve el repository, con la mascota y su estado. */
+/**
+ * Fila del listado tal como la devuelve el repository, con la mascota, su estado y la
+ * publicación activa (`take: 1`, por eso el arreglo tiene a lo sumo un elemento).
+ */
 function favoritoConMascota(opciones: {
   id: number;
   mascotaId: number;
   fechaAlta: Date;
   estado?: { id: number; nombre: string };
   fechaNacimiento?: Date | null;
+  /** Sin publicación viva la mascota ya no se puede solicitar. */
+  publicacionId?: number | null;
+  /** Solicitud viva del usuario sobre esa publicación, si la tiene. */
+  solicitudId?: number | null;
 }) {
-  const { id, mascotaId, fechaAlta, estado, fechaNacimiento = new Date(2022, 2, 15) } = opciones;
+  const {
+    id,
+    mascotaId,
+    fechaAlta,
+    estado,
+    fechaNacimiento = new Date(2022, 2, 15),
+    publicacionId = 5,
+    solicitudId = null,
+  } = opciones;
 
   return {
     id,
@@ -42,6 +57,15 @@ function favoritoConMascota(opciones: {
       imagenUrl: '/api/v1/archivos/mascotas/x.jpg',
       raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
       historicoEstados: estado ? [{ estadoMascota: estado }] : [],
+      publicaciones:
+        publicacionId === null
+          ? []
+          : [
+              {
+                id: publicacionId,
+                solicitudes: solicitudId === null ? [] : [{ id: solicitudId }],
+              },
+            ],
     },
   };
 }
@@ -181,6 +205,42 @@ describe('listarFavoritos', () => {
       estado: { id: 1, nombre: 'Disponible' },
       fechaAgregado: reciente.toISOString(),
     });
+  });
+
+  // Lo que decide el botón "Solicitar" de la tarjeta de GUI-12 (HU-7.1).
+  it('expone la publicación activa y la solicitud viva propia', async () => {
+    vi.mocked(repo.listarVisiblesDeUsuario).mockResolvedValue([
+      favoritoConMascota({
+        id: 1,
+        mascotaId: 42,
+        fechaAlta: FECHA_AGREGADO,
+        estado: { id: 1, nombre: 'Disponible' },
+        publicacionId: 88,
+        solicitudId: 1042,
+      }),
+    ] as never);
+
+    const { favoritos } = await service.listarFavoritos(USUARIO);
+
+    expect(favoritos[0]).toMatchObject({ publicacionId: 88, solicitudAbiertaId: 1042 });
+  });
+
+  it('sin publicación viva no hay nada que solicitar', async () => {
+    vi.mocked(repo.listarVisiblesDeUsuario).mockResolvedValue([
+      favoritoConMascota({
+        id: 1,
+        mascotaId: 42,
+        fechaAlta: FECHA_AGREGADO,
+        estado: { id: 3, nombre: 'Adoptado' },
+        publicacionId: null,
+      }),
+    ] as never);
+
+    const { favoritos } = await service.listarFavoritos(USUARIO);
+
+    // La mascota sigue en la lista (HU-6.6), pero sin publicación ni solicitud posible.
+    expect(favoritos).toHaveLength(1);
+    expect(favoritos[0]).toMatchObject({ publicacionId: null, solicitudAbiertaId: null });
   });
 
   it('incluye mascotas en cualquier estado, no sólo Disponible', async () => {

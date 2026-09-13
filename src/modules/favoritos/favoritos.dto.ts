@@ -30,6 +30,16 @@ export interface MascotaFavoritaDto {
   raza: { id: number; nombre: string };
   /** Estado ACTUAL de la mascota, no el que tenía al guardarla (HU-6.6). */
   estado: { id: number; nombre: string };
+  /**
+   * Publicación activa de la mascota, o `null` si ya no está publicada. Es lo que habilita
+   * el botón "Solicitar" de la tarjeta (HU-7.1): sin publicación no hay qué solicitar.
+   */
+  publicacionId: number | null;
+  /**
+   * Solicitud viva que este usuario ya tiene sobre esa publicación. Con valor, la tarjeta
+   * muestra "Solicitud enviada" en lugar del botón.
+   */
+  solicitudAbiertaId: number | null;
   /** Momento en que se guardó: define el orden por defecto del listado. */
   fechaAgregado: string;
 }

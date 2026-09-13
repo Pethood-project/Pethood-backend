@@ -455,6 +455,12 @@ model Solicitud {
   usuarioId       Int @map("usuario_id")
   tipoSolicitudId Int @map("tipo_solicitud_id")
 
+  // Versión del hogar que estaba vigente al enviar: es lo que el refugio evaluó. El hogar
+  // del usuario se versiona (baja lógica + alta, igual que HistoriaClinica), así una
+  // mudanza posterior no reescribe lo que se declaró. Nullable: las solicitudes anteriores
+  // a HU-7.1 no tienen hogar.
+  hogarId Int? @map("hogar_id")
+
   usuarioAlta         Int       @map("solicitud_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("solicitud_fecha_alta")
   usuarioModificacion Int?      @map("solicitud_usuario_modificacion")
@@ -465,6 +471,7 @@ model Solicitud {
   publicacion   Publicacion   @relation(fields: [publicacionId], references: [id])
   usuario       Usuario       @relation(fields: [usuarioId], references: [id])
   tipoSolicitud TipoSolicitud @relation(fields: [tipoSolicitudId], references: [id])
+  hogar         Hogar?        @relation(fields: [hogarId], references: [id])
 
   historicoEstados SolicitudEstado[]
   seguimientos     Seguimiento[]
@@ -734,6 +741,9 @@ model Hogar {
   fechaBaja           DateTime? @map("hogar_fecha_baja")
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  /// Solicitudes que declararon ESTA versión del hogar.
+  solicitudes Solicitud[]
 
   @@map("hogar")
 }
