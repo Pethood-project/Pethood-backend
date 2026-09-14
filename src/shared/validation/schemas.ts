@@ -118,6 +118,29 @@ export function decimalSchema(opciones: {
   });
 }
 
+/**
+ * Sí/no que puede llegar como booleano (JSON) o como texto (`'true'`/`'false'` de un form
+ * multipart). Ausente cuenta como `false`: en un alta, un switch que nadie tocó está apagado.
+ */
+export function booleanoSchema() {
+  return z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((valor) => valor === true || valor === 'true');
+}
+
+/**
+ * Igual que `booleanoSchema`, pero conserva la diferencia entre "llegó en false" y "no
+ * llegó". Es el que necesita una edición parcial: ahí un campo ausente significa "no lo
+ * toques", y colapsarlo a `false` apagaría una bandera que nadie tocó.
+ */
+export function booleanoOpcionalSchema() {
+  return z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((valor) => (valor === undefined ? undefined : valor === true || valor === 'true'));
+}
+
 export function idSchema(etiqueta: string) {
   return z.coerce
     .number({ required_error: `${etiqueta} es obligatorio` })

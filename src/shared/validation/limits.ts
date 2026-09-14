@@ -58,9 +58,22 @@ export const LIMITES = {
     descripcion: { min: 1, max: 1000 },
   },
 
-  /** El comentario del refugio al aceptar/rechazar (HU-7.4). `motivacion` se agrega cuando se implemente HU-7.1. */
   solicitud: {
+    /** El comentario del refugio al aceptar/rechazar (HU-7.4). */
     comentario: { max: 500 },
+    /**
+     * Paso 3 de GUI-7.1.1. El mínimo de 20 es de esta HU: la columna es NOT NULL y un
+     * "quiero adoptarlo" de tres palabras no le sirve al refugio para decidir.
+     */
+    motivacion: { min: 20, max: 500 },
+  },
+
+  /** Paso 2 de GUI-7.1.1: las respuestas sobre el hogar del solicitante. */
+  hogar: {
+    direccion: { min: 5, max: 150 },
+    /** Solo se pide cuando respondió que sí tiene otras mascotas. */
+    detalleMascotas: { max: 200 },
+    descripcion: { max: 300 },
   },
   /**
    * Seguimiento post-adopción (spec 011). La HU-9.1 pide "descripción larga" sin fijar el

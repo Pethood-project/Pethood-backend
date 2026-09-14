@@ -5,16 +5,12 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
 import {
+  booleanoOpcionalSchema,
+  booleanoSchema,
   fechaFuturaOpcionalSchema,
   fechaPasadaSchema,
   textoSchema,
 } from '../../shared/validation/schemas';
-
-/** Llega como texto desde un form multipart: 'true'/'false' además de booleano. */
-const booleanoSchema = z
-  .union([z.boolean(), z.string()])
-  .optional()
-  .transform((valor) => valor === true || valor === 'true');
 
 /**
  * Alta (HU-8.1). Fecha visita, título y descripción son obligatorios; fecha próxima y
@@ -24,8 +20,8 @@ const booleanoSchema = z
 export const crearHistoriaClinicaSchema = z.object({
   fechaVisita: fechaPasadaSchema('La fecha de visita'),
   fechaProxima: fechaFuturaOpcionalSchema('La fecha próxima'),
-  requiereRevision: booleanoSchema,
-  vacunacion: booleanoSchema,
+  requiereRevision: booleanoSchema(),
+  vacunacion: booleanoSchema(),
   titulo: textoSchema({ ...LIMITES.historiaClinica.titulo, etiqueta: 'El título' }),
   descripcion: textoSchema({
     ...LIMITES.historiaClinica.descripcion,
@@ -44,10 +40,7 @@ export type CrearHistoriaClinicaDto = z.infer<typeof crearHistoriaClinicaSchema>
 export const editarHistoriaClinicaSchema = z.object({
   fechaVisita: fechaPasadaSchema('La fecha de visita').optional(),
   fechaProxima: fechaFuturaOpcionalSchema('La fecha próxima').optional(),
-  requiereRevision: z
-    .union([z.boolean(), z.string()])
-    .optional()
-    .transform((valor) => (valor === undefined ? undefined : valor === true || valor === 'true')),
+  requiereRevision: booleanoOpcionalSchema(),
   titulo: textoSchema({ ...LIMITES.historiaClinica.titulo, etiqueta: 'El título' }).optional(),
   descripcion: textoSchema({
     ...LIMITES.historiaClinica.descripcion,

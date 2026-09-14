@@ -139,6 +139,8 @@ Authorization: Bearer <token>
       "especie": { "id": 1, "nombre": "Perro" },
       "raza": { "id": 2, "nombre": "Labrador" },
       "estado": { "id": 1, "nombre": "Disponible" },
+      "publicacionId": 88,
+      "solicitudAbiertaId": null,
       "fechaAgregado": "2026-08-19T15:00:00.000Z"
     },
     {
@@ -149,6 +151,8 @@ Authorization: Bearer <token>
       "especie": { "id": 1, "nombre": "Perro" },
       "raza": { "id": 7, "nombre": "Mestizo" },
       "estado": { "id": 5, "nombre": "En_Transito" },
+      "publicacionId": 91,
+      "solicitudAbiertaId": 1042,
       "fechaAgregado": "2026-08-01T09:00:00.000Z"
     }
   ]
@@ -161,6 +165,8 @@ Authorization: Bearer <token>
 | `id` | **Id de la MASCOTA**, no del favorito. Es el que va en el `DELETE` y en la navegación a la ficha |
 | `fechaNacimiento` | `AAAA-MM-DD` o `null`. **La edad se calcula en el cliente** con `edadEnTexto`, igual que en el resto del proyecto |
 | `estado` | Estado **actual** de la mascota, para el badge |
+| `publicacionId` | Publicación activa de la mascota, o `null` si ya no está publicada. Es lo que habilita el botón "Solicitar" de la tarjeta (HU-7.1) |
+| `solicitudAbiertaId` | Solicitud viva **de este usuario** sobre esa publicación, o `null`. Con valor, la tarjeta muestra "Enviada" en lugar del botón |
 | `fechaAgregado` | ISO 8601. Define el orden |
 
 ### Garantías del listado

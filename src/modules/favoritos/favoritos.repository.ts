@@ -30,11 +30,36 @@ const RELACIONES_TARJETA = {
   },
 } as const;
 
-/** Favoritos visibles del usuario, del más reciente al más antiguo (HU-6.6). */
+/**
+ * Favoritos visibles del usuario, del más reciente al más antiguo (HU-6.6).
+ *
+ * Trae además la publicación activa de cada mascota y la solicitud viva que el usuario ya
+ * tenga sobre ella: es lo que decide el botón de GUI-12 (HU-7.1). Sin publicación no hay
+ * nada que solicitar aunque el favorito siga en la lista, y con una solicitud abierta la
+ * tarjeta dice "Solicitud enviada" en vez de ofrecer un botón que iba a rebotar con 409.
+ */
 export function listarVisiblesDeUsuario(usuarioId: number) {
   return prisma.favorito.findMany({
     where: visiblesDe(usuarioId),
-    include: { mascota: { include: RELACIONES_TARJETA } },
+    include: {
+      mascota: {
+        include: {
+          ...RELACIONES_TARJETA,
+          publicaciones: {
+            where: { fechaBaja: null },
+            select: {
+              id: true,
+              solicitudes: {
+                where: { usuarioId, fechaBaja: null, fechaRespuesta: null },
+                select: { id: true },
+                take: 1,
+              },
+            },
+            take: 1,
+          },
+        },
+      },
+    },
     orderBy: { fechaAlta: 'desc' },
   });
 }

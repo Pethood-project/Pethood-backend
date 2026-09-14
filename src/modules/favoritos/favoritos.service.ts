@@ -37,6 +37,9 @@ function aFavoritoDto(favorito: Favorito): FavoritoAgregadoDto {
 function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
   const { mascota } = favorito;
   const estado = mascota.historicoEstados[0]!.estadoMascota;
+  // Una mascota tiene una sola publicación viva a la vez; el `take: 1` del repository ya
+  // la acota, acá solo se desarma el arreglo.
+  const publicacion = mascota.publicaciones[0];
 
   return {
     id: mascota.id,
@@ -46,6 +49,8 @@ function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
     especie: { id: mascota.raza.especie.id, nombre: mascota.raza.especie.nombre },
     raza: { id: mascota.raza.id, nombre: mascota.raza.nombre },
     estado: { id: estado.id, nombre: estado.nombre },
+    publicacionId: publicacion?.id ?? null,
+    solicitudAbiertaId: publicacion?.solicitudes[0]?.id ?? null,
     fechaAgregado: favorito.fechaAlta.toISOString(),
   };
 }

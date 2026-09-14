@@ -2,6 +2,9 @@ import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
 import {
+  crearSolicitudSchema,
+  filtrosElegibilidadSchema,
+  filtrosMiasSchema,
   filtrosRecibidasSchema,
   idSolicitudSchema,
   resolverSolicitudSchema,
@@ -22,6 +25,36 @@ function parsearOFallar<T extends z.ZodTypeAny>(schema: T, datos: unknown): z.in
 
 function idDeRuta(req: Request): number {
   return parsearOFallar(idSolicitudSchema, req.params.id);
+}
+
+/** HU-7.1: si puede abrir el formulario, y si no, con qué cartel se lo frena. */
+export async function elegibilidad(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { publicacionId } = parsearOFallar(filtrosElegibilidadSchema, req.query);
+    res.json(await service.obtenerElegibilidad(req.usuario!.usuarioId, publicacionId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** HU-7.1: el adoptante crea la solicitud. */
+export async function crear(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const datos = parsearOFallar(crearSolicitudSchema, req.body);
+    res.status(201).json(await service.crearSolicitud(datos, req.usuario!.usuarioId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** HU-7.3: historial de lo que el propio usuario solicitó. */
+export async function listarMias(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const filtros = parsearOFallar(filtrosMiasSchema, req.query);
+    res.json(await service.listarMias(req.usuario!.usuarioId, filtros));
+  } catch (err) {
+    next(err);
+  }
 }
 
 /** HU-7.5 (listado). */
