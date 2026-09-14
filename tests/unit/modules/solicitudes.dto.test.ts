@@ -5,6 +5,7 @@ import {
   idSolicitudSchema,
   resolverSolicitudSchema,
 } from '../../../src/modules/solicitudes/solicitudes.dto';
+import { aFechaISO } from '../../../src/shared/validation/dates';
 
 function primerErrorResolver(entrada: unknown): string | undefined {
   const resultado = resolverSolicitudSchema.safeParse(entrada);
@@ -122,11 +123,18 @@ describe('crearSolicitudSchema (HU-7.1)', () => {
 
   const MOTIVACION = 'Vivimos en una casa con patio y ya criamos perros grandes.';
 
-  /** Un día que siempre es futuro, para que las pruebas no venzan con el calendario. */
+  /**
+   * Un día que siempre es futuro, para que las pruebas no venzan con el calendario.
+   *
+   * `aFechaISO` y no `toISOString().slice(0, 10)`: ese último lee los componentes en UTC,
+   * que en un huso horario negativo (Argentina, UTC-3) puede quedar un día adelantado
+   * respecto del calendario local cerca de la medianoche — justo el mismo criterio que usa
+   * `parsearFecha` para interpretar la fecha que arma este helper.
+   */
   function enDias(dias: number): string {
     const fecha = new Date();
     fecha.setDate(fecha.getDate() + dias);
-    return fecha.toISOString().slice(0, 10);
+    return aFechaISO(fecha);
   }
 
   function parsear(entrada: Record<string, unknown>) {

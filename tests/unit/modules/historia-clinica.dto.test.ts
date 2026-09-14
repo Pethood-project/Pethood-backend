@@ -3,21 +3,28 @@ import {
   crearHistoriaClinicaSchema,
   editarHistoriaClinicaSchema,
 } from '../../../src/modules/historia-clinica/historia-clinica.dto';
+import { aFechaISO } from '../../../src/shared/validation/dates';
 
+/**
+ * `aFechaISO` y no `toISOString().slice(0, 10)`: ese último lee los componentes en UTC, que
+ * en un huso horario negativo (Argentina, UTC-3) puede quedar un día adelantado respecto
+ * del calendario local cerca de la medianoche — el mismo criterio que usa el schema para
+ * interpretar la fecha que arma este helper.
+ */
 function mañana(): string {
   const fecha = new Date();
   fecha.setDate(fecha.getDate() + 1);
-  return fecha.toISOString().slice(0, 10);
+  return aFechaISO(fecha);
 }
 
 function ayer(): string {
   const fecha = new Date();
   fecha.setDate(fecha.getDate() - 1);
-  return fecha.toISOString().slice(0, 10);
+  return aFechaISO(fecha);
 }
 
 function hoy(): string {
-  return new Date().toISOString().slice(0, 10);
+  return aFechaISO(new Date());
 }
 
 const DATOS_BASE = {

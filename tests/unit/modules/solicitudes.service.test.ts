@@ -68,9 +68,7 @@ function solicitudConDetalle(opciones: {
 
   const declarado = conHogar ? hogar() : null;
   // Sin mudanza, el vigente y el declarado son la MISMA fila: mismo id.
-  const vigente = hogarVigente
-    ? { ...hogar(), ...hogarVigente }
-    : declarado;
+  const vigente = hogarVigente ? { ...hogar(), ...hogarVigente } : declarado;
 
   return {
     id: SOLICITUD,
@@ -719,9 +717,9 @@ describe('visibilidad del solicitante (HU-7.3)', () => {
       usuario(OTRO_MIEMBRO_MISMO_REFUGIO, OTRO_REFUGIO_ID + 10) as never,
     );
 
-    await expect(service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO)).rejects.toMatchObject(
-      { codigo: 'NO_ENCONTRADO' },
-    );
+    await expect(
+      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO),
+    ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
   });
 });
 

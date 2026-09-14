@@ -159,7 +159,11 @@ function fechaFiltroSchema(campo: 'fechaDesde' | 'fechaHasta') {
 
     const fecha = parsearFecha(valor as string | Date);
     if (!fecha) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message: 'La fecha no es válida' });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [campo],
+        message: 'La fecha no es válida',
+      });
       return z.NEVER;
     }
 
