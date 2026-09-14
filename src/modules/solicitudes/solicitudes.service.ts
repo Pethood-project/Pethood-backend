@@ -11,7 +11,7 @@
  * - mascota personal (`refugioId` nulo) -> solo quien la publicó.
  */
 import { AppError } from '../../middlewares/errorHandler';
-import { aFechaISO } from '../../shared/validation/dates';
+import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import type {
   CambioDeHogarDto,
@@ -363,14 +363,29 @@ export async function listarMias(
   filtros: FiltrosMiasDto,
 ): Promise<ListaSolicitudesRecibidasDto> {
   const todas = await repo.listarDelSolicitante(usuarioId);
-
-  const filtradas = filtros.estado
-    ? todas.filter((s) => s.historicoEstados[0]?.estadoSolicitud.nombre === filtros.estado)
-    : todas;
+  const filtradas = filtrarPorEstadoYFecha(todas, filtros);
 
   const pagina = filtradas.slice(filtros.desplazamiento, filtros.desplazamiento + filtros.limite);
 
   return { total: filtradas.length, solicitudes: pagina.map(aResumenDto) };
+}
+
+/**
+ * Estado y rango de fecha (sobre `fechaAlta`, las dos puntas inclusive) de `listarMias` y
+ * `listarRecibidas`. Un genérico y no un tipo con nombre porque lo único que importa acá es
+ * la forma mínima que necesita el filtro, no de qué repo salió la lista.
+ */
+function filtrarPorEstadoYFecha<
+  T extends { fechaAlta: Date; historicoEstados: { estadoSolicitud: { nombre: string } }[] },
+>(solicitudes: T[], filtros: FiltrosRecibidasDto | FiltrosMiasDto): T[] {
+  return solicitudes.filter((s) => {
+    if (filtros.estado && s.historicoEstados[0]?.estadoSolicitud.nombre !== filtros.estado) {
+      return false;
+    }
+    if (filtros.fechaDesde && s.fechaAlta < filtros.fechaDesde) return false;
+    if (filtros.fechaHasta && s.fechaAlta > finDelDia(filtros.fechaHasta)) return false;
+    return true;
+  });
 }
 
 export async function obtenerDetalle(
@@ -392,10 +407,7 @@ export async function listarRecibidas(
 ): Promise<ListaSolicitudesRecibidasDto> {
   const actor = await resolverActor(usuarioId);
   const todas = await repo.listarDelActor(actor);
-
-  const filtradas = filtros.estado
-    ? todas.filter((s) => s.historicoEstados[0]?.estadoSolicitud.nombre === filtros.estado)
-    : todas;
+  const filtradas = filtrarPorEstadoYFecha(todas, filtros);
 
   const pagina = filtradas.slice(filtros.desplazamiento, filtros.desplazamiento + filtros.limite);
 

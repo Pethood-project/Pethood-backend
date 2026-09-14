@@ -152,11 +152,34 @@ export const NOMBRES_ESTADO_SOLICITUD = [
   'Cancelada',
 ] as const;
 
-export const filtrosRecibidasSchema = z.object({
-  estado: z.enum(NOMBRES_ESTADO_SOLICITUD).optional(),
-  limite: z.coerce.number().int().positive().max(50).optional().default(20),
-  desplazamiento: z.coerce.number().int().min(0).optional().default(0),
-});
+/** Una punta del rango de fecha de los filtros. Vacío/ausente queda `undefined`, no error. */
+function fechaFiltroSchema(campo: 'fechaDesde' | 'fechaHasta') {
+  return z.unknown().transform((valor, ctx) => {
+    if (valor === undefined || valor === null || valor === '') return undefined;
+
+    const fecha = parsearFecha(valor as string | Date);
+    if (!fecha) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message: 'La fecha no es válida' });
+      return z.NEVER;
+    }
+
+    return fecha;
+  });
+}
+
+export const filtrosRecibidasSchema = z
+  .object({
+    estado: z.enum(NOMBRES_ESTADO_SOLICITUD).optional(),
+    /** Filtran por `fechaAlta`, inclusive en las dos puntas. */
+    fechaDesde: fechaFiltroSchema('fechaDesde'),
+    fechaHasta: fechaFiltroSchema('fechaHasta'),
+    limite: z.coerce.number().int().positive().max(50).optional().default(20),
+    desplazamiento: z.coerce.number().int().min(0).optional().default(0),
+  })
+  .refine(
+    (datos) => !datos.fechaDesde || !datos.fechaHasta || datos.fechaDesde <= datos.fechaHasta,
+    { message: 'La fecha "desde" no puede ser posterior a "hasta"', path: ['fechaHasta'] },
+  );
 
 export type FiltrosRecibidasDto = z.infer<typeof filtrosRecibidasSchema>;
 
