@@ -128,9 +128,16 @@ function diasDesde(fecha: Date, hoy: Date): number {
   return Math.max(0, Math.floor((hoy.getTime() - fecha.getTime()) / 86_400_000));
 }
 
-const BUCKETS_ANTIGUEDAD_PUBLICACION = ['0-15 días', '15-30 días', '30-60 días', '+60 días'] as const;
+const BUCKETS_ANTIGUEDAD_PUBLICACION = [
+  '0-15 días',
+  '15-30 días',
+  '30-60 días',
+  '+60 días',
+] as const;
 
-function bucketDeAntiguedadPublicacion(dias: number): (typeof BUCKETS_ANTIGUEDAD_PUBLICACION)[number] {
+function bucketDeAntiguedadPublicacion(
+  dias: number,
+): (typeof BUCKETS_ANTIGUEDAD_PUBLICACION)[number] {
   if (dias <= 15) return '0-15 días';
   if (dias <= 30) return '15-30 días';
   if (dias <= 60) return '30-60 días';
@@ -148,9 +155,10 @@ function aPublicacionesPorAntiguedad(
   porBucket: Record<string, number>;
   demasiadoAntiguas: { id: number; mascota: string; dias: number }[];
 } {
-  const porBucket = Object.fromEntries(
-    BUCKETS_ANTIGUEDAD_PUBLICACION.map((b) => [b, 0]),
-  ) as Record<string, number>;
+  const porBucket = Object.fromEntries(BUCKETS_ANTIGUEDAD_PUBLICACION.map((b) => [b, 0])) as Record<
+    string,
+    number
+  >;
   const demasiadoAntiguas: { id: number; mascota: string; dias: number }[] = [];
 
   for (const { id, fechaAlta, mascota } of publicaciones) {
