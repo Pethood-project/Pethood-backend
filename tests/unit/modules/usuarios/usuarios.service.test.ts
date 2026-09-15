@@ -10,6 +10,9 @@ vi.mock('../../../../src/modules/usuarios/usuarios.repository', () => ({
   actualizarPerfil: vi.fn(),
   actualizarContrasena: vi.fn(),
   buscarHashContrasena: vi.fn(),
+  buscarEstadoUsuarioPorNombre: vi.fn(),
+  buscarEstadoSolicitudPorNombre: vi.fn(),
+  darDeBajaCuenta: vi.fn(),
 }));
 
 vi.mock('../../../../src/shared/logAuditoria', () => ({
@@ -24,6 +27,7 @@ import * as repo from '../../../../src/modules/usuarios/usuarios.repository';
 import {
   actualizarPerfil,
   cambiarPassword,
+  darDeBajaCuenta,
   obtenerPerfil,
 } from '../../../../src/modules/usuarios/usuarios.service';
 import * as imagenPerfil from '../../../../src/shared/imagenPerfil';
@@ -164,5 +168,55 @@ describe('usuarios.service', () => {
     await expect(cambiarPassword(10, { passwordNueva: 'nuevaClave1' })).rejects.toBeInstanceOf(
       AppError,
     );
+  });
+
+  it('da de baja la cuenta y deja auditoría, también si el usuario es de Google', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(
+      perfilFake({ googleId: 'google-abc', contrasena: null }),
+    );
+    mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 4 } as never);
+    mockedRepo.buscarEstadoSolicitudPorNombre.mockResolvedValue({ id: 5 } as never);
+    mockedRepo.darDeBajaCuenta.mockResolvedValue(undefined);
+
+    await darDeBajaCuenta(10);
+
+    expect(mockedRepo.darDeBajaCuenta).toHaveBeenCalledWith(10, 4, 5);
+  });
+
+  it('no deja dar de baja una cuenta de administrador', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(
+      perfilFake({
+        roles: [
+          {
+            id: 1,
+            usuarioId: 10,
+            rolId: 1,
+            usuarioAlta: 10,
+            fechaAlta: new Date(),
+            usuarioModificacion: null,
+            fechaModificacion: null,
+            usuarioBaja: null,
+            fechaBaja: null,
+            rol: {
+              id: 1,
+              nombre: ROL_DB.ADMIN,
+              descripcion: null,
+              usuarioAlta: 1,
+              fechaAlta: new Date(),
+              usuarioModificacion: null,
+              fechaModificacion: null,
+              usuarioBaja: null,
+              fechaBaja: null,
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(darDeBajaCuenta(10)).rejects.toMatchObject({
+      codigo: 'NO_SE_PUEDE_BAJAR_ADMIN',
+      httpStatus: 403,
+    });
+    expect(mockedRepo.darDeBajaCuenta).not.toHaveBeenCalled();
   });
 });

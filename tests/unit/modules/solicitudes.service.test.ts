@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FLAGS } from '../../../src/config/flags';
 import { AppError } from '../../../src/middlewares/errorHandler';
 import * as logAuditoria from '../../../src/shared/logAuditoria';
 import * as repo from '../../../src/modules/solicitudes/solicitudes.repository';
@@ -6,6 +7,10 @@ import * as service from '../../../src/modules/solicitudes/solicitudes.service';
 
 vi.mock('../../../src/modules/solicitudes/solicitudes.repository');
 vi.mock('../../../src/shared/logAuditoria');
+
+afterEach(() => {
+  FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR = false;
+});
 
 const REFUGIO_ID = 1;
 const OTRO_REFUGIO_ID = 2;
@@ -597,6 +602,7 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
   });
 
   it('un usuario sin verificar recibe el texto literal de la HU', async () => {
+    FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR = true;
     vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
       ...usuario(SOLICITANTE, null),
       verificado: false,
@@ -607,6 +613,19 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
       mensaje: 'Tenés que verificarte antes de solicitar una adopción',
     });
     expect(repo.crearConHogar).not.toHaveBeenCalled();
+  });
+
+  it('con la verificación desactivada un usuario sin verificar puede solicitar', async () => {
+    FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR = false;
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, null),
+      verificado: false,
+    } as never);
+
+    await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).resolves.toMatchObject({
+      estado: { nombre: 'Pendiente' },
+    });
+    expect(repo.crearConHogar).toHaveBeenCalled();
   });
 
   it('con 5 pendientes recibe el texto literal de la HU', async () => {
@@ -743,6 +762,7 @@ describe('obtenerElegibilidad (chequeo previo de HU-7.1)', () => {
   });
 
   it('la falta de verificación gana sobre el resto de los motivos', async () => {
+    FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR = true;
     vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
       ...usuario(SOLICITANTE, null),
       verificado: false,
@@ -752,6 +772,19 @@ describe('obtenerElegibilidad (chequeo previo de HU-7.1)', () => {
     await expect(service.obtenerElegibilidad(SOLICITANTE, 40)).resolves.toMatchObject({
       motivo: 'NO_VERIFICADO',
       mensaje: 'Tenés que verificarte antes de solicitar una adopción',
+    });
+  });
+
+  it('con la verificación desactivada no bloquea a un usuario sin verificar', async () => {
+    FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR = false;
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, null),
+      verificado: false,
+    } as never);
+
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40)).resolves.toMatchObject({
+      puedeSolicitar: true,
+      motivo: null,
     });
   });
 

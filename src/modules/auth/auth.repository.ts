@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
-import { datosAlta, USUARIO_SISTEMA_ID } from '../../shared/auditoria';
+import { datosAlta, datosModificacion, USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { AppError } from '../../middlewares/errorHandler';
 
 const includeUsuario = {
@@ -42,15 +42,15 @@ function mapearErrorUnico(error: unknown): never {
 }
 
 export async function buscarPorEmail(email: string): Promise<UsuarioConRoles | null> {
-  return prisma.usuario.findFirst({
-    where: { email, fechaBaja: null },
+  return prisma.usuario.findUnique({
+    where: { email },
     include: includeUsuario,
   });
 }
 
 export async function buscarPorGoogleId(googleId: string): Promise<UsuarioConRoles | null> {
-  return prisma.usuario.findFirst({
-    where: { googleId, fechaBaja: null },
+  return prisma.usuario.findUnique({
+    where: { googleId },
     include: includeUsuario,
   });
 }
@@ -137,5 +137,39 @@ export async function actualizarContrasena(usuarioId: number, hash: string): Pro
       usuarioModificacion: usuarioId,
       fechaModificacion: new Date(),
     },
+  });
+}
+
+export type DatosReactivarCuenta = Partial<
+  Pick<
+    DatosNuevoUsuario,
+    | 'nombre'
+    | 'apellido'
+    | 'contrasena'
+    | 'telefono'
+    | 'dni'
+    | 'fechaNacimiento'
+    | 'googleId'
+    | 'imagenUrl'
+    | 'verificado'
+  >
+>;
+
+/** HU-1.8: vuelve a dar de alta una cuenta que el propio usuario había dado de baja. */
+export async function reactivarCuenta(
+  usuarioId: number,
+  estadoActivoId: number,
+  extras: DatosReactivarCuenta = {},
+): Promise<UsuarioConRoles> {
+  return prisma.usuario.update({
+    where: { id: usuarioId },
+    data: {
+      estadoId: estadoActivoId,
+      fechaBaja: null,
+      usuarioBaja: null,
+      ...extras,
+      ...datosModificacion(usuarioId),
+    },
+    include: includeUsuario,
   });
 }

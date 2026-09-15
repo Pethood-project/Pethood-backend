@@ -2,7 +2,7 @@ import bcrypt from 'bcrypt';
 import { AppError } from '../../middlewares/errorHandler';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
-import { rolesDbAApi } from '../../shared/roles';
+import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
 import type { ArchivoSubida } from '../../shared/r2';
 import type { ActualizarPerfilBody, CambiarPasswordBody, PerfilPropio } from './usuarios.dto';
 import type { UsuarioPerfil } from './usuarios.repository';
@@ -99,6 +99,48 @@ export async function cambiarPassword(usuarioId: number, body: CambiarPasswordBo
   await registrarAuditoria({
     usuarioId,
     accion: 'CAMBIAR_CONTRASENA',
+    entidad: 'Usuario',
+    entidadId: usuarioId,
+  });
+}
+
+/**
+ * HU-1.8. Misma baja para quien se registró con correo o con Google: el usuario queda
+ * Inactivo, se cierran trámites abiertos y el perfil deja de verse. El cliente cierra
+ * la sesión; el JWT no se invalida (regla 3).
+ */
+export async function darDeBajaCuenta(usuarioId: number): Promise<void> {
+  const usuario = await repo.buscarPerfil(usuarioId);
+  if (!usuario) {
+    throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
+  }
+
+  if (nombresDeRol(usuario).includes(ROL_DB.ADMIN)) {
+    throw new AppError(
+      'NO_SE_PUEDE_BAJAR_ADMIN',
+      'No se puede dar de baja una cuenta de administrador.',
+      403,
+    );
+  }
+
+  const [estadoInactivo, estadoCancelada] = await Promise.all([
+    repo.buscarEstadoUsuarioPorNombre(ESTADO_USUARIO.INACTIVO),
+    repo.buscarEstadoSolicitudPorNombre('Cancelada'),
+  ]);
+
+  if (!estadoInactivo || !estadoCancelada) {
+    throw new AppError(
+      'ERROR_INTERNO',
+      'No pudimos dar de baja la cuenta. Intentalo de nuevo.',
+      500,
+    );
+  }
+
+  await repo.darDeBajaCuenta(usuarioId, estadoInactivo.id, estadoCancelada.id);
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'BAJA_CUENTA',
     entidad: 'Usuario',
     entidadId: usuarioId,
   });

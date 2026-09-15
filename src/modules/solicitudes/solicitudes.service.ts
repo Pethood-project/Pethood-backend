@@ -10,6 +10,7 @@
  *   igual criterio que `mascotas.repository.listarPorAmbito` y el dashboard de refugio.
  * - mascota personal (`refugioId` nulo) -> solo quien la publicó.
  */
+import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
@@ -230,13 +231,14 @@ async function evaluarElegibilidad(
     ? await repo.buscarVivaDeUsuarioEnPublicacion(usuarioId, publicacionId)
     : null;
 
-  const motivo: MotivoBloqueo | null = !usuario.verificado
-    ? 'NO_VERIFICADO'
-    : abierta
-      ? 'YA_SOLICITADA'
-      : pendientes >= MAXIMO_PENDIENTES
-        ? 'LIMITE_ALCANZADO'
-        : null;
+  const motivo: MotivoBloqueo | null =
+    FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR && !usuario.verificado
+      ? 'NO_VERIFICADO'
+      : abierta
+        ? 'YA_SOLICITADA'
+        : pendientes >= MAXIMO_PENDIENTES
+          ? 'LIMITE_ALCANZADO'
+          : null;
 
   return {
     puedeSolicitar: motivo === null,
