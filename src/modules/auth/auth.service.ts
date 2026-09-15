@@ -103,9 +103,7 @@ async function reactivarCuentaPropia(
 }
 
 async function asegurarUsuarioActivo(usuario: UsuarioConRoles): Promise<UsuarioConRoles> {
-  const vigente = esBajaAutoReactivable(usuario)
-    ? await reactivarCuentaPropia(usuario)
-    : usuario;
+  const vigente = esBajaAutoReactivable(usuario) ? await reactivarCuentaPropia(usuario) : usuario;
   asegurarPuedeIngresar(vigente);
   return vigente;
 }

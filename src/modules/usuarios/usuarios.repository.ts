@@ -134,10 +134,7 @@ export async function darDeBajaCuenta(
     const solicitudes = await tx.solicitud.findMany({
       where: {
         fechaBaja: null,
-        OR: [
-          { usuarioId },
-          { publicacion: { usuarioId, mascota: { refugioId: null } } },
-        ],
+        OR: [{ usuarioId }, { publicacion: { usuarioId, mascota: { refugioId: null } } }],
       },
       include: {
         historicoEstados: {
@@ -152,8 +149,7 @@ export async function darDeBajaCuenta(
     const abiertas = solicitudes.filter((solicitud) => {
       const vigente = solicitud.historicoEstados[0]?.estadoSolicitud.nombre;
       return (
-        vigente !== undefined &&
-        (ESTADOS_SOLICITUD_ABIERTA as readonly string[]).includes(vigente)
+        vigente !== undefined && (ESTADOS_SOLICITUD_ABIERTA as readonly string[]).includes(vigente)
       );
     });
 

@@ -171,7 +171,9 @@ describe('usuarios.service', () => {
   });
 
   it('da de baja la cuenta y deja auditoría, también si el usuario es de Google', async () => {
-    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ googleId: 'google-abc', contrasena: null }));
+    mockedRepo.buscarPerfil.mockResolvedValue(
+      perfilFake({ googleId: 'google-abc', contrasena: null }),
+    );
     mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 4 } as never);
     mockedRepo.buscarEstadoSolicitudPorNombre.mockResolvedValue({ id: 5 } as never);
     mockedRepo.darDeBajaCuenta.mockResolvedValue(undefined);
