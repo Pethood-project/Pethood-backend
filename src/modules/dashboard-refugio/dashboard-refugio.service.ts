@@ -3,6 +3,17 @@ import { finDeMes, inicioDeMes, parsearMesISO } from '../../shared/validation/da
 import type { PeriodoDashboardInput } from './dashboard-refugio.dto';
 import * as repo from './dashboard-refugio.repository';
 
+/** Solicitud sin resolver todavía (mismo criterio que "abiertas" en el repository). */
+const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'];
+/** A partir de cuántos días sin resolver una solicitud abierta se considera demorada. */
+const UMBRAL_DEMORA_DIAS = 5;
+/** Cuántas solicitudes demoradas se listan en el detalle (las más antiguas primero). */
+const TOPE_DETALLE_DEMORADAS = 5;
+/** A partir de cuántos días publicada una publicación se considera "demasiado antigua". */
+const UMBRAL_PUBLICACION_ANTIGUA_DIAS = 60;
+/** Cuántas publicaciones demasiado antiguas se listan en el detalle (las más antiguas primero). */
+const TOPE_DETALLE_PUBLICACIONES_ANTIGUAS = 10;
+
 const MESES_ES = [
   'Ene',
   'Feb',
@@ -27,9 +38,14 @@ export interface DashboardRefugioDto {
     animalesEnRefugio: number;
     montoDonado: number;
     objetivoDonaciones: number;
+    solicitudesDemoradas: number;
   };
   solicitudesPorEstado: { estado: string; cantidad: number; porcentaje: number }[];
   donacionesPorMes: { mes: string; monto: number; objetivo: number }[];
+  mascotasPorEstado: Record<string, number>;
+  publicacionesPorAntiguedad: Record<string, number>;
+  solicitudesDemoradasDetalle: { id: number; mascota: string; dias: number }[];
+  publicacionesDemasiadoAntiguas: { id: number; mascota: string; dias: number }[];
 }
 
 /** Precondición compartida con mascotas.service.ts: solo un usuario Refugio con refugioId puede operar. */
@@ -98,6 +114,82 @@ function aSolicitudesPorEstado(
   });
 }
 
+/** Junta un catálogo con su groupBy de conteos, en un Record nombre → cantidad (0 si no hubo filas). */
+function aConteoPorNombre(
+  catalogo: { id: number; nombre: string }[],
+  conteos: { estadoMascotaId: number; _count: { _all: number } }[],
+): Record<string, number> {
+  const porId = new Map(conteos.map((c) => [c.estadoMascotaId, c._count._all]));
+
+  return Object.fromEntries(catalogo.map((item) => [item.nombre, porId.get(item.id) ?? 0]));
+}
+
+function diasDesde(fecha: Date, hoy: Date): number {
+  return Math.max(0, Math.floor((hoy.getTime() - fecha.getTime()) / 86_400_000));
+}
+
+const BUCKETS_ANTIGUEDAD_PUBLICACION = ['0-15 días', '15-30 días', '30-60 días', '+60 días'] as const;
+
+function bucketDeAntiguedadPublicacion(dias: number): (typeof BUCKETS_ANTIGUEDAD_PUBLICACION)[number] {
+  if (dias <= 15) return '0-15 días';
+  if (dias <= 30) return '15-30 días';
+  if (dias <= 60) return '30-60 días';
+  return '+60 días';
+}
+
+/**
+ * Hace cuántos días está publicada cada publicación vigente del refugio, agrupadas en buckets, y
+ * el detalle de las que superan UMBRAL_PUBLICACION_ANTIGUA_DIAS (mascota puntual, no solo el conteo).
+ */
+function aPublicacionesPorAntiguedad(
+  publicaciones: { id: number; fechaAlta: Date; mascota: { nombre: string | null } }[],
+  hoy: Date,
+): {
+  porBucket: Record<string, number>;
+  demasiadoAntiguas: { id: number; mascota: string; dias: number }[];
+} {
+  const porBucket = Object.fromEntries(
+    BUCKETS_ANTIGUEDAD_PUBLICACION.map((b) => [b, 0]),
+  ) as Record<string, number>;
+  const demasiadoAntiguas: { id: number; mascota: string; dias: number }[] = [];
+
+  for (const { id, fechaAlta, mascota } of publicaciones) {
+    const dias = diasDesde(fechaAlta, hoy);
+    const bucket = bucketDeAntiguedadPublicacion(dias);
+    porBucket[bucket] = (porBucket[bucket] ?? 0) + 1;
+
+    if (dias >= UMBRAL_PUBLICACION_ANTIGUA_DIAS) {
+      demasiadoAntiguas.push({ id, mascota: mascota.nombre ?? '', dias });
+    }
+  }
+
+  demasiadoAntiguas.sort((a, b) => b.dias - a.dias);
+
+  return { porBucket, demasiadoAntiguas };
+}
+
+/** Solicitudes abiertas (sin resolver) hace más de UMBRAL_DEMORA_DIAS, más antiguas primero. */
+function aSolicitudesDemoradas(
+  solicitudes: {
+    id: number;
+    publicacion: { mascota: { nombre: string | null } };
+    historicoEstados: { fechaAlta: Date; estadoSolicitud: { nombre: string } }[];
+  }[],
+  hoy: Date,
+): { id: number; mascota: string; dias: number }[] {
+  return solicitudes
+    .flatMap((s) => {
+      const vigente = s.historicoEstados[0];
+      if (!vigente || !ESTADOS_SOLICITUD_ABIERTA.includes(vigente.estadoSolicitud.nombre)) {
+        return [];
+      }
+      const dias = diasDesde(vigente.fechaAlta, hoy);
+      const mascota = s.publicacion.mascota.nombre ?? '';
+      return dias >= UMBRAL_DEMORA_DIAS ? [{ id: s.id, mascota, dias }] : [];
+    })
+    .sort((a, b) => b.dias - a.dias);
+}
+
 function aDonacionesPorMes(
   periodo: PeriodoDashboardInput,
   donaciones: { fechaAlta: Date; monto: unknown }[],
@@ -130,6 +222,10 @@ export async function obtenerDashboard(
     solicitudesCreadas,
     donaciones,
     objetivoDonaciones,
+    estadosMascota,
+    mascotasPorEstado,
+    publicacionesActivas,
+    solicitudesAbiertas,
   ] = await Promise.all([
     repo.contarMascotasEnRefugio(refugio.id),
     repo.listarEstadosSolicitud(),
@@ -137,15 +233,25 @@ export async function obtenerDashboard(
     repo.contarSolicitudesCreadas(refugio.id, desde, hasta),
     repo.listarDonaciones(refugio.id, desde, hasta),
     repo.sumarObjetivoCampaniasActivas(refugio.id),
+    repo.listarEstadosMascota(),
+    repo.contarMascotasPorEstado(refugio.id),
+    repo.listarPublicacionesActivas(refugio.id),
+    repo.listarSolicitudesAbiertas(refugio.id),
   ]);
 
   const solicitudesPorEstadoConPorcentaje = aSolicitudesPorEstado(
     estadosSolicitud,
     solicitudesPorEstado,
   );
-  const animalesAdoptados =
-    solicitudesPorEstadoConPorcentaje.find((s) => s.estado === 'Aprobada')?.cantidad ?? 0;
+  const mascotasPorEstadoDto = aConteoPorNombre(estadosMascota, mascotasPorEstado);
+  // Snapshot: mascotas del refugio cuyo estado vigente es "Adoptado" ahora mismo, no una cuenta de
+  // solicitudes aprobadas en el período (mismo criterio snapshot que animalesEnRefugio).
+  const animalesAdoptados = mascotasPorEstadoDto['Adoptado'] ?? 0;
   const montoDonado = donaciones.reduce((acc, d) => acc + Number(d.monto), 0);
+
+  const hoy = new Date();
+  const { porBucket, demasiadoAntiguas } = aPublicacionesPorAntiguedad(publicacionesActivas, hoy);
+  const solicitudesDemoradasDetalle = aSolicitudesDemoradas(solicitudesAbiertas, hoy);
 
   return {
     refugio: { nombre: refugio.nombre, localidad: refugio.direccion },
@@ -156,9 +262,14 @@ export async function obtenerDashboard(
       animalesEnRefugio,
       montoDonado,
       objetivoDonaciones,
+      solicitudesDemoradas: solicitudesDemoradasDetalle.length,
     },
     solicitudesPorEstado: solicitudesPorEstadoConPorcentaje,
     donacionesPorMes: aDonacionesPorMes(periodo, donaciones, objetivoDonaciones),
+    mascotasPorEstado: mascotasPorEstadoDto,
+    publicacionesPorAntiguedad: porBucket,
+    solicitudesDemoradasDetalle: solicitudesDemoradasDetalle.slice(0, TOPE_DETALLE_DEMORADAS),
+    publicacionesDemasiadoAntiguas: demasiadoAntiguas.slice(0, TOPE_DETALLE_PUBLICACIONES_ANTIGUAS),
   };
 }
 

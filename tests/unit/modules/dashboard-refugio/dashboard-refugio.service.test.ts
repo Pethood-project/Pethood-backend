@@ -11,6 +11,10 @@ vi.mock('../../../../src/modules/dashboard-refugio/dashboard-refugio.repository'
   listarDonaciones: vi.fn(),
   sumarObjetivoCampaniasActivas: vi.fn(),
   paginaSolicitudesParaExport: vi.fn(),
+  listarEstadosMascota: vi.fn(),
+  contarMascotasPorEstado: vi.fn(),
+  listarPublicacionesActivas: vi.fn(),
+  listarSolicitudesAbiertas: vi.fn(),
 }));
 
 import * as repo from '../../../../src/modules/dashboard-refugio/dashboard-refugio.repository';
@@ -24,6 +28,14 @@ const ESTADOS_SOLICITUD = [
   { id: 3, nombre: 'Aprobada' },
   { id: 4, nombre: 'Rechazada' },
   { id: 5, nombre: 'Cancelada' },
+];
+
+const ESTADOS_MASCOTA = [
+  { id: 1, nombre: 'Disponible' },
+  { id: 2, nombre: 'En_Tratamiento' },
+  { id: 3, nombre: 'En_Transito' },
+  { id: 4, nombre: 'Adoptado' },
+  { id: 5, nombre: 'Fallecido' },
 ];
 
 const PERIODO = { desde: '2026-03', hasta: '2026-08' };
@@ -45,6 +57,10 @@ beforeEach(() => {
   mockedRepo.contarSolicitudesCreadas.mockResolvedValue(0);
   mockedRepo.listarDonaciones.mockResolvedValue([] as never);
   mockedRepo.sumarObjetivoCampaniasActivas.mockResolvedValue(0);
+  mockedRepo.listarEstadosMascota.mockResolvedValue(ESTADOS_MASCOTA as never);
+  mockedRepo.contarMascotasPorEstado.mockResolvedValue([] as never);
+  mockedRepo.listarPublicacionesActivas.mockResolvedValue([] as never);
+  mockedRepo.listarSolicitudesAbiertas.mockResolvedValue([] as never);
 });
 
 describe('obtenerDashboard', () => {
@@ -77,10 +93,26 @@ describe('obtenerDashboard', () => {
       animalesEnRefugio: 0,
       montoDonado: 0,
       objetivoDonaciones: 0,
+      solicitudesDemoradas: 0,
     });
+    expect(dashboard.mascotasPorEstado).toEqual({
+      Disponible: 0,
+      En_Tratamiento: 0,
+      En_Transito: 0,
+      Adoptado: 0,
+      Fallecido: 0,
+    });
+    expect(dashboard.publicacionesPorAntiguedad).toEqual({
+      '0-15 días': 0,
+      '15-30 días': 0,
+      '30-60 días': 0,
+      '+60 días': 0,
+    });
+    expect(dashboard.solicitudesDemoradasDetalle).toEqual([]);
+    expect(dashboard.publicacionesDemasiadoAntiguas).toEqual([]);
   });
 
-  it('calcula animalesAdoptados desde solicitudesPorEstado (estado Aprobada)', async () => {
+  it('arma el porcentaje de solicitudesPorEstado a partir de contarSolicitudesPorEstado', async () => {
     mockedRepo.contarSolicitudesPorEstado.mockResolvedValue([
       { estadoSolicitudId: 3, _count: { _all: 4 } },
       { estadoSolicitudId: 1, _count: { _all: 1 } },
@@ -88,7 +120,6 @@ describe('obtenerDashboard', () => {
 
     const dashboard = await obtenerDashboard(10, PERIODO);
 
-    expect(dashboard.kpis.animalesAdoptados).toBe(4);
     const aprobada = dashboard.solicitudesPorEstado.find((s) => s.estado === 'Aprobada');
     expect(aprobada).toEqual({ estado: 'Aprobada', cantidad: 4, porcentaje: 80 });
   });
@@ -116,5 +147,79 @@ describe('obtenerDashboard', () => {
     });
     expect(dashboard.kpis.montoDonado).toBe(15000);
     expect(dashboard.kpis.objetivoDonaciones).toBe(60000);
+  });
+
+  it('calcula mascotasPorEstado y kpis.animalesAdoptados a partir de contarMascotasPorEstado (snapshot, no de solicitudes)', async () => {
+    mockedRepo.contarMascotasPorEstado.mockResolvedValue([
+      { estadoMascotaId: 1, _count: { _all: 2 } },
+      { estadoMascotaId: 4, _count: { _all: 5 } },
+    ] as never);
+    // Ninguna solicitud "Aprobada" en el período: animalesAdoptados NO debe salir de acá.
+    mockedRepo.contarSolicitudesPorEstado.mockResolvedValue([] as never);
+
+    const dashboard = await obtenerDashboard(10, PERIODO);
+
+    expect(dashboard.mascotasPorEstado).toEqual({
+      Disponible: 2,
+      En_Tratamiento: 0,
+      En_Transito: 0,
+      Adoptado: 5,
+      Fallecido: 0,
+    });
+    expect(dashboard.kpis.animalesAdoptados).toBe(5);
+  });
+
+  it('agrupa publicacionesPorAntiguedad en buckets y lista las de más de 60 días, más antiguas primero', async () => {
+    const hoy = new Date();
+    const diasAtras = (dias: number) => new Date(hoy.getTime() - dias * 86_400_000);
+    mockedRepo.listarPublicacionesActivas.mockResolvedValue([
+      { id: 1, fechaAlta: diasAtras(2), mascota: { nombre: 'Kiwi' } },
+      { id: 2, fechaAlta: diasAtras(20), mascota: { nombre: 'Manchas' } },
+      { id: 3, fechaAlta: diasAtras(45), mascota: { nombre: 'Simba' } },
+      { id: 4, fechaAlta: diasAtras(70), mascota: { nombre: 'Coco' } },
+      { id: 5, fechaAlta: diasAtras(90), mascota: { nombre: 'Pipo' } },
+    ] as never);
+
+    const dashboard = await obtenerDashboard(10, PERIODO);
+
+    expect(dashboard.publicacionesPorAntiguedad).toEqual({
+      '0-15 días': 1,
+      '15-30 días': 1,
+      '30-60 días': 1,
+      '+60 días': 2,
+    });
+    expect(dashboard.publicacionesDemasiadoAntiguas).toEqual([
+      { id: 5, mascota: 'Pipo', dias: 90 },
+      { id: 4, mascota: 'Coco', dias: 70 },
+    ]);
+  });
+
+  it('lista solo las solicitudes abiertas demoradas más de UMBRAL_DEMORA_DIAS, más antiguas primero', async () => {
+    const hoy = new Date();
+    const diasAtras = (dias: number) => new Date(hoy.getTime() - dias * 86_400_000);
+    mockedRepo.listarSolicitudesAbiertas.mockResolvedValue([
+      {
+        id: 1,
+        publicacion: { mascota: { nombre: 'Firulais' } },
+        historicoEstados: [{ fechaAlta: diasAtras(2), estadoSolicitud: { nombre: 'Pendiente' } }],
+      },
+      {
+        id: 2,
+        publicacion: { mascota: { nombre: 'Michi' } },
+        historicoEstados: [
+          { fechaAlta: diasAtras(12), estadoSolicitud: { nombre: 'En_Revision' } },
+        ],
+      },
+      {
+        id: 3,
+        publicacion: { mascota: { nombre: 'Rocky' } },
+        historicoEstados: [{ fechaAlta: diasAtras(20), estadoSolicitud: { nombre: 'Aprobada' } }],
+      },
+    ] as never);
+
+    const dashboard = await obtenerDashboard(10, PERIODO);
+
+    expect(dashboard.kpis.solicitudesDemoradas).toBe(1);
+    expect(dashboard.solicitudesDemoradasDetalle).toEqual([{ id: 2, mascota: 'Michi', dias: 12 }]);
   });
 });
