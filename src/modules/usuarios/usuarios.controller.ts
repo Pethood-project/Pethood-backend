@@ -46,3 +46,15 @@ export async function cambiarPassword(
     next(error);
   }
 }
+
+export async function darDeBajaMe(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError('NO_AUTENTICADO', 'Falta el token de autenticación', 401);
+    }
+    await service.darDeBajaCuenta(req.usuario.usuarioId);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+}

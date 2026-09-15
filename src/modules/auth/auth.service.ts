@@ -72,6 +72,44 @@ function asegurarPuedeIngresar(usuario: UsuarioConRoles): void {
   }
 }
 
+/** Baja hecha por el mismo usuario (HU-1.8). La baja de un admin no se auto-reactiva. */
+function esBajaAutoReactivable(usuario: UsuarioConRoles): boolean {
+  return usuario.fechaBaja !== null && usuario.usuarioBaja === usuario.id;
+}
+
+async function reactivarCuentaPropia(
+  usuario: UsuarioConRoles,
+  extras: authRepo.DatosReactivarCuenta = {},
+): Promise<UsuarioConRoles> {
+  const estado = await authRepo.buscarEstadoPorNombre(ESTADO_USUARIO.ACTIVO);
+  if (!estado) {
+    throw new AppError(
+      'ERROR_INTERNO',
+      'Faltan catálogos de roles o estados. Corré el seed de la base.',
+      500,
+    );
+  }
+
+  const reactivado = await authRepo.reactivarCuenta(usuario.id, estado.id, extras);
+
+  await registrarAuditoria({
+    usuarioId: usuario.id,
+    accion: 'REACTIVAR_CUENTA',
+    entidad: 'Usuario',
+    entidadId: usuario.id,
+  });
+
+  return reactivado;
+}
+
+async function asegurarUsuarioActivo(usuario: UsuarioConRoles): Promise<UsuarioConRoles> {
+  const vigente = esBajaAutoReactivable(usuario)
+    ? await reactivarCuentaPropia(usuario)
+    : usuario;
+  asegurarPuedeIngresar(vigente);
+  return vigente;
+}
+
 async function exigirCatalogos(rolApi: string) {
   const estado = await authRepo.buscarEstadoPorNombre(ESTADO_USUARIO.ACTIVO);
   const rol = await authRepo.buscarRolPorNombre(rolApiADb(rolApi));
@@ -100,15 +138,28 @@ export async function registrar(
   }
 
   const existente = await authRepo.buscarPorEmail(body.email);
-  if (existente) {
+  if (existente && !esBajaAutoReactivable(existente)) {
     throw new AppError('EMAIL_DUPLICADO', 'Ya existe una cuenta con ese correo.', 409);
   }
 
-  const { estado, rol } = await exigirCatalogos(body.rol);
   const fechaNacimiento = parsearFechaNacimiento(body.fechaNacimiento);
   const hash = await bcrypt.hash(body.password, BCRYPT_COST);
   const imagenUrl = archivo && r2Habilitado() ? await subirImagenPerfil(archivo) : undefined;
 
+  if (existente) {
+    const usuario = await reactivarCuentaPropia(existente, {
+      nombre: body.nombre,
+      apellido: body.apellido,
+      contrasena: hash,
+      telefono: body.telefono,
+      dni: body.dni,
+      fechaNacimiento,
+      imagenUrl,
+    });
+    return aRespuesta(usuario);
+  }
+
+  const { estado, rol } = await exigirCatalogos(body.rol);
   const usuario = await authRepo.crearUsuarioConRol(
     {
       nombre: body.nombre,
@@ -165,24 +216,24 @@ export async function login(body: LoginBody): Promise<RespuestaAuth> {
     );
   }
 
-  asegurarPuedeIngresar(usuario);
+  const vigente = await asegurarUsuarioActivo(usuario);
   limpiarIntentos(body.email);
 
-  return aRespuesta(usuario);
+  return aRespuesta(vigente);
 }
 
 export async function loginConGoogle(perfil: PerfilGoogle): Promise<RespuestaAuth> {
   const porGoogle = await authRepo.buscarPorGoogleId(perfil.googleId);
   if (porGoogle) {
-    asegurarPuedeIngresar(porGoogle);
-    return aRespuesta(porGoogle);
+    const vigente = await asegurarUsuarioActivo(porGoogle);
+    return aRespuesta(vigente);
   }
 
   const porEmail = await authRepo.buscarPorEmail(perfil.email);
   if (porEmail) {
-    asegurarPuedeIngresar(porEmail);
+    const vigente = await asegurarUsuarioActivo(porEmail);
     const vinculado = await authRepo.vincularGoogleId(
-      porEmail.id,
+      vigente.id,
       perfil.googleId,
       perfil.imagenUrl,
     );
