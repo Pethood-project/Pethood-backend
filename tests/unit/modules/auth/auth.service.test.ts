@@ -12,6 +12,7 @@ vi.mock('../../../../src/modules/auth/auth.repository', () => ({
   crearUsuarioConRol: vi.fn(),
   vincularGoogleId: vi.fn(),
   actualizarContrasena: vi.fn(),
+  reactivarCuenta: vi.fn(),
 }));
 
 vi.mock('../../../../src/shared/logAuditoria', () => ({
@@ -36,6 +37,20 @@ import * as r2 from '../../../../src/shared/r2';
 
 const mockedRepo = vi.mocked(authRepo);
 
+function estadoUsuario(nombre: string, id = 2) {
+  return {
+    id,
+    nombre,
+    descripcion: null,
+    usuarioAlta: 1,
+    fechaAlta: new Date(),
+    usuarioModificacion: null,
+    fechaModificacion: null,
+    usuarioBaja: null,
+    fechaBaja: null,
+  };
+}
+
 function usuarioFake(overrides: Partial<UsuarioConRoles> = {}): UsuarioConRoles {
   return {
     id: 10,
@@ -58,17 +73,7 @@ function usuarioFake(overrides: Partial<UsuarioConRoles> = {}): UsuarioConRoles 
     fechaModificacion: null,
     usuarioBaja: null,
     fechaBaja: null,
-    estado: {
-      id: 2,
-      nombre: ESTADO_USUARIO.ACTIVO,
-      descripcion: null,
-      usuarioAlta: 1,
-      fechaAlta: new Date(),
-      usuarioModificacion: null,
-      fechaModificacion: null,
-      usuarioBaja: null,
-      fechaBaja: null,
-    },
+    estado: estadoUsuario(ESTADO_USUARIO.ACTIVO),
     roles: [
       {
         id: 1,
@@ -95,6 +100,16 @@ function usuarioFake(overrides: Partial<UsuarioConRoles> = {}): UsuarioConRoles 
     ],
     ...overrides,
   };
+}
+
+function usuarioDadoDeBaja(overrides: Partial<UsuarioConRoles> = {}): UsuarioConRoles {
+  return usuarioFake({
+    estadoId: 4,
+    usuarioBaja: 10,
+    fechaBaja: new Date('2026-09-01'),
+    estado: estadoUsuario(ESTADO_USUARIO.INACTIVO, 4),
+    ...overrides,
+  });
 }
 
 describe('auth.service', () => {
@@ -232,17 +247,7 @@ describe('auth.service', () => {
     mockedRepo.buscarPorEmail.mockResolvedValue(
       usuarioFake({
         contrasena: await (await import('bcrypt')).hash('secreto123', 4),
-        estado: {
-          id: 3,
-          nombre: ESTADO_USUARIO.SUSPENDIDO,
-          descripcion: null,
-          usuarioAlta: 1,
-          fechaAlta: new Date(),
-          usuarioModificacion: null,
-          fechaModificacion: null,
-          usuarioBaja: null,
-          fechaBaja: null,
-        },
+        estado: estadoUsuario(ESTADO_USUARIO.SUSPENDIDO, 3),
       }),
     );
 
@@ -250,6 +255,35 @@ describe('auth.service', () => {
       codigo: 'USUARIO_SUSPENDIDO',
       httpStatus: 403,
     });
+  });
+
+  it('login reactiva una cuenta dada de baja por el mismo usuario', async () => {
+    const password = 'secreto123';
+    const hash = await (await import('bcrypt')).hash(password, 4);
+    const dadaDeBaja = usuarioDadoDeBaja({ contrasena: hash, googleId: null });
+    const reactivada = usuarioFake({ contrasena: hash });
+
+    mockedRepo.buscarPorEmail.mockResolvedValue(dadaDeBaja);
+    mockedRepo.reactivarCuenta.mockResolvedValue(reactivada);
+
+    const resultado = await login({ email: 'ana@mail.com', password });
+
+    expect(resultado.usuario.id).toBe(10);
+    expect(mockedRepo.reactivarCuenta).toHaveBeenCalledWith(10, 2, {});
+  });
+
+  it('login no reactiva una cuenta dada de baja por un admin', async () => {
+    const password = 'secreto123';
+    const hash = await (await import('bcrypt')).hash(password, 4);
+    mockedRepo.buscarPorEmail.mockResolvedValue(
+      usuarioDadoDeBaja({ contrasena: hash, usuarioBaja: 99 }),
+    );
+
+    await expect(login({ email: 'ana@mail.com', password })).rejects.toMatchObject({
+      codigo: 'CREDENCIALES_INVALIDAS',
+      httpStatus: 401,
+    });
+    expect(mockedRepo.reactivarCuenta).not.toHaveBeenCalled();
   });
 
   it('login con Google crea adoptante si no existe', async () => {
@@ -290,6 +324,82 @@ describe('auth.service', () => {
 
     expect(resultado.usuario.id).toBe(10);
     expect(mockedRepo.vincularGoogleId).toHaveBeenCalledWith(10, 'sub-google', undefined);
+  });
+
+  it('login con Google reactiva una cuenta dada de baja por el mismo usuario', async () => {
+    const dadaDeBaja = usuarioDadoDeBaja({
+      googleId: 'sub-google',
+      email: 'ana@gmail.com',
+      contrasena: null,
+      verificado: true,
+    });
+    const reactivada = usuarioFake({
+      googleId: 'sub-google',
+      email: 'ana@gmail.com',
+      contrasena: null,
+      verificado: true,
+    });
+
+    mockedRepo.buscarPorGoogleId.mockResolvedValue(dadaDeBaja);
+    mockedRepo.reactivarCuenta.mockResolvedValue(reactivada);
+
+    const resultado = await loginConGoogle({
+      googleId: 'sub-google',
+      email: 'ana@gmail.com',
+      nombre: 'Ana',
+      apellido: 'Perez',
+    });
+
+    expect(resultado.usuario.email).toBe('ana@gmail.com');
+    expect(mockedRepo.reactivarCuenta).toHaveBeenCalledWith(10, 2, {});
+    expect(mockedRepo.crearUsuarioConRol).not.toHaveBeenCalled();
+  });
+
+  it('login con Google no reactiva una cuenta dada de baja por un admin', async () => {
+    mockedRepo.buscarPorGoogleId.mockResolvedValue(
+      usuarioDadoDeBaja({ googleId: 'sub-google', usuarioBaja: 99 }),
+    );
+
+    await expect(
+      loginConGoogle({
+        googleId: 'sub-google',
+        email: 'ana@gmail.com',
+        nombre: 'Ana',
+        apellido: 'Perez',
+      }),
+    ).rejects.toMatchObject({ codigo: 'CREDENCIALES_INVALIDAS', httpStatus: 401 });
+    expect(mockedRepo.reactivarCuenta).not.toHaveBeenCalled();
+    expect(mockedRepo.crearUsuarioConRol).not.toHaveBeenCalled();
+  });
+
+  it('registrar reactiva una cuenta dada de baja por el mismo usuario', async () => {
+    const dadaDeBaja = usuarioDadoDeBaja({ contrasena: null, googleId: 'sub-google' });
+    const reactivada = usuarioFake();
+
+    mockedRepo.buscarPorEmail.mockResolvedValue(dadaDeBaja);
+    mockedRepo.reactivarCuenta.mockResolvedValue(reactivada);
+
+    const resultado = await registrar({
+      nombre: 'Ana',
+      apellido: 'Perez',
+      email: 'ana@mail.com',
+      password: 'secreto123',
+      fechaNacimiento: '20/05/1995',
+      telefono: '2615123456',
+      rol: ROL_API.ADOPTANTE,
+    });
+
+    expect(resultado.usuario.id).toBe(10);
+    expect(mockedRepo.reactivarCuenta).toHaveBeenCalledWith(
+      10,
+      2,
+      expect.objectContaining({
+        nombre: 'Ana',
+        apellido: 'Perez',
+        telefono: '2615123456',
+      }),
+    );
+    expect(mockedRepo.crearUsuarioConRol).not.toHaveBeenCalled();
   });
 
   it('recuperar no revela si el email existe', async () => {

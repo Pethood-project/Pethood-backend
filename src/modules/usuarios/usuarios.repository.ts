@@ -1,7 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
-import { datosModificacion } from '../../shared/auditoria';
+import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { AppError } from '../../middlewares/errorHandler';
+
+const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'] as const;
 
 const includePerfil = {
   estado: true,
@@ -100,5 +102,96 @@ export async function buscarHashContrasena(
   return prisma.usuario.findFirst({
     where: { id: usuarioId, fechaBaja: null },
     select: { id: true, contrasena: true },
+  });
+}
+
+export function buscarEstadoUsuarioPorNombre(nombre: string) {
+  return prisma.estadoUsuario.findFirst({ where: { nombre, fechaBaja: null } });
+}
+
+export function buscarEstadoSolicitudPorNombre(nombre: string) {
+  return prisma.estadoSolicitud.findFirst({ where: { nombre, fechaBaja: null } });
+}
+
+/**
+ * HU-1.8: cierra trámites abiertos del usuario y deja la cuenta Inactiva (baja lógica).
+ *
+ * En la misma transacción:
+ * - cancela solicitudes Pendiente/En_Revision que envió o que le llegaron sobre mascotas
+ *   particulares (las del refugio las siguen viendo los demás miembros);
+ * - retira publicaciones y mascotas particulares;
+ * - limpia favoritos;
+ * - marca al usuario con estado Inactivo + fechaBaja.
+ */
+export async function darDeBajaCuenta(
+  usuarioId: number,
+  estadoInactivoId: number,
+  estadoCanceladaId: number,
+): Promise<void> {
+  const baja = datosBaja(usuarioId);
+
+  await prisma.$transaction(async (tx) => {
+    const solicitudes = await tx.solicitud.findMany({
+      where: {
+        fechaBaja: null,
+        OR: [{ usuarioId }, { publicacion: { usuarioId, mascota: { refugioId: null } } }],
+      },
+      include: {
+        historicoEstados: {
+          where: { fechaBaja: null },
+          include: { estadoSolicitud: true },
+          orderBy: { fechaAlta: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    const abiertas = solicitudes.filter((solicitud) => {
+      const vigente = solicitud.historicoEstados[0]?.estadoSolicitud.nombre;
+      return (
+        vigente !== undefined && (ESTADOS_SOLICITUD_ABIERTA as readonly string[]).includes(vigente)
+      );
+    });
+
+    for (const solicitud of abiertas) {
+      await tx.solicitud.update({
+        where: { id: solicitud.id },
+        data: baja,
+      });
+      await tx.solicitudEstado.create({
+        data: {
+          solicitudId: solicitud.id,
+          estadoSolicitudId: estadoCanceladaId,
+          ...datosAlta(usuarioId),
+        },
+      });
+    }
+
+    const mascotas = await tx.mascota.findMany({
+      where: { usuarioId, fechaBaja: null, refugioId: null },
+      select: { id: true },
+    });
+    const mascotaIds = mascotas.map((mascota) => mascota.id);
+
+    if (mascotaIds.length > 0) {
+      await tx.publicacion.updateMany({
+        where: { mascotaId: { in: mascotaIds }, fechaBaja: null },
+        data: baja,
+      });
+      await tx.mascota.updateMany({
+        where: { id: { in: mascotaIds } },
+        data: baja,
+      });
+    }
+
+    await tx.favorito.updateMany({
+      where: { usuarioId, fechaBaja: null },
+      data: baja,
+    });
+
+    await tx.usuario.update({
+      where: { id: usuarioId },
+      data: { estadoId: estadoInactivoId, ...baja },
+    });
   });
 }

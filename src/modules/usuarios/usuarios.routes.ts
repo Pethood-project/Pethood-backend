@@ -23,3 +23,4 @@ usuariosRouter.patch(
   validar(cambiarPasswordBodySchema),
   controller.cambiarPassword,
 );
+usuariosRouter.delete('/me', autenticar, controller.darDeBajaMe);
