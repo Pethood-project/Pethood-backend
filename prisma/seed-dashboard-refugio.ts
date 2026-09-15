@@ -20,6 +20,11 @@ function haceMeses(cantidad: number, dia = 15): Date {
   return new Date(hoy.getFullYear(), hoy.getMonth() - cantidad, dia);
 }
 
+/** Para poblar publicacionesPorAntiguedad (spec 010 §7) con sus 4 buckets, no solo "0-15 días". */
+function haceDias(cantidad: number): Date {
+  return new Date(Date.now() - cantidad * 86_400_000);
+}
+
 async function main() {
   if (process.env.NODE_ENV === 'production') {
     console.log('⏭️  NODE_ENV=production: seed-dashboard-refugio no corre (son datos de prueba).');
@@ -65,15 +70,15 @@ async function seedMascotas(
   const estadoIdPorNombre = new Map(estados.map((e) => [e.nombre, e.id]));
 
   const definiciones = [
-    { nombre: 'Dashboard Refugio Kiwi', estadoNombre: 'Disponible' },
-    { nombre: 'Dashboard Refugio Manchas', estadoNombre: 'Disponible' },
-    { nombre: 'Dashboard Refugio Simba', estadoNombre: 'En_Tratamiento' },
-    { nombre: 'Dashboard Refugio Coco', estadoNombre: 'En_Transito' },
-    { nombre: 'Dashboard Refugio Pipo', estadoNombre: 'Adoptado' },
-    { nombre: 'Dashboard Refugio Estrella', estadoNombre: 'Adoptado' },
+    { nombre: 'Dashboard Refugio Kiwi', estadoNombre: 'Disponible', diasAtras: 3 },
+    { nombre: 'Dashboard Refugio Manchas', estadoNombre: 'Disponible', diasAtras: 20 },
+    { nombre: 'Dashboard Refugio Simba', estadoNombre: 'En_Tratamiento', diasAtras: 45 },
+    { nombre: 'Dashboard Refugio Coco', estadoNombre: 'En_Transito', diasAtras: 75 },
+    { nombre: 'Dashboard Refugio Pipo', estadoNombre: 'Adoptado', diasAtras: 10 },
+    { nombre: 'Dashboard Refugio Estrella', estadoNombre: 'Adoptado', diasAtras: 5 },
   ];
 
-  const resultado: { id: number; estadoNombre: string }[] = [];
+  const resultado: { id: number; estadoNombre: string; diasAtras: number }[] = [];
 
   for (const def of definiciones) {
     let mascota = await prisma.mascota.findFirst({ where: { nombre: def.nombre } });
@@ -93,19 +98,25 @@ async function seedMascotas(
           mascotaId: mascota.id,
           estadoMascotaId: estadoIdPorNombre.get(def.estadoNombre)!,
           usuarioAlta,
+          fechaAlta: haceDias(def.diasAtras),
         },
       });
     }
-    resultado.push({ id: mascota.id, estadoNombre: def.estadoNombre });
+    resultado.push({ id: mascota.id, estadoNombre: def.estadoNombre, diasAtras: def.diasAtras });
   }
 
   return resultado;
 }
 
+/**
+ * fechaAlta de cada publicación = mismo diasAtras que su MascotaEstado (variedad ya pensada para
+ * cubrir los 4 buckets de mascotasPorAntiguedad), así también cubre los 4 buckets nuevos de
+ * publicacionesPorAntiguedad (0-15/15-30/30-60/+60 días) sin fixtures separados.
+ */
 async function seedPublicaciones(
   usuarioAlta: number,
   usuarioId: number,
-  mascotas: { id: number }[],
+  mascotas: { id: number; diasAtras: number }[],
 ) {
   const publicaciones = [];
   for (const mascota of mascotas) {
@@ -117,6 +128,7 @@ async function seedPublicaciones(
           mascotaId: mascota.id,
           usuarioId,
           usuarioAlta,
+          fechaAlta: haceDias(mascota.diasAtras),
         },
       });
     }

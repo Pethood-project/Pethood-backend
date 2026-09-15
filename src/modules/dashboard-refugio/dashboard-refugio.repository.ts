@@ -27,6 +27,56 @@ export function listarEstadosSolicitud() {
   return prisma.estadoSolicitud.findMany({ where: { fechaBaja: null } });
 }
 
+export function listarEstadosMascota() {
+  return prisma.estadoMascota.findMany({ where: { fechaBaja: null } });
+}
+
+/** Igual agrupación que dashboard-admin.repository.ts, pero scopeada a las mascotas del refugio. */
+export function contarMascotasPorEstado(refugioId: number) {
+  return prisma.mascotaEstado.groupBy({
+    by: ['estadoMascotaId'],
+    where: { fechaBaja: null, mascota: { refugioId, fechaBaja: null } },
+    _count: { _all: true },
+  });
+}
+
+/**
+ * Publicaciones vigentes (sin baja) de mascotas del refugio, con la fecha en que se publicaron
+ * — el service calcula hace cuántos días están publicadas a partir de esto.
+ */
+export function listarPublicacionesActivas(refugioId: number) {
+  return prisma.publicacion.findMany({
+    where: {
+      fechaBaja: null,
+      mascota: { refugioId, fechaBaja: null },
+    },
+    select: { id: true, fechaAlta: true, mascota: { select: { nombre: true } } },
+  });
+}
+
+/**
+ * Solicitudes del refugio con su estado vigente, sin filtrar por período: "demoradas" es una
+ * foto del backlog actual (mismo criterio snapshot que contarMascotasEnRefugio), no algo que
+ * dependa del rango desde/hasta elegido en pantalla.
+ */
+export function listarSolicitudesAbiertas(refugioId: number) {
+  return prisma.solicitud.findMany({
+    where: {
+      fechaBaja: null,
+      publicacion: { mascota: { refugioId, fechaBaja: null } },
+    },
+    include: {
+      publicacion: { include: { mascota: true } },
+      historicoEstados: {
+        where: { fechaBaja: null },
+        include: { estadoSolicitud: true },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+    },
+  });
+}
+
 /** Estado vigente de Solicitud = última Solicitud_Estado sin baja, con fechaAlta en el período. */
 export function contarSolicitudesPorEstado(refugioId: number, desde: Date, hasta: Date) {
   return prisma.solicitudEstado.groupBy({
