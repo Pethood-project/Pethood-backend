@@ -164,7 +164,7 @@ modulo/
 npm run dev          # Desarrollo con hot-reload
 npm run build        # Build de producción
 npm start            # Ejecutar build
-npm run seed         # Sembrar datos iniciales (catálogos + cuentas de prueba)
+npm run seed         # Sembrar catálogos + datos de demo de toda la app (ver Seed)
 npm run lint         # Analizar con ESLint
 npm run lint:fix     # Fix automático de ESLint
 npm run format       # Formatear con Prettier
@@ -172,28 +172,38 @@ npm run format:check # Verificar formato (CI)
 npm test             # Ejecutar tests
 ```
 
-### Seeds por módulo (opcionales)
+### Seed
 
-`npm run seed` corre solo `prisma/seed.ts`: catálogos y las cuentas de prueba
-(`admin@` / `adoptante@` / `refugio@pethood.test`, contraseña `Pethood123`). Es el único que
-se ejecuta automáticamente con `prisma db seed` y `migrate reset`.
+`npm run seed` (también corre con `prisma db seed` y `migrate reset`) deja la base lista para
+recorrer **toda** la app con datos coherentes. Es idempotente: se puede correr N veces sin
+duplicar filas. Con `NODE_ENV=production` solo siembra catálogos y el usuario SISTEMA.
 
-Además hay seeds por módulo, que se corren **a mano y después** del anterior. Están separados
-a propósito: son datos para desarrollar una pantalla puntual y no deberían imponerse a quien
-está trabajando en otra fase. Todos son idempotentes y no corren con `NODE_ENV=production`.
+Está dividido por módulo en `prisma/seed/` y `prisma/seed.ts` los orquesta en orden:
 
-```bash
-npx tsx prisma/seed-chats.ts              # HU-5.1 — listado de conversaciones (GUI-08 / GUI-31)
-npx tsx prisma/seed-dashboard-admin.ts    # spec 009 — dashboard admin
-npx tsx prisma/seed-dashboard-refugio.ts  # spec 010 — dashboard refugio
-npx tsx prisma/seed-admin-usuarios.ts     # spec 002 — gestión de usuarios y refugios
-```
+| Módulo | Qué siembra |
+| --- | --- |
+| `catalogos` | Estados, roles, tipos de solicitud, especies/razas, preguntas de seguimiento, usuario SISTEMA (id 1) |
+| `usuarios` | Cuentas principales, 3 refugios con operador, 24 refugios + 24 vecinos para paginar el panel admin |
+| `mascotas` | 22 mascotas con fotos, histórico de estados, 18 publicaciones y 11 registros de historia clínica |
+| `favoritos` | Favoritos de Ana (todos los badges de estado) y de otros adoptantes |
+| `solicitudes` | Hogares versionados, 17 solicitudes en los 5 estados (adopción y tránsito), seguimientos post-adopción en distintos tramos, una pendiente vencida para el cron |
+| `chats` | 7 conversaciones: refugio/adoptante, sin mensajes, contacto de baja, solo foto, no leídos |
+| `comunidad` | Campañas con donaciones repartidas por mes, reseñas, reportes de moderación, animales perdidos |
 
-`seed-chats.ts` deja 6 conversaciones para `adoptante@pethood.test` que cubren todos los casos
-del listado: chat con refugio y con otro adoptante, sala sin ningún mensaje, contacto dado de
-baja, mensaje de solo foto, contador por encima de 99 y nombres largos para ver el truncado.
-Los mensajes se fechan relativo al momento de correrlo, así se ven los distintos tramos de
-tiempo relativo ("Hace 3 min", "Hace 2 horas", "Ayer", "Hace 4 días").
+Cuentas (contraseña `Pethood123` para todas):
+
+| Email | Quién es | Para qué sirve |
+| --- | --- | --- |
+| `adoptante@pethood.test` | Ana Gomez | Adoptante principal: feed, favoritos, solicitudes, seguimientos, chats, mis mascotas |
+| `refugio@pethood.test` | Bruno Diaz (Refugio Patitas) | Lado refugio: solicitudes recibidas, seguimientos, chats, dashboard refugio |
+| `admin@pethood.test` | Admin | Panel web-admin: dashboard, usuarios, refugios, moderación |
+| `huellitas@pethood.test` | Nico Peralta (Huellitas del Sur) | Segundo refugio |
+| `carla@` / `martin@` / `elena@` / `lucia@pethood.test` | Otros adoptantes | Solicitudes y chats con los refugios |
+| `multirol@pethood.test` | Bruna Salvatierra | Adoptante + Refugio (roles múltiples) |
+
+Los mensajes de chat y las fechas de solicitudes/seguimientos se calculan relativo al momento
+de correrlo, así los tramos ("Hace 3 min", "Ayer", pedido vencido, próximo aviso) se ven
+siempre igual sin importar cuándo se siembre.
 
 ## Documentación
 
