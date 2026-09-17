@@ -21,11 +21,19 @@ datasource db {
 }
 
 // ─────────────── ENUMS ───────────────
-// Único enum real: selector cerrado de 2 valores explícito en HU-6.1, no modelado como catálogo.
+// Selectores de valores fijos, no modelados como catálogo porque no son configurables
+// desde el panel admin. Sin tildes ni ñ en los identificadores (CONSTITUTION.md §5) —
+// la UI muestra las etiquetas en español correcto.
 
 enum GeneroMascota {
   MACHO
   HEMBRA
+}
+
+enum TamanioMascota {
+  PEQUENO
+  MEDIANO
+  GRANDE
 }
 
 // ─────────────── CATÁLOGOS ───────────────
@@ -207,17 +215,23 @@ model Rol {
 // ─────────────── USUARIOS ───────────────
 
 model Usuario {
-  id         Int     @id @default(autoincrement()) @map("usuario_id")
-  nombre     String  @map("usuario_nombre")
-  apellido   String  @map("usuario_apellido")
-  email      String  @unique @map("usuario_email")
-  contrasena String  @map("usuario_contrasena")
-  telefono   String? @map("usuario_telefono")
-  dni        String  @unique @map("usuario_dni")
-  verificado Boolean @default(false) @map("usuario_verificado")
-  imagenUrl  String? @map("usuario_imagen_url")
-  refugioId  Int?    @map("refugio_id")
-  estadoId   Int     @map("estado_id")
+  id               Int       @id @default(autoincrement()) @map("usuario_id")
+  nombre           String    @map("usuario_nombre")
+  apellido         String    @map("usuario_apellido")
+  email            String    @unique @map("usuario_email")
+  // Nullable: las cuentas creadas solo con Google no tienen contraseña local.
+  contrasena       String?   @map("usuario_contrasena")
+  telefono         String?   @map("usuario_telefono")
+  // Nullable: el registro mobile actual no pide DNI; Google OAuth tampoco.
+  dni              String?   @unique @map("usuario_dni")
+  fechaNacimiento  DateTime? @map("usuario_fecha_nacimiento")
+  googleId         String?   @unique @map("usuario_google_id")
+  verificado       Boolean   @default(false) @map("usuario_verificado")
+  imagenUrl        String?   @map("usuario_imagen_url")
+  // Barrio / ciudad del perfil (GUI-15). Nullable para cuentas nuevas o de Google.
+  ubicacion        String?   @map("usuario_ubicacion")
+  refugioId        Int?      @map("refugio_id")
+  estadoId         Int       @map("estado_id")
 
   usuarioAlta         Int       @map("usuario_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("usuario_fecha_alta")
@@ -298,17 +312,25 @@ model Refugio {
 
 // ─────────────── MASCOTAS ───────────────
 
+// `peso` y `tamanio` no vienen del diagrama de clases original — se agregaron porque el
+// formulario de alta los pide. Ver MODELO_DATOS.md.
+//
+// Nullables en base igual que `nombre` y `fechaNacimiento`: la obligatoriedad se impone en
+// mascotas.dto.ts, no en la columna, para no bloquear altas desde otros flujos (ej. un
+// animal encontrado del que no se conocen todos los datos).
 model Mascota {
-  id              Int           @id @default(autoincrement()) @map("mascota_id")
-  nombre          String?       @map("mascota_nombre")
-  fechaNacimiento DateTime?     @map("mascota_fecha_nacimiento")
-  genero          GeneroMascota @map("mascota_genero")
-  castrado        Boolean       @default(false) @map("mascota_castrado")
-  descripcion     String?       @map("mascota_descripcion")
-  imagenUrl       String?       @map("mascota_imagen_url")
-  razaId          Int           @map("raza_id")
-  refugioId       Int?          @map("refugio_id")
-  usuarioId       Int           @map("usuario_id")
+  id              Int             @id @default(autoincrement()) @map("mascota_id")
+  nombre          String?         @map("mascota_nombre")
+  fechaNacimiento DateTime?       @map("mascota_fecha_nacimiento")
+  genero          GeneroMascota   @map("mascota_genero")
+  peso            Decimal?        @map("mascota_peso") @db.Decimal(4, 1)
+  tamanio         TamanioMascota? @map("mascota_tamanio")
+  castrado        Boolean         @default(false) @map("mascota_castrado")
+  descripcion     String?         @map("mascota_descripcion")
+  imagenUrl       String?         @map("mascota_imagen_url")
+  razaId          Int             @map("raza_id")
+  refugioId       Int?            @map("refugio_id")
+  usuarioId       Int             @map("usuario_id")
 
   usuarioAlta         Int       @map("mascota_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("mascota_fecha_alta")
@@ -350,13 +372,26 @@ model MascotaEstado {
 
 // ─────────────── PUBLICACIONES ───────────────
 
+// Varios campos de acá no están en el diagrama de clases (ver MODELO_DATOS.md). Los text[]
+// se usan para listas de valores simples, sin atributos ni ciclo de vida propio, donde no
+// se justifica una tabla hija.
+//
+// `imagenes` guarda hasta 5 fotos y el orden del array ES el orden de la galería: la
+// primera es la portada. `imagenUrl` se mantiene con esa portada, para no romper lo que ya
+// lee ese campo.
 model Publicacion {
-  id          Int     @id @default(autoincrement()) @map("publicacion_id")
-  titulo      String  @map("publicacion_titulo")
-  descripcion String? @map("publicacion_descripcion")
-  imagenUrl   String? @map("publicacion_imagen_url")
-  mascotaId   Int     @map("mascota_id")
-  usuarioId   Int     @map("usuario_id")
+  id            Int      @id @default(autoincrement()) @map("publicacion_id")
+  titulo        String   @map("publicacion_titulo")
+  descripcion   String?  @map("publicacion_descripcion")
+  ubicacion     String?  @map("publicacion_ubicacion")
+  requisitos    String[] @map("publicacion_requisitos")
+  personalidad  String[] @map("publicacion_personalidad")
+  desparasitado Boolean  @default(false) @map("publicacion_desparasitado")
+  vacunas       String?  @map("publicacion_vacunas")
+  imagenes      String[] @map("publicacion_imagenes")
+  imagenUrl     String?  @map("publicacion_imagen_url")
+  mascotaId     Int      @map("mascota_id")
+  usuarioId     Int      @map("usuario_id")
 
   usuarioAlta         Int       @map("publicacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("publicacion_fecha_alta")
@@ -373,6 +408,16 @@ model Publicacion {
   @@map("publicacion")
 }
 
+// Además del índice de abajo, la tabla tiene dos índices PARCIALES que Prisma no sabe
+// expresar y viven en `migrations/20260820120000_favorito_indices_parciales`:
+//
+// - `favorito_usuario_mascota_activo_uq` — único (usuario, mascota) WHERE fecha_baja IS NULL.
+//   Garantiza un solo favorito activo por par sin impedir volver a guardar algo que se quitó.
+// - `favorito_usuario_fecha_alta_idx` — (usuario, fecha_alta DESC) WHERE fecha_baja IS NULL,
+//   para el orden por defecto de HU-6.6.
+//
+// Quitar un favorito es baja lógica (regla 1 de CLAUDE.md): cada ciclo de guardar/quitar
+// deja su propia fila, así que el par (usuario, mascota) puede repetirse en el histórico.
 model Favorito {
   id        Int @id @default(autoincrement()) @map("favorito_id")
   usuarioId Int @map("usuario_id")
@@ -395,13 +440,26 @@ model Favorito {
 // ─────────────── ADOPCIÓN ───────────────
 
 model Solicitud {
-  id              Int       @id @default(autoincrement()) @map("solicitud_id")
-  motivacion      String    @map("solicitud_motivacion")
-  fechaRespuesta  DateTime? @map("solicitud_fecha_respuesta")
-  comentario      String?   @map("solicitud_comentario")
-  publicacionId   Int       @map("publicacion_id")
-  usuarioId       Int       @map("usuario_id")
-  tipoSolicitudId Int       @map("tipo_solicitud_id")
+  id             Int       @id @default(autoincrement()) @map("solicitud_id")
+  motivacion     String    @map("solicitud_motivacion")
+  fechaRespuesta DateTime? @map("solicitud_fecha_respuesta")
+  comentario     String?   @map("solicitud_comentario")
+
+  // Período ofrecido cuando el tipo es "Transito". Nulos en una solicitud de adopción:
+  // no hay período que declarar. Van en Solicitud y no en Hogar porque son de ESTA
+  // solicitud — el hogar es el perfil del usuario y lo comparten todas.
+  fechaInicioTransito DateTime? @map("solicitud_fecha_inicio_transito")
+  fechaFinTransito    DateTime? @map("solicitud_fecha_fin_transito")
+
+  publicacionId   Int @map("publicacion_id")
+  usuarioId       Int @map("usuario_id")
+  tipoSolicitudId Int @map("tipo_solicitud_id")
+
+  // Versión del hogar que estaba vigente al enviar: es lo que el refugio evaluó. El hogar
+  // del usuario se versiona (baja lógica + alta, igual que HistoriaClinica), así una
+  // mudanza posterior no reescribe lo que se declaró. Nullable: las solicitudes anteriores
+  // a HU-7.1 no tienen hogar.
+  hogarId Int? @map("hogar_id")
 
   usuarioAlta         Int       @map("solicitud_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("solicitud_fecha_alta")
@@ -413,6 +471,7 @@ model Solicitud {
   publicacion   Publicacion   @relation(fields: [publicacionId], references: [id])
   usuario       Usuario       @relation(fields: [usuarioId], references: [id])
   tipoSolicitud TipoSolicitud @relation(fields: [tipoSolicitudId], references: [id])
+  hogar         Hogar?        @relation(fields: [hogarId], references: [id])
 
   historicoEstados SolicitudEstado[]
   seguimientos     Seguimiento[]
@@ -534,6 +593,17 @@ model Resena {
 // ─────────────── CHAT ───────────────
 // Chat: "alta y baja" explícito en la nota de Mensaje (cita textual del doc de requisitos)
 // — sin par de modificación propio, igual que Mascota_Estado.
+//
+// `refugioId` NO reemplaza a UsuarioChat, lo complementa (HU-5.1, docs/api-chats.md):
+// UsuarioChat es la única tabla de pertenencia — toda persona con acceso a la sala tiene
+// fila, incluido el miembro del refugio que atiende. `refugioId` es una etiqueta
+// institucional: dice que la contraparte de la conversación es ese refugio, y es lo que
+// define qué nombre e imagen ve el adoptante. Tiene que ser así porque Mensaje.usuarioId
+// es NOT NULL contra Usuario: un refugio no emite mensajes, los emite una persona.
+//
+// Corolario: `refugioId != null` ⇔ chat adoptante↔refugio; `null` ⇔ coordinación entre
+// adoptantes por una mascota perdida (REQUISITOS.md, módulo 5). Son los dos casos que
+// `tipo` querría distinguir, ya derivables sin él.
 
 model Chat {
   id        Int     @id @default(autoincrement()) @map("chat_id")
@@ -553,6 +623,12 @@ model Chat {
   @@map("chat")
 }
 
+// Además del índice de abajo, la tabla tiene un índice PARCIAL que Prisma no sabe expresar
+// y vive en `migrations/20260901120000_chat_indices_listado_conversaciones`:
+//
+// - `usuario_chat_usuario_activo_idx` — (usuario_id) WHERE fecha_baja IS NULL. Es el punto
+//   de entrada de HU-5.1 ("mis salas activas"); el índice de abajo arranca por `chat_id` y
+//   no sirve para buscar por usuario.
 model UsuarioChat {
   id        Int @id @default(autoincrement()) @map("usuario_chat_id")
   chatId    Int @map("chat_id")
@@ -573,6 +649,20 @@ model UsuarioChat {
 }
 
 // Mensaje: solo alta, nunca baja ni modificación (MODELO_DATOS.md, excepción explícita).
+//
+// La tabla no declara índices acá pero tiene dos en
+// `migrations/20260901120000_chat_indices_listado_conversaciones`:
+//
+// - `mensaje_chat_fecha_alta_idx` — (chat_id, fecha_alta DESC). Sostiene el DISTINCT ON que
+//   trae el último mensaje de todos los chats de un usuario en una sola query (HU-5.1) y el
+//   historial paginado de la sala (HU-5.2). No es parcial: no hay `fecha_baja` que filtrar.
+// - `mensaje_chat_usuario_no_leido_idx` — (chat_id, usuario_id) WHERE leido = false, para el
+//   contador de no leídos. Parcial porque las filas no leídas son una minoría que se achica
+//   sola a medida que se abren las salas.
+//
+// `leido` es un booleano ÚNICO por mensaje, no por participante: alcanza para una sala de
+// dos (los no leídos de alguien son los mensajes que no emitió él), pero NO soportaría un
+// chat grupal. Ver "Pendientes" en docs/api-chats.md.
 model Mensaje {
   id        Int     @id @default(autoincrement()) @map("mensaje_id")
   contenido String  @map("mensaje_contenido")
@@ -615,12 +705,29 @@ model Notificacion {
 // Perfil extendido de Usuario, no un rol/módulo separado (ver ROADMAP.md).
 
 model Hogar {
-  id                   Int       @id @default(autoincrement()) @map("hogar_id")
-  direccion            String    @map("hogar_direccion")
-  tienePatio           Boolean   @default(false) @map("hogar_tiene_patio")
-  tieneMascotas        Boolean   @default(false) @map("hogar_tiene_mascotas")
+  id        Int    @id @default(autoincrement()) @map("hogar_id")
+  direccion String @map("hogar_direccion")
+
+  /// Derivado de `espacioExterior`: verdadero para "Patio" y "Jardin". Se mantiene porque
+  /// es el campo del diagrama de clases; la respuesta real del formulario es la otra.
+  tienePatio Boolean @default(false) @map("hogar_tiene_patio")
+
+  /// "Balcon" | "Patio" | "Jardin" | "Ninguno" (GUI-7.1.1 paso 2).
+  espacioExterior String? @map("hogar_espacio_exterior")
+
+  tieneMascotas Boolean @default(false) @map("hogar_tiene_mascotas")
+  /// Texto libre que solo se pide cuando `tieneMascotas` es verdadero.
+  detalleMascotas String? @map("hogar_detalle_mascotas")
+
+  tieneNinios       Boolean @default(false) @map("hogar_tiene_ninios")
+  experienciaPrevia Boolean @default(false) @map("hogar_experiencia_previa")
+
+  /// Tope del rango elegido en el formulario: 4 ("menos de 4"), 8 ("entre 4 y 8") o 12 ("más de 8").
+  horasSolo Int? @map("hogar_horas_solo")
+
   descripcion          String?   @map("hogar_descripcion")
-  tipoVivienda         String?   @map("hogar_tipo_vivienda") // sin valores confirmados en el doc
+  /// "Casa" | "Departamento" | "Otro" (el documento fuente no fijaba valores).
+  tipoVivienda         String?   @map("hogar_tipo_vivienda")
   inicioDisponibilidad DateTime? @map("hogar_inicio_disponibilidad")
   finDisponibilidad    DateTime? @map("hogar_fin_disponibilidad")
   imagenUrl            String?   @map("hogar_imagen_url")
@@ -634,6 +741,9 @@ model Hogar {
   fechaBaja           DateTime? @map("hogar_fecha_baja")
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  /// Solicitudes que declararon ESTA versión del hogar.
+  solicitudes Solicitud[]
 
   @@map("hogar")
 }

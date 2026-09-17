@@ -38,7 +38,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 
 ### Usuario
 
-`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña`, `usuario_telefono`, `usuario_dni`, `usuario_verificado`, `usuario_imagen_url`, FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, `usuario_ubicacion` (nullable — barrio/ciudad del perfil, GUI-15), FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
 
 Relaciones: 1 Usuario → N Mascota, N Publicacion, N Solicitud, N Favorito, N Notificacion, N Hogar, N Reseña (como autor), N Donacion, N Campaña, N Usuario_Chat, N Mensaje, N Rol_Usuario, N Animal_Perdido (como reportante).
 
@@ -54,9 +54,15 @@ Relaciones: 1 Refugio → N Campaña, 1 Refugio → N Reseña (como reportado/ `
 
 ### Mascota
 
-`mascota_id PK`, `mascota_nombre`, `mascota_fecha_nacimiento`, `mascota_genero`, `mascota_castrado`, `mascota_descripcion`, `mascota_imagen_url`, FK `raza_id NOT NULL`, FK `refugio_id` (nullable), FK `usuario_id NOT NULL` (dueño/creador).
+`mascota_id PK`, `mascota_nombre`, `mascota_fecha_nacimiento`, `mascota_genero`, `mascota_peso`, `mascota_tamanio`, `mascota_castrado`, `mascota_descripcion`, `mascota_imagen_url`, FK `raza_id NOT NULL`, FK `refugio_id` (nullable), FK `usuario_id NOT NULL` (dueño/creador).
+
+**Campos agregados fuera del diagrama de clases (2026-08-13, HU-6.1):** `mascota_peso` (`Decimal(4,1)`) y `mascota_tamanio` (enum `PEQUENO`/`MEDIANO`/`GRANDE`) **no figuran en el diagrama de clases original**, pero HU-6.1 AC-12 y AC-13 los pide como campos base obligatorios del formulario de creación. Se agregaron por migración. Pendiente: reflejarlos en el diagrama de clases del grupo para que no vuelvan a divergir.
+
+Ambos son nullables en base, igual que `mascota_nombre` y `mascota_fecha_nacimiento` — que también son obligatorios en HU-6.1 pero nacieron nullables. La obligatoriedad se impone en el DTO Zod del módulo, no en la columna, para no bloquear altas de Mascota desde otros flujos (ej. un animal encontrado sin datos completos, Módulo 13).
 
 Validaciones de negocio (HU-6.1): nombre 2-25 caracteres (con trim); fecha de nacimiento nunca futura; peso numérico con hasta 1 decimal (acepta punto o coma); tamaño = selector cerrado Pequeño/Mediano/Grande; sexo = selector cerrado Macho/Hembra; foto obligatoria (≤5MB, jpg/png/webp/jpeg); especie/raza dependientes en cascada.
+
+**Estado inicial al crear (decisión de equipo, 2026-08-13):** toda Mascota nace con una fila en `Mascota_Estado`. El formulario del refugio (GUI-30) tiene selector de Estado explícito (AC-16). El del adoptante (GUI-16) no lo tiene: se deriva del selector "¿Es tu mascota o es para adopción?" — "para adopción" → `Disponible`, "es mi mascota" → `Adoptado` (ya tiene dueño, no se ofrece publicar).
 
 ### Mascota_Estado
 
@@ -68,7 +74,22 @@ Ver catálogos arriba.
 
 ### Publicacion
 
-`publicacion_id PK`, `publicacion_titulo`, `publicacion_descripcion` (máx. 50 caracteres, trim), `publicacion_imagen_url`, FK `mascota_id FK NOT NULL`, FK `usuario_id FK NOT NULL`.
+`publicacion_id PK`, `publicacion_titulo`, `publicacion_descripcion` (máx. 50 caracteres, trim), `publicacion_ubicacion`, `publicacion_requisitos`, `publicacion_imagen_url`, FK `mascota_id FK NOT NULL`, FK `usuario_id FK NOT NULL`.
+
+**Campos agregados fuera del diagrama de clases (2026-08-13, HU-6.1):** `publicacion_ubicacion` (texto libre ≤50 caracteres con trim, AC-27) y `publicacion_requisitos` (`text[]`, los "Requisitos del adoptante" del tag input de AC-26, cada etiqueta ≤25 caracteres). Los requisitos se modelan como array plano y no como tabla hija porque cada uno es solo una etiqueta de texto libre sin atributos ni ciclo de vida propio. Pendiente: reflejarlos en el diagrama de clases del grupo.
+
+**Campos agregados por el diseño de GUI-24 (2026-08-17):** tampoco están en el diagrama de clases.
+
+| Campo | Tipo | Para qué |
+|---|---|---|
+| `publicacion_imagenes` | `text[]` | Hasta 5 fotos. **El orden del array es el orden de la galería**: la primera es la portada. `publicacion_imagen_url` se mantiene sincronizado con esa portada para no romper lo que ya lee ese campo. Si no se suben fotos propias, se hereda la de la mascota. |
+| `publicacion_personalidad` | `text[]` | Rasgos elegidos como pastillas (≤25 caracteres cada uno). Hoy las opciones están fijas en el frontend; cuando se definan, deberían pasar a ser un catálogo como Especie o Raza. |
+| `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
+| `publicacion_vacunas` | `text` | Texto libre ≤200. **Provisional**: el diseño muestra pastillas por vacuna (Rabia, Parvovirus, Moquillo, Triple) y conceptualmente esto pertenece a `Historia_Clinica` (Módulo 8, Fase 6). Se guarda como texto hasta que ese módulo exista. |
+
+**A revisar con el equipo:** los datos de salud (desparasitado, vacunas) viven hoy en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`. Cuando se implemente la Fase 6, evaluar migrarlos.
+
+**Pendiente de definición:** `publicacion_titulo` es NOT NULL en el schema, pero el formulario de GUI-24 (AC-25 a AC-28) no pide un título — solo descripción, requisitos y ubicación. Confirmar con el equipo si el título se deriva del nombre de la mascota o si falta el campo en la pantalla.
 
 Relaciones: 1 Publicacion → N Solicitud, N Favorito (vía Mascota), 1 Publicacion → N Reseña (visibles en contexto de publicación/solicitud).
 
@@ -80,9 +101,13 @@ Regla de negocio: máximo 5 publicaciones activas simultáneas por adoptante par
 
 ### Solicitud
 
-`solicitud_id PK`, `solicitud_motivacion`, `solicitud_fecha_respuesta`, `solicitud_comentario`, FK `publicacion_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (solicitante), FK `tipoSolicitud_id FK NOT NULL`.
+`solicitud_id PK`, `solicitud_motivacion`, `solicitud_fecha_respuesta`, `solicitud_comentario`, `solicitud_fecha_inicio_transito`, `solicitud_fecha_fin_transito`, FK `publicacion_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (solicitante), FK `tipoSolicitud_id FK NOT NULL`.
 
-Regla de negocio: máximo 5 solicitudes en estado "Pendiente" simultáneas por usuario. Cancelación automática (usuario "SISTEMA") a los 6 meses sin resolución.
+**Campos agregados fuera del diagrama de clases (HU-7.1):** `solicitud_fecha_inicio_transito` y `solicitud_fecha_fin_transito`, ambos nullable. Son el período que el solicitante ofrece cuando el tipo es `Transito`; en una adopción quedan nulos. El diagrama original no los tenía y la HU los pide explícitamente ("el sistema le muestra en la misma solicitud de adopción el tiempo de inicio y el tiempo de fin") — ver `REQUISITOS.md` §10.
+
+Van en `Solicitud` y no en `Hogar` porque son de ESA solicitud: el hogar es el perfil del usuario y lo comparten todas.
+
+Reglas de negocio: máximo 5 solicitudes en estado "Pendiente" simultáneas por usuario. Cancelación automática (usuario "SISTEMA") a los 6 meses sin resolución. Solo se puede solicitar una publicación viva de otro usuario cuya mascota esté `Disponible`, y no se puede tener más de una solicitud abierta sobre la misma publicación.
 
 ### Solicitud_Estado
 
@@ -139,6 +164,22 @@ Disparada por eventos de: Solicitud (aceptada/rechazada/nueva), Chat/Mensaje (me
 `hogar_id PK`, `hogar_direccion`, `hogar_tiene_patio`, `hogar_tiene_mascotas`, `hogar_descripcion`, `hogar_tipo_vivienda`, `hogar_inicio_disponibilidad`, `hogar_fin_disponibilidad`, `hogar_imagen_url`, FK `usuario_id FK NOT NULL`.
 
 Representa el hogar de tránsito de un usuario/adoptante — no es una entidad de rol separada, es un atributo/perfil extendido del Usuario para cuando ofrece tránsito temporal. Ver `ROADMAP.md` sobre por qué no es módulo autónomo.
+
+**Un solo hogar VIGENTE por usuario**, garantizado por el índice parcial `hogar_usuario_activo_uq (usuario_id) WHERE hogar_fecha_baja IS NULL` (mismo criterio que los índices de `Favorito`: parcial y no único plano, porque con baja lógica un único total impediría volver a cargar un hogar después de darlo de baja). El paso 2 del formulario de solicitud (GUI-7.1.1) actualiza el hogar existente en vez de crear otro, así la segunda solicitud del usuario arranca con las respuestas ya puestas.
+
+**Campos agregados fuera del diagrama de clases (HU-7.1)** — el formulario de solicitud pregunta cosas que el diagrama no contemplaba; ver `REQUISITOS.md` §10:
+
+| Campo | Tipo | Qué responde |
+|---|---|---|
+| `hogar_espacio_exterior` | texto: `Balcon` \| `Patio` \| `Jardin` \| `Ninguno` | "¿Tenés espacios al aire libre?" |
+| `hogar_detalle_mascotas` | texto, nullable | "¿Cuáles?", solo si `hogar_tiene_mascotas` |
+| `hogar_tiene_ninios` | boolean | "¿Vive algún niño en tu casa?" |
+| `hogar_experiencia_previa` | boolean | "¿Tuviste mascotas antes?" |
+| `hogar_horas_solo` | entero: 4, 8 o 12 | "¿Cuántas horas por día quedaría sola?" (es el TOPE del rango elegido, no una cantidad exacta) |
+
+`hogar_tipo_vivienda` estaba en el diagrama sin valores definidos; HU-7.1 los fija en `Casa` / `Departamento` / `Otro`.
+
+**`hogar_tiene_patio` pasa a ser un derivado.** Ya no se pregunta: el formulario pide `hogar_espacio_exterior` y el servicio calcula el booleano (`Patio` o `Jardin` → verdadero). La columna se conserva porque está en el diagrama de clases, pero la respuesta real del usuario es la otra — no escribirla a mano.
 
 ### Campaña
 

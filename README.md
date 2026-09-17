@@ -2,7 +2,7 @@
 
 <img src="docs/images/logo.png" alt="PetHood Logo" width="200" />
 
-# PetHood Backend
+# PetHood Server
 
 **API REST para adopción responsable y rescate animal**
 
@@ -164,13 +164,46 @@ modulo/
 npm run dev          # Desarrollo con hot-reload
 npm run build        # Build de producción
 npm start            # Ejecutar build
-npm run seed         # Sembrar datos iniciales
+npm run seed         # Sembrar catálogos + datos de demo de toda la app (ver Seed)
 npm run lint         # Analizar con ESLint
 npm run lint:fix     # Fix automático de ESLint
 npm run format       # Formatear con Prettier
 npm run format:check # Verificar formato (CI)
 npm test             # Ejecutar tests
 ```
+
+### Seed
+
+`npm run seed` (también corre con `prisma db seed` y `migrate reset`) deja la base lista para
+recorrer **toda** la app con datos coherentes. Es idempotente: se puede correr N veces sin
+duplicar filas. Con `NODE_ENV=production` solo siembra catálogos y el usuario SISTEMA.
+
+Está dividido por módulo en `prisma/seed/` y `prisma/seed.ts` los orquesta en orden:
+
+| Módulo | Qué siembra |
+| --- | --- |
+| `catalogos` | Estados, roles, tipos de solicitud, especies/razas, preguntas de seguimiento, usuario SISTEMA (id 1) |
+| `usuarios` | Cuentas principales, 3 refugios con operador, 24 refugios + 24 vecinos para paginar el panel admin |
+| `mascotas` | 22 mascotas con fotos, histórico de estados, 18 publicaciones y 11 registros de historia clínica |
+| `favoritos` | Favoritos de Ana (todos los badges de estado) y de otros adoptantes |
+| `solicitudes` | Hogares versionados, 17 solicitudes en los 5 estados (adopción y tránsito), seguimientos post-adopción en distintos tramos, una pendiente vencida para el cron |
+| `chats` | 7 conversaciones: refugio/adoptante, sin mensajes, contacto de baja, solo foto, no leídos |
+| `comunidad` | Campañas con donaciones repartidas por mes, reseñas, reportes de moderación, animales perdidos |
+
+Cuentas (contraseña `Pethood123` para todas):
+
+| Email | Quién es | Para qué sirve |
+| --- | --- | --- |
+| `adoptante@pethood.test` | Ana Gomez | Adoptante principal: feed, favoritos, solicitudes, seguimientos, chats, mis mascotas |
+| `refugio@pethood.test` | Bruno Diaz (Refugio Patitas) | Lado refugio: solicitudes recibidas, seguimientos, chats, dashboard refugio |
+| `admin@pethood.test` | Admin | Panel web-admin: dashboard, usuarios, refugios, moderación |
+| `huellitas@pethood.test` | Nico Peralta (Huellitas del Sur) | Segundo refugio |
+| `carla@` / `martin@` / `elena@` / `lucia@pethood.test` | Otros adoptantes | Solicitudes y chats con los refugios |
+| `multirol@pethood.test` | Bruna Salvatierra | Adoptante + Refugio (roles múltiples) |
+
+Los mensajes de chat y las fechas de solicitudes/seguimientos se calculan relativo al momento
+de correrlo, así los tramos ("Hace 3 min", "Ayer", pedido vencido, próximo aviso) se ven
+siempre igual sin importar cuándo se siembre.
 
 ## Documentación
 
@@ -185,7 +218,7 @@ npm test             # Ejecutar tests
 
 ## Equipo
 
-Proyecto académico - **UTN Regional Mendoza**, Ingeniería en Sistemas, Grupo N°09.
+Proyecto académico - **UTN Regional Mendoza**, Ingeniería en Sistemas.
 
 - Camila Fabián
 - Agustín Leyes

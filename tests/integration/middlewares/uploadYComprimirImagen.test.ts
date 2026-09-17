@@ -51,7 +51,11 @@ describe('uploadImagen + comprimirImagen (integración)', () => {
 
   it('rechaza un archivo que no es imagen con 400 y el formato de error del proyecto', async () => {
     const form = new FormData();
-    form.append('imagen', new Blob([Buffer.from('no es una imagen')], { type: 'text/plain' }), 'archivo.txt');
+    form.append(
+      'imagen',
+      new Blob([Buffer.from('no es una imagen')], { type: 'text/plain' }),
+      'archivo.txt',
+    );
 
     const res = await fetch(`${baseUrl}/test`, { method: 'POST', body: form });
     const body = (await res.json()) as { error: { codigo: string; mensaje: string } };

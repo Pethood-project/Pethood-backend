@@ -17,9 +17,12 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 |---|---|---|---|
 | 001 | Gestión de Perfiles y Autenticación | 1 | BORRADOR |
 | 002 | Publicación de Mascotas | 2 | pendiente |
-| 003 | Adopción y Favoritos | 3 | pendiente |
+| 003 | Adopción y Favoritos | 3 | BORRADOR |
 | 004 | Chat y Notificaciones | 4 | pendiente |
-| 005 | Historia Clínica y Seguimiento | 5 | pendiente |
+| 005 | Historia Clínica (HU-8.1 a HU-8.4) | 5 | APROBADA |
 | 006 | Hogares de Tránsito y Reputación | 6 | pendiente |
 | 007 | Campañas, Padrinazgos y Perdidos | 7 | pendiente |
 | 008 | Panel Admin y Moderación | 8 | pendiente |
+| 009 | Dashboards y Reportes (Admin) | 12 | APROBADA |
+| 010 | Dashboard de Refugio | 12 | APROBADA |
+| 011 | Seguimiento Post-Adopción (HU-9.1, HU-9.2) | 7 | APROBADA |

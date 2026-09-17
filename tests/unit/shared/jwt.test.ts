@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { describe, expect, it } from 'vitest';
+import { env } from '../../../src/config/env';
 import { firmarToken, refrescarToken, verificarToken } from '../../../src/shared/jwt';
 
 describe('jwt', () => {
@@ -13,6 +14,15 @@ describe('jwt', () => {
 
   it('verificarToken tira si el token está corrompido', () => {
     expect(() => verificarToken('esto-no-es-un-jwt')).toThrow();
+  });
+
+  it('verificarToken tira si el token expiró', () => {
+    const vencido = jwt.sign(
+      { usuarioId: 1, roles: [], exp: Math.floor(Date.now() / 1000) - 10 },
+      env.JWT_SECRET,
+    );
+
+    expect(() => verificarToken(vencido)).toThrow();
   });
 
   it('verificarToken tira si el token fue firmado con otro secreto', () => {

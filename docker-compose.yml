@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: docker.io/postgres:16-alpine
     container_name: pethood-db
     restart: unless-stopped
     environment:

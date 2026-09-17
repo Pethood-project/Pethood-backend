@@ -1,6 +1,8 @@
 import type { Server } from 'node:http';
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { env } from '../../../src/config/env';
 import { autenticar } from '../../../src/middlewares/auth';
 import { errorHandler } from '../../../src/middlewares/errorHandler';
 import { requiereRol } from '../../../src/middlewares/roles';
@@ -42,6 +44,21 @@ describe('autenticar + requiereRol (integración)', () => {
   it('con token inválido responde 401 NO_AUTENTICADO', async () => {
     const res = await fetch(`${baseUrl}/privado`, {
       headers: { Authorization: 'Bearer esto-no-es-un-token' },
+    });
+    const body = (await res.json()) as { error: { codigo: string } };
+
+    expect(res.status).toBe(401);
+    expect(body.error.codigo).toBe('NO_AUTENTICADO');
+  });
+
+  it('con token expirado responde 401 NO_AUTENTICADO', async () => {
+    const token = jwt.sign(
+      { usuarioId: 1, roles: ['Administrador'], exp: Math.floor(Date.now() / 1000) - 10 },
+      env.JWT_SECRET,
+    );
+
+    const res = await fetch(`${baseUrl}/privado`, {
+      headers: { Authorization: `Bearer ${token}` },
     });
     const body = (await res.json()) as { error: { codigo: string } };
 
