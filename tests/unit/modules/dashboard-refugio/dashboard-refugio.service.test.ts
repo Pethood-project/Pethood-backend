@@ -281,9 +281,7 @@ describe('prepararExportEntidad', () => {
     const { headers, filasGeneradas } = await filasDe('solicitudes');
 
     expect(headers).toEqual(['id', 'mascota', 'tipoSolicitud', 'estado', 'fechaAlta']);
-    expect(filasGeneradas).toEqual([
-      [5, 'Michi', 'Adopcion', 'Aprobada', new Date(2026, 3, 1)],
-    ]);
+    expect(filasGeneradas).toEqual([[5, 'Michi', 'Adopcion', 'Aprobada', new Date(2026, 3, 1)]]);
   });
 
   it('exporta donaciones del refugio en el período', async () => {
