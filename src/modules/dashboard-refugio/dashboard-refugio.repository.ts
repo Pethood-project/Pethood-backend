@@ -152,3 +152,49 @@ export function paginaSolicitudesParaExport(
     },
   });
 }
+
+/** Snapshot igual que contarMascotasPorEstado: no se filtra por período, son las mascotas actuales del refugio. */
+export function paginaMascotasParaExport(
+  refugioId: number,
+  cursorId: number | undefined,
+  take: number,
+) {
+  return prisma.mascota.findMany({
+    where: {
+      fechaBaja: null,
+      refugioId,
+      ...(cursorId ? { id: { gt: cursorId } } : {}),
+    },
+    orderBy: { id: 'asc' },
+    take,
+    include: {
+      raza: { include: { especie: true } },
+      historicoEstados: {
+        where: { fechaBaja: null },
+        include: { estadoMascota: true },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+    },
+  });
+}
+
+export function paginaDonacionesParaExport(
+  refugioId: number,
+  desde: Date,
+  hasta: Date,
+  cursorId: number | undefined,
+  take: number,
+) {
+  return prisma.donacion.findMany({
+    where: {
+      fechaBaja: null,
+      fechaAlta: { gte: desde, lte: hasta },
+      campania: { refugioId, fechaBaja: null },
+      ...(cursorId ? { id: { gt: cursorId } } : {}),
+    },
+    orderBy: { id: 'asc' },
+    take,
+    include: { campania: true, usuario: true },
+  });
+}

@@ -14,7 +14,7 @@ dashboardRefugioRouter.get(
 );
 
 dashboardRefugioRouter.get(
-  '/dashboard/exportar',
+  '/dashboard/exportar/:entidad',
   autenticar,
   requiereRol(ROL_API.MIEMBRO_REFUGIO),
   controller.exportar,

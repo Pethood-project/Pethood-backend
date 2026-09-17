@@ -16,3 +16,10 @@ export const periodoDashboardSchema = z
   });
 
 export type PeriodoDashboardInput = z.infer<typeof periodoDashboardSchema>;
+
+// Export por entidad (mismo patrón que dashboard-admin.dto.ts), scopeado a refugioId.
+export const ENTIDADES_EXPORTABLES_REFUGIO = ['mascotas', 'solicitudes', 'donaciones'] as const;
+
+export type EntidadExportableRefugio = (typeof ENTIDADES_EXPORTABLES_REFUGIO)[number];
+
+export const entidadExportRefugioSchema = z.enum(ENTIDADES_EXPORTABLES_REFUGIO);
