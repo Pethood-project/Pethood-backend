@@ -1,7 +1,7 @@
 # Spec 010 — Dashboard Refugio (HU-14.2)
 
 **Estado:** APROBADA
-**Sprint:** 12 (Fase 12, construida en paralelo sobre datos de prueba — igual criterio que spec 009) · **Responsable:** nachocastro123@gmail.com · **Última actualización:** 2026-08-24
+**Sprint:** 12 (Fase 12, construida en paralelo sobre datos de prueba — igual criterio que spec 009) · **Responsable:** nachocastro123@gmail.com · **Última actualización:** 2026-09-17
 
 ## 1. Objetivo
 
@@ -34,7 +34,7 @@ Ninguna nueva — vistas de solo lectura sobre `Usuario`, `Refugio`, `Mascota`, 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | GET | /api/v1/refugio/dashboard?desde=YYYY-MM&hasta=YYYY-MM | JWT, rol Refugio | Métricas agregadas del refugio del usuario autenticado, para el rango de meses dado |
-| GET | /api/v1/refugio/dashboard/exportar?desde=YYYY-MM&hasta=YYYY-MM | JWT, rol Refugio | CSV de las solicitudes recibidas por el refugio en el período, generado por streams |
+| GET | /api/v1/refugio/dashboard/exportar/:entidad?desde=YYYY-MM&hasta=YYYY-MM | JWT, rol Refugio | CSV de una entidad del refugio (`mascotas`, `solicitudes`, `donaciones`), generado por streams |
 
 `desde`/`hasta` son meses calendario en formato `YYYY-MM` (igual formato que produce `<input type="month">` en el front), inclusive en ambos extremos. Si faltan, están mal formados, o `desde > hasta` → `400 PERIODO_INVALIDO`.
 
@@ -84,13 +84,21 @@ GET /api/v1/refugio/dashboard?desde=2026-03&hasta=2026-08
 `animalesAdoptados` = cantidad de `Mascota` del refugio cuyo estado vigente (`MascotaEstado` sin baja, más reciente) es `Adoptado` **ahora mismo** — snapshot, igual criterio y misma fuente que `mascotasPorEstado.Adoptado` y que `animalesEnRefugio`, no depende de `desde`/`hasta`. `solicitudesCreadas` y `solicitudesPorEstado` cuentan solicitudes cuya `fechaAlta` cae en el período. `montoDonado` = suma de `Donacion.monto` con `fechaAlta` en el período ("declarado", mismo gap documentado en spec 009 §3 — `Donacion` no tiene campo de confirmación).
 
 ```
-GET /api/v1/refugio/dashboard/exportar?desde=2026-03&hasta=2026-08
+GET /api/v1/refugio/dashboard/exportar/solicitudes?desde=2026-03&hasta=2026-08
 → 200, Content-Type: text/csv, streamed
 ```
 
-CSV: una fila por `Solicitud` recibida por el refugio en el período (columnas: `id, mascota, tipoSolicitud, estado, fechaAlta`), streamed por cursor igual que spec 009 §6.4. No es por-entidad como en admin: el refugio exporta un único reporte consolidado del período.
+Por-entidad, igual patrón que spec 009 (`/admin/dashboard/exportar/:entidad`), scopeado al `refugioId` del usuario autenticado — nunca recibe `refugioId` como parámetro del cliente. Streamed por cursor igual que spec 009 §6.4. Entidades soportadas y columnas:
 
-Errores: `403 { error: { codigo: "ROL_NO_AUTORIZADO", ... } }` si no es Refugio. `403 { error: { codigo: "SIN_REFUGIO", ... } }` si el usuario Refugio no tiene `refugioId` asignado. `400 { error: { codigo: "PERIODO_INVALIDO", ... } }` si el rango de meses es inválido.
+| Entidad | Columnas | ¿Filtra por `desde`/`hasta`? |
+|---|---|---|
+| `mascotas` | `id, nombre, especie, raza, estado, fechaAlta` | No — snapshot, mismas mascotas que `mascotasPorEstado` |
+| `solicitudes` | `id, mascota, tipoSolicitud, estado, fechaAlta` | Sí — `fechaAlta` en el período |
+| `donaciones` | `id, donante, campania, monto, fechaAlta` | Sí — `fechaAlta` en el período |
+
+`desde`/`hasta` siguen siendo obligatorios en la URL para las tres entidades (mismo query param que el dashboard, para no tener dos formas de armar el link de descarga en el front); `mascotas` los recibe pero no los usa para filtrar, igual criterio snapshot que en el dashboard.
+
+Errores: `403 { error: { codigo: "ROL_NO_AUTORIZADO", ... } }` si no es Refugio. `403 { error: { codigo: "SIN_REFUGIO", ... } }` si el usuario Refugio no tiene `refugioId` asignado. `400 { error: { codigo: "PERIODO_INVALIDO", ... } }` si el rango de meses es inválido. `400 { error: { codigo: "ENTIDAD_INVALIDA", ... } }` si `:entidad` no es `mascotas`/`solicitudes`/`donaciones`.
 
 ## 6. Pantallas (frontend)
 
@@ -115,13 +123,15 @@ Errores: `403 { error: { codigo: "ROL_NO_AUTORIZADO", ... } }` si no es Refugio.
 - [ ] Given soy Refugio sin `refugioId` asignado, When pido el dashboard, Then recibo 403 `SIN_REFUGIO`.
 - [ ] Given mi refugio no tiene datos operativos en el período, When pido el dashboard, Then los KPIs son 0 (no error) — habilita GUI-40.
 - [ ] Given pido `desde`/`hasta` inválidos o `desde > hasta`, When llamo el endpoint, Then recibo 400 `PERIODO_INVALIDO`.
-- [ ] Given pido exportar, When la descarga corre, Then el CSV tiene headers correctos y solo filas de solicitudes de mi refugio en el período, sin cargar el dataset completo en memoria.
+- [ ] Given pido exportar una entidad soportada (`mascotas`, `solicitudes` o `donaciones`), When la descarga corre, Then el CSV tiene headers correctos y solo filas de mi refugio (filtradas por período cuando corresponde), sin cargar el dataset completo en memoria.
+- [ ] Given pido exportar una entidad no soportada, When llamo el endpoint, Then recibo 400 `ENTIDAD_INVALIDA`.
 
 ## 9. Casos borde y errores
 
 - Refugio sin datos en el período → KPIs en 0, export con solo headers.
 - Rol insuficiente → 403, sin filtrar info parcial de otro refugio.
 - Período mal formado → 400.
+- Entidad de export inexistente/mal tipeada → 400 `ENTIDAD_INVALIDA`.
 
 ## 10. Notas y decisiones
 
@@ -129,3 +139,4 @@ Errores: `403 { error: { codigo: "ROL_NO_AUTORIZADO", ... } }` si no es Refugio.
 - 2026-09-14: se suman `mascotasPorEstado`, `mascotasPorAntiguedad` y `kpis.diasPromedioEnRefugio` (idea del equipo: priorizar difusión de los animales "estancados" en el refugio) y `kpis.solicitudesDemoradas`/`solicitudesDemoradasDetalle` (alertar solicitudes sin responder hace más de 5 días), a pedido de nachocastro123@gmail.com al revisar qué funcionalidades del Dashboard Admin (spec 009) le faltaban a este dashboard. Ninguna entidad ni columna nueva: todo sale de `MascotaEstado.fechaAlta` y `SolicitudEstado.fechaAlta`, mismo criterio de agregación que el resto de la spec. `UMBRAL_DEMORA_DIAS = 5` es una constante del `service.ts`, no configurable todavía.
 - 2026-09-14 (más tarde, mismo día): se reemplazan `mascotasPorAntiguedad` y `kpis.diasPromedioEnRefugio` por `publicacionesPorAntiguedad` y `publicacionesDemasiadoAntiguas`, a pedido de nachocastro123@gmail.com — la antigüedad útil para el refugio es "hace cuánto está publicada la mascota" (`Publicacion.fechaAlta`), no la antigüedad del estado de la `Mascota` en sí, y hacía falta poder identificar puntualmente qué mascotas llevan mucho tiempo publicadas (no solo un conteo agregado) para poder actuar (renovar foto/descripción, bajar el precio de adopción simbólico, etc.). Buckets nuevos `0-15 días`/`15-30 días`/`30-60 días`/`+60 días` (antes `0-7`/`8-30`/`31-60`/`+60`, pensados para la mascota). `publicacionesDemasiadoAntiguas` usa el mismo umbral que separa el bucket `+60 días` (constante `UMBRAL_PUBLICACION_ANTIGUA_DIAS = 60`) y tope `TOPE_DETALLE_PUBLICACIONES_ANTIGUAS = 10`, ambas en `service.ts`, no configurables todavía. Sigue sin agregar entidades ni columnas: sale de `Publicacion.fechaAlta`/`fechaBaja` ya existentes.
 - 2026-09-14 (bugfix, mismo día): `kpis.animalesAdoptados` contaba mal — sumaba `Solicitud` cuyo estado vigente pasó a `Aprobada` **dentro del período** elegido, en vez de mascotas del refugio actualmente adoptadas. Reportado por nachocastro123@gmail.com al ver que la tarjeta mostraba un número que en realidad correspondía a mascotas `Disponible`. Se corrige para que sea snapshot: cuenta `Mascota` del refugio con estado vigente `Adoptado` ahora mismo, tomado del mismo `mascotasPorEstado.Adoptado` que ya se calculaba para el gráfico de barras (sin query nueva). §5 y §7 actualizados.
+- 2026-09-17: se reemplaza el export único de solicitudes por export **por entidad** (`mascotas`, `solicitudes`, `donaciones`), a pedido de nachocastro123@gmail.com para que el refugio pueda descargar todos los paneles de su dashboard y no solo las solicitudes — mismo patrón que ya tenía Admin en spec 009 (`/exportar/:entidad`), ahora scopeado a `refugioId` en vez de global. `mascotas` es snapshot (no filtra por `desde`/`hasta`, igual criterio que `mascotasPorEstado`); `solicitudes` y `donaciones` sí filtran por `fechaAlta` en el período, igual que antes. Se agrega el error `ENTIDAD_INVALIDA` (ya existía en spec 009, ahora también acá). Ninguna entidad ni columna nueva en el modelo de datos. §5 y §8 actualizados.

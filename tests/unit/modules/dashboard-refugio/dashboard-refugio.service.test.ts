@@ -11,6 +11,8 @@ vi.mock('../../../../src/modules/dashboard-refugio/dashboard-refugio.repository'
   listarDonaciones: vi.fn(),
   sumarObjetivoCampaniasActivas: vi.fn(),
   paginaSolicitudesParaExport: vi.fn(),
+  paginaMascotasParaExport: vi.fn(),
+  paginaDonacionesParaExport: vi.fn(),
   listarEstadosMascota: vi.fn(),
   contarMascotasPorEstado: vi.fn(),
   listarPublicacionesActivas: vi.fn(),
@@ -18,7 +20,10 @@ vi.mock('../../../../src/modules/dashboard-refugio/dashboard-refugio.repository'
 }));
 
 import * as repo from '../../../../src/modules/dashboard-refugio/dashboard-refugio.repository';
-import { obtenerDashboard } from '../../../../src/modules/dashboard-refugio/dashboard-refugio.service';
+import {
+  obtenerDashboard,
+  prepararExportEntidad,
+} from '../../../../src/modules/dashboard-refugio/dashboard-refugio.service';
 
 const mockedRepo = vi.mocked(repo);
 
@@ -221,5 +226,83 @@ describe('obtenerDashboard', () => {
 
     expect(dashboard.kpis.solicitudesDemoradas).toBe(1);
     expect(dashboard.solicitudesDemoradasDetalle).toEqual([{ id: 2, mascota: 'Michi', dias: 12 }]);
+  });
+});
+
+describe('prepararExportEntidad', () => {
+  async function filasDe(entidad: 'mascotas' | 'solicitudes' | 'donaciones') {
+    const { headers, filas } = await prepararExportEntidad(10, entidad, PERIODO);
+    const filasGeneradas: unknown[][] = [];
+    for await (const fila of filas()) filasGeneradas.push(fila);
+    return { headers, filasGeneradas };
+  }
+
+  it('lanza SIN_REFUGIO si el usuario no tiene refugio asignado, sin tocar el repo de export', async () => {
+    mockedRepo.buscarUsuarioConRefugio.mockResolvedValue({ id: 10, refugioId: null } as never);
+
+    await expect(prepararExportEntidad(10, 'mascotas', PERIODO)).rejects.toMatchObject({
+      codigo: 'SIN_REFUGIO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('exporta mascotas del refugio sin filtrar por período (snapshot)', async () => {
+    mockedRepo.paginaMascotasParaExport.mockResolvedValueOnce([
+      {
+        id: 1,
+        nombre: 'Firulais',
+        fechaAlta: new Date(2026, 0, 1),
+        raza: { nombre: 'Labrador', especie: { nombre: 'Perro' } },
+        historicoEstados: [{ estadoMascota: { nombre: 'Disponible' } }],
+      },
+    ] as never);
+    mockedRepo.paginaMascotasParaExport.mockResolvedValueOnce([]);
+
+    const { headers, filasGeneradas } = await filasDe('mascotas');
+
+    expect(headers).toEqual(['id', 'nombre', 'especie', 'raza', 'estado', 'fechaAlta']);
+    expect(filasGeneradas).toEqual([
+      [1, 'Firulais', 'Perro', 'Labrador', 'Disponible', new Date(2026, 0, 1)],
+    ]);
+    expect(mockedRepo.paginaMascotasParaExport).toHaveBeenCalledWith(1, undefined, 500);
+  });
+
+  it('exporta solicitudes del refugio en el período', async () => {
+    mockedRepo.paginaSolicitudesParaExport.mockResolvedValueOnce([
+      {
+        id: 5,
+        fechaAlta: new Date(2026, 3, 1),
+        publicacion: { mascota: { nombre: 'Michi' } },
+        tipoSolicitud: { nombre: 'Adopcion' },
+        historicoEstados: [{ estadoSolicitud: { nombre: 'Aprobada' } }],
+      },
+    ] as never);
+    mockedRepo.paginaSolicitudesParaExport.mockResolvedValueOnce([]);
+
+    const { headers, filasGeneradas } = await filasDe('solicitudes');
+
+    expect(headers).toEqual(['id', 'mascota', 'tipoSolicitud', 'estado', 'fechaAlta']);
+    expect(filasGeneradas).toEqual([
+      [5, 'Michi', 'Adopcion', 'Aprobada', new Date(2026, 3, 1)],
+    ]);
+  });
+
+  it('exporta donaciones del refugio en el período', async () => {
+    mockedRepo.paginaDonacionesParaExport.mockResolvedValueOnce([
+      {
+        id: 7,
+        monto: 5000,
+        fechaAlta: new Date(2026, 4, 1),
+        usuario: { nombre: 'Ana', apellido: 'Gómez' },
+        campania: { titulo: 'Vacunación 2026' },
+      },
+    ] as never);
+    mockedRepo.paginaDonacionesParaExport.mockResolvedValueOnce([]);
+
+    const { headers, filasGeneradas } = await filasDe('donaciones');
+
+    expect(headers).toEqual(['id', 'donante', 'campania', 'monto', 'fechaAlta']);
+    expect(filasGeneradas).toEqual([
+      [7, 'Ana Gómez', 'Vacunación 2026', '5000', new Date(2026, 4, 1)],
+    ]);
   });
 });

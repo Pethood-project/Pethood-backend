@@ -1,6 +1,6 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { finDeMes, inicioDeMes, parsearMesISO } from '../../shared/validation/dates';
-import type { PeriodoDashboardInput } from './dashboard-refugio.dto';
+import type { EntidadExportableRefugio, PeriodoDashboardInput } from './dashboard-refugio.dto';
 import * as repo from './dashboard-refugio.repository';
 
 /** Solicitud sin resolver todavía (mismo criterio que "abiertas" en el repository). */
@@ -281,10 +281,36 @@ export async function obtenerDashboard(
   };
 }
 
-// ─────────────── EXPORT CSV ───────────────
+// ─────────────── EXPORT CSV (por entidad, mismo patrón que dashboard-admin.service.ts) ───────────────
 
 const FILAS_POR_PAGINA = 500;
-const HEADERS_EXPORT_SOLICITUDES = ['id', 'mascota', 'tipoSolicitud', 'estado', 'fechaAlta'];
+
+const HEADERS_EXPORT: Record<EntidadExportableRefugio, string[]> = {
+  mascotas: ['id', 'nombre', 'especie', 'raza', 'estado', 'fechaAlta'],
+  solicitudes: ['id', 'mascota', 'tipoSolicitud', 'estado', 'fechaAlta'],
+  donaciones: ['id', 'donante', 'campania', 'monto', 'fechaAlta'],
+};
+
+/** Snapshot, no depende del período — mismo criterio que mascotasPorEstado en obtenerDashboard. */
+async function* filasMascotas(refugioId: number) {
+  let cursorId: number | undefined;
+  for (;;) {
+    const pagina = await repo.paginaMascotasParaExport(refugioId, cursorId, FILAS_POR_PAGINA);
+    if (pagina.length === 0) return;
+    for (const m of pagina) {
+      yield [
+        m.id,
+        m.nombre,
+        m.raza.especie.nombre,
+        m.raza.nombre,
+        m.historicoEstados[0]?.estadoMascota.nombre ?? '',
+        m.fechaAlta,
+      ];
+    }
+    cursorId = pagina[pagina.length - 1]!.id;
+    if (pagina.length < FILAS_POR_PAGINA) return;
+  }
+}
 
 async function* filasSolicitudes(refugioId: number, desde: Date, hasta: Date) {
   let cursorId: number | undefined;
@@ -311,17 +337,52 @@ async function* filasSolicitudes(refugioId: number, desde: Date, hasta: Date) {
   }
 }
 
+async function* filasDonaciones(refugioId: number, desde: Date, hasta: Date) {
+  let cursorId: number | undefined;
+  for (;;) {
+    const pagina = await repo.paginaDonacionesParaExport(
+      refugioId,
+      desde,
+      hasta,
+      cursorId,
+      FILAS_POR_PAGINA,
+    );
+    if (pagina.length === 0) return;
+    for (const d of pagina) {
+      yield [
+        d.id,
+        `${d.usuario.nombre} ${d.usuario.apellido}`,
+        d.campania.titulo,
+        d.monto.toString(),
+        d.fechaAlta,
+      ];
+    }
+    cursorId = pagina[pagina.length - 1]!.id;
+    if (pagina.length < FILAS_POR_PAGINA) return;
+  }
+}
+
 /**
  * Resuelve permisos y período ANTES de que el controller empiece a escribir la respuesta CSV
  * (una vez que res.write() corrió no se puede volver a un 403/400 JSON) — mismo motivo por el
  * que dashboard-admin valida la entidad antes de setear headers.
  */
-export async function prepararExportSolicitudes(usuarioId: number, periodo: PeriodoDashboardInput) {
+export async function prepararExportEntidad(
+  usuarioId: number,
+  entidad: EntidadExportableRefugio,
+  periodo: PeriodoDashboardInput,
+) {
   const refugio = await exigirRefugioDeUsuario(usuarioId);
   const { desde, hasta } = rangoDelPeriodo(periodo);
 
+  const filasPorEntidad: Record<EntidadExportableRefugio, () => AsyncGenerator<unknown[]>> = {
+    mascotas: () => filasMascotas(refugio.id),
+    solicitudes: () => filasSolicitudes(refugio.id, desde, hasta),
+    donaciones: () => filasDonaciones(refugio.id, desde, hasta),
+  };
+
   return {
-    headers: HEADERS_EXPORT_SOLICITUDES,
-    filas: () => filasSolicitudes(refugio.id, desde, hasta),
+    headers: HEADERS_EXPORT[entidad],
+    filas: filasPorEntidad[entidad],
   };
 }
