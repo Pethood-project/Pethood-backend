@@ -46,11 +46,15 @@ vacunacion: "true"              // solo en POST; no es editable en PATCH
 titulo: "Control anual"         // obligatorio en POST, opcional en PATCH
 descripcion: "..."              // obligatorio en POST, opcional en PATCH
 documento: <file>               // opcional, imagen (jpg/png/webp) o pdf, ≤5MB
+rotacion: "90"                  // opcional, solo si documento es imagen: 90 | 180 | 270
+cropX / cropY / cropWidth / cropHeight: "0" / "0" / "800" / "600"  // opcional, los cuatro juntos o ninguno; px sobre la imagen original
 ```
 
 Errores posibles: `VALIDACION` (400), `NO_ENCONTRADO` (404, mascota o registro inexistente),
 `NO_AUTORIZADO` (403, sin asociación con la mascota o sin permiso de edición),
-`ARCHIVO_INVALIDO` / `ARCHIVO_DEMASIADO_GRANDE` (400, documento fuera de norma).
+`ARCHIVO_INVALIDO` / `ARCHIVO_DEMASIADO_GRANDE` (400, documento fuera de norma),
+`RECORTE_INVALIDO` (400, el recorte excede el tamaño de la imagen). `rotacion` y el recorte se
+ignoran silenciosamente si `documento` es un pdf: solo aplican a imagen.
 
 ## 5. Pantallas (frontend)
 

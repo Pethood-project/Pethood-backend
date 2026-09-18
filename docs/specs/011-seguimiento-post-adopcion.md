@@ -123,7 +123,9 @@ Errores: `404 NO_ENCONTRADO` si el seguimiento no existe o su solicitud no está
 
 ### POST /seguimientos/:id/actualizacion
 
-`multipart/form-data`: `descripcion` (texto) + `foto` (imagen ≤5 MB, jpg/png/webp).
+`multipart/form-data`: `descripcion` (texto) + `foto` (imagen ≤5 MB, jpg/png/webp). Opcional:
+`rotacion` (`90`|`180`|`270`) y/o `cropX`/`cropY`/`cropWidth`/`cropHeight` (enteros ≥0, px sobre
+la `foto` original, los cuatro juntos o ninguno) para recortar/rotar antes de comprimir.
 
 ```json
 { "mensaje": "seguimiento cargado con exito", "seguimiento": { "id": 32, "estado": "COMPLETADO", "…": "…" } }
@@ -134,6 +136,7 @@ Errores: `404 NO_ENCONTRADO` si el seguimiento no existe o su solicitud no está
 | 400 | `VALIDACION` | `Completar descripción` | HU-9.1, texto literal |
 | 400 | `VALIDACION` | `Limite de caracteres superado` | HU-9.1, texto literal |
 | 400 | `VALIDACION` | `Adjuntar imagen de prueba` | HU-9.1, texto literal |
+| 400 | `RECORTE_INVALIDO` | `El recorte excede el tamaño de la imagen` | recorte fuera de los límites de la foto |
 | 403 | `NO_AUTORIZADO` | `Solo quien tiene la mascota a su cargo puede subir la actualización` | solo el adoptante responde |
 | 409 | `SEGUIMIENTO_VENCIDO` | `El plazo de 48 horas para responder este seguimiento venció` | HU-9.1 |
 | 409 | `SEGUIMIENTO_COMPLETADO` | `Este seguimiento ya fue completado` | responder dos veces |
