@@ -124,6 +124,7 @@ Toda regla de validación **genérica** (o sea, que podría necesitar más de un
 | `dates.ts` | Parseo y comparación de fechas: `parsearFecha`, `esFutura`, `esPasada`, `validarFechaPasada`, `aFechaISO` | No |
 | `numbers.ts` | `parsearDecimal` (acepta coma o punto), `parsearId` | No |
 | `text.ts` | `validarTexto` (trim + longitudes), `mensajeLongitud` | No |
+| `imagen.ts` | `parsearRotacion` (0\|90\|180\|270), `parsearRecorte` (cropX/Y/Width/Height en px sobre la imagen original) | No |
 | `schemas.ts` | Adaptador que envuelve lo anterior en schemas Zod componibles | Sí |
 
 **Toda la lógica está en las funciones puras**; `schemas.ts` es solo una capa fina encima. Así se testean sin Zod y el día que cambie la librería de validación se toca un solo archivo.

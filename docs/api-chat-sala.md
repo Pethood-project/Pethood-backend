@@ -172,6 +172,8 @@ Dos formatos, según lleve foto o no:
 |---|---|---|
 | `contenido` | texto, ≤1000 caracteres | Solo si no hay `foto` |
 | `foto` | jpg/png/webp, ≤5 MB | Solo si no hay `contenido` |
+| `rotacion` | `90` \| `180` \| `270` | No — sin rotación por defecto |
+| `cropX`, `cropY`, `cropWidth`, `cropHeight` | enteros ≥0, en píxeles sobre la `foto` original | No — los cuatro juntos o ninguno |
 
 **`application/json`** (solo texto):
 
@@ -181,7 +183,7 @@ Dos formatos, según lleve foto o no:
 
 **Texto y foto pueden ir juntos** — el pie de foto es un mensaje válido. Lo que no se acepta es un mensaje sin ninguno de los dos.
 
-La foto se comprime en el servidor (`sharp`, ancho máx. 1600px) antes de persistirse, igual que en el alta de mascota.
+La foto se recorta (si vino `cropX`/`cropY`/`cropWidth`/`cropHeight`) y rota (si vino `rotacion`) antes de comprimirse en el servidor (`sharp`, ancho máx. 1600px), igual que en el alta de mascota. El recorte se aplica primero y sus coordenadas son siempre sobre la imagen original que se subió, no sobre una ya rotada. `RECORTE_INVALIDO` (400) si el rectángulo excede la imagen; `VALIDACION` (400) si `rotacion` no es 0/90/180/270 o si el recorte viene incompleto.
 
 ### Respuesta 201
 
