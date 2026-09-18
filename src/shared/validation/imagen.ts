@@ -10,8 +10,7 @@ export type RotacionValida = 0 | 90 | 180 | 270;
 const ROTACIONES_VALIDAS: readonly RotacionValida[] = [0, 90, 180, 270];
 
 export type ResultadoRotacion =
-  | { valido: true; valor: RotacionValida }
-  | { valido: false; error: string };
+  { valido: true; valor: RotacionValida } | { valido: false; error: string };
 
 /**
  * Campo `rotacion` opcional del multipart. Ausente/vacío = sin rotación. Solo se admiten
@@ -39,8 +38,7 @@ export interface Recorte {
 }
 
 export type ResultadoRecorte =
-  | { valido: true; valor: Recorte | null }
-  | { valido: false; error: string };
+  { valido: true; valor: Recorte | null } | { valido: false; error: string };
 
 const CAMPOS_RECORTE = ['cropX', 'cropY', 'cropWidth', 'cropHeight'] as const;
 
