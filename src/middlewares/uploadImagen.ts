@@ -68,6 +68,26 @@ export function uploadImagenOpcional(campo: string): RequestHandler {
 }
 
 /**
+ * Igual que `uploadImagenOpcional` pero para varias imágenes bajo el mismo campo: deja pasar
+ * el JSON sin tocar y sólo activa multer cuando el cuerpo es multipart.
+ *
+ * Lo usa el envío de mensajes (HU-5.2), donde un mensaje puede no llevar ninguna foto,
+ * llevar una o llevar hasta el máximo.
+ */
+export function uploadImagenesOpcional(campo: string, maximo: number): RequestHandler {
+  const middleware = uploadImagenes(campo, maximo);
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    const contentType = req.headers['content-type'] ?? '';
+    if (contentType.toLowerCase().includes('multipart/form-data')) {
+      middleware(req, res, next);
+      return;
+    }
+    next();
+  };
+}
+
+/**
  * Upload de una única imagen. La deja en memoria (`req.file.buffer`) para que
  * comprimirImagen la procese antes de que el controller la persista.
  */

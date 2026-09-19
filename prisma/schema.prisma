@@ -30,6 +30,22 @@ enum GeneroMascota {
   HEMBRA
 }
 
+// Qué es un mensaje del chat (HU-5.2).
+//
+// TEXTO es todo lo que escribe una persona, con o sin fotos. SOLICITUD es la tarjeta que
+// PetHood inserta en la sala cuando se envía una solicitud de adopción o tránsito: la emite
+// el usuario SISTEMA y lleva solicitud_id, para que el cliente pinte el estado y la mascota
+// sin pedir nada más.
+//
+// Es un enum de Prisma y no una tabla de catálogo porque son valores del dominio que el
+// código ramifica, como GeneroMascota, y no una lista que el administrador edite.
+enum TipoMensaje {
+  TEXTO
+  SOLICITUD
+
+  @@map("tipo_mensaje")
+}
+
 enum TamanioMascota {
   PEQUENO
   MEDIANO
@@ -475,6 +491,8 @@ model Solicitud {
 
   historicoEstados SolicitudEstado[]
   seguimientos     Seguimiento[]
+  chats            Chat[]
+  mensajes         Mensaje[]
 
   @@map("solicitud")
 }
@@ -610,12 +628,18 @@ model Chat {
   tipo      String? @map("chat_tipo") // valores sin confirmar — ver nota en MODELO_DATOS.md
   refugioId Int?    @map("refugio_id")
 
+  // Solicitud que habilitó la sala (CONSTITUTION §7: no hay chat sin interacción previa).
+  // Nullable: las salas de coordinación por mascota perdida (HU-13.2) y las anteriores a
+  // esta HU no salen de una solicitud.
+  solicitudId Int? @map("solicitud_id")
+
   usuarioAlta Int       @map("chat_usuario_alta")
   fechaAlta   DateTime  @default(now()) @map("chat_fecha_alta")
   usuarioBaja Int?      @map("chat_usuario_baja")
   fechaBaja   DateTime? @map("chat_fecha_baja")
 
-  refugio Refugio? @relation(fields: [refugioId], references: [id])
+  refugio   Refugio?   @relation(fields: [refugioId], references: [id])
+  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
 
   participantes UsuarioChat[]
   mensajes      Mensaje[]
@@ -633,6 +657,16 @@ model UsuarioChat {
   id        Int @id @default(autoincrement()) @map("usuario_chat_id")
   chatId    Int @map("chat_id")
   usuarioId Int @map("usuario_id")
+
+  // Hasta qué momento este participante tiene la sala leída y entregada. Un mensaje ajeno
+  // cuenta como no leído si su `mensaje_fecha_alta` es posterior a `ultima_lectura`.
+  //
+  // Van acá y no en `Mensaje` porque el estado es POR PARTICIPANTE: `mensaje_leido` es un
+  // booleano único por mensaje, sin dueño, y con tres o más personas en la sala el primero
+  // que abre le baja el badge al resto. Además es una sola escritura por sala abierta en
+  // lugar de un UPDATE masivo sobre `mensaje`. Nullable: nunca leyó ni recibió nada.
+  ultimaLectura DateTime? @map("usuario_chat_ultima_lectura")
+  ultimaEntrega DateTime? @map("usuario_chat_ultima_entrega")
 
   usuarioAlta         Int       @map("usuario_chat_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("usuario_chat_fecha_alta")
@@ -664,19 +698,37 @@ model UsuarioChat {
 // dos (los no leídos de alguien son los mensajes que no emitió él), pero NO soportaría un
 // chat grupal. Ver "Pendientes" en docs/api-chats.md.
 model Mensaje {
-  id        Int     @id @default(autoincrement()) @map("mensaje_id")
-  contenido String  @map("mensaje_contenido")
-  leido     Boolean @default(false) @map("mensaje_leido")
-  imagenUrl String? @map("mensaje_imagen_url")
-  chatId    Int     @map("chat_id")
-  usuarioId Int     @map("usuario_id")
+  id        Int    @id @default(autoincrement()) @map("mensaje_id")
+  contenido String @map("mensaje_contenido")
+
+  // OBSOLETO desde HU-5.2 (brechas de chat): lo reemplazan usuario_chat_ultima_lectura y
+  // usuario_chat_ultima_entrega, que son POR PARTICIPANTE. Se mantiene poblado para no
+  // romper lecturas viejas, pero nada del código lo consulta.
+  leido Boolean @default(false) @map("mensaje_leido")
+
+  // Primera imagen del mensaje, desnormalizada: la usa el preview del listado (HU-5.1) sin
+  // tener que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`.
+  imagenUrl String?  @map("mensaje_imagen_url")
+  imagenes  String[] @map("mensaje_imagenes")
+
+  tipo TipoMensaje @default(TEXTO) @map("mensaje_tipo")
+
+  // Sólo en los mensajes de tipo SOLICITUD: la tarjeta que se pinta en la sala.
+  solicitudId Int? @map("solicitud_id")
+
+  chatId    Int @map("chat_id")
+  usuarioId Int @map("usuario_id")
 
   usuarioAlta Int      @map("mensaje_usuario_alta")
   fechaAlta   DateTime @default(now()) @map("mensaje_fecha_alta")
 
-  chat    Chat    @relation(fields: [chatId], references: [id])
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  chat      Chat       @relation(fields: [chatId], references: [id])
+  usuario   Usuario    @relation(fields: [usuarioId], references: [id])
+  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
 
+  // Conteo de no leídos con el modelo nuevo: "mensajes de la sala que no emití yo y son
+  // posteriores a mi última lectura". Los índices parciales de HU-5.1 siguen en SQL a mano.
+  @@index([chatId, usuarioId, fechaAlta])
   @@map("mensaje")
 }
 

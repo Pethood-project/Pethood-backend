@@ -60,7 +60,10 @@ export interface ConversacionDto {
   chatId: number;
   contacto: ContactoChatDto;
   ultimoMensaje: UltimoMensajeDto | null;
-  /** Mensajes del chat que el usuario autenticado no emitió y todavía no leyó. */
+  /**
+   * Mensajes del chat que el usuario autenticado no emitió y son posteriores a su última
+   * lectura de esa sala (`usuario_chat_ultima_lectura`).
+   */
   noLeidos: number;
   /**
    * Clave de orden, NUNCA null: fecha del último mensaje o, si la sala está vacía, fecha de
@@ -99,13 +102,64 @@ export interface MensajeDto {
   chatId: number;
   /** Cadena vacía en un mensaje de solo foto. Sin truncar. */
   contenido: string;
-  /** Ruta relativa (`/api/v1/archivos/chats/...`) o null si el mensaje es solo texto. */
+  /**
+   * PRIMERA foto del mensaje, o null si es solo texto. Se mantiene por compatibilidad con
+   * los clientes que sólo saben de una: es siempre `imagenes[0]`.
+   */
   imagenUrl: string | null;
+  /** Todas las fotos, en el orden en que se enviaron. Vacío si el mensaje es solo texto. */
+  imagenes: string[];
   /** Id del emisor. El cliente decide de qué lado de la burbuja va. */
   usuarioId: number;
+  /**
+   * Qué es este mensaje. `SOLICITUD` lo emite el usuario SISTEMA y trae `solicitud`
+   * completa: es la tarjeta embebida de la sala, no una burbuja de texto.
+   */
+  tipo: 'TEXTO' | 'SOLICITUD';
+  /**
+   * El otro ya lo recibió en algún dispositivo, aunque no lo haya abierto. Es el segundo
+   * tilde. Un mensaje leído está siempre entregado.
+   */
+  entregado: boolean;
+  /** El otro lo leyó: el doble tilde pintado. */
   leido: boolean;
+  /**
+   * Cuándo lo leyó el otro, ISO 8601 crudo, o `null` si todavía no. Es la marca de lectura
+   * del contacto, no del mensaje: con el modelo por participante, todos los mensajes que una
+   * lectura cubrió comparten la misma hora.
+   */
+  fechaLectura: string | null;
+  /** Sólo en los de tipo `SOLICITUD`. */
+  solicitud: SolicitudEnChatDto | null;
   /** ISO 8601 crudo. La hora la formatea el cliente. */
   fechaAlta: string;
+}
+
+/**
+ * La solicitud que originó la sala, tal como la pinta la tarjeta embebida y el subtítulo de
+ * la cabecera (GUI-14).
+ *
+ * Es un resumen y no la solicitud entera: lo que el chat necesita mostrar. El detalle
+ * completo sigue viviendo en `GET /solicitudes/:id`, y el cliente navega ahí con el `id`.
+ */
+export interface SolicitudEnChatDto {
+  id: number;
+  /** "Adopcion" o "Transito", del catálogo `TipoSolicitud`. */
+  tipo: string;
+  /** Estado vigente: "Pendiente", "Aceptada", "Rechazada"… El color lo decide el cliente. */
+  estado: string;
+  /** ISO 8601 crudo: cuándo se envió. */
+  fechaAlta: string;
+  mascota: {
+    id: number;
+    /** `null` en una mascota sin nombre cargado: el texto de relleno lo pone el cliente. */
+    nombre: string | null;
+    /** Nombre de la especie, del catálogo. */
+    especie: string;
+    /** ISO 8601 crudo, o `null` si no se cargó. La edad la calcula el cliente. */
+    fechaNacimiento: string | null;
+    imagenUrl: string | null;
+  };
 }
 
 /**
@@ -140,6 +194,16 @@ export interface CabeceraChatDto {
    * snapshot del momento del pedido: a partir de ahí lo actualiza `chat:presencia`.
    */
   enLinea: boolean;
+  /**
+   * En cuántos MINUTOS suele responder el contacto en esta conversación, o `null` si
+   * todavía no contestó lo suficiente como para decir algo.
+   *
+   * Viaja como número y no como "responde en ~2 h" por el mismo motivo que las fechas van en
+   * ISO: el texto es una decisión de UI y el redondeo depende del idioma.
+   */
+  minutosRespuesta: number | null;
+  /** La solicitud que originó la sala, o `null` si no nació de una (HU-13.2, salas viejas). */
+  solicitud: SolicitudEnChatDto | null;
 }
 
 /**
@@ -154,6 +218,20 @@ export interface LeidosDto {
   chatId: number;
   noLeidos: number;
   marcados: number;
+}
+
+/**
+ * Resultado de acusar recibo de la sala.
+ *
+ * `marcados` es cuántos mensajes pasaron de "sin entregar" a "entregado" en esta llamada: 0
+ * cuando el cliente acusa algo que ya había acusado, que es el caso normal cuando hay varios
+ * dispositivos. `hasta` es la marca que quedó guardada, para que el cliente no tenga que
+ * adivinar hasta dónde llegó.
+ */
+export interface EntregadosDto {
+  chatId: number;
+  marcados: number;
+  hasta: string | null;
 }
 
 /**
@@ -178,7 +256,10 @@ export type HistorialQuery = z.infer<typeof historialQuerySchema>;
 
 /**
  * Body del envío. El texto es opcional porque un mensaje puede ser solo foto; que venga al
- * menos uno de los dos lo valida el service, que es el único que ve el archivo.
+ * menos uno de los dos lo valida el service, que es el único que ve los archivos.
+ *
+ * Las fotos no se declaran acá: viajan como multipart y las valida el middleware de upload
+ * (formato, peso y cantidad), no Zod.
  */
 export const enviarMensajeSchema = z.object({
   contenido: textoOpcionalNoNuloSchema({

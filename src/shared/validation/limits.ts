@@ -94,6 +94,11 @@ export const LIMITES = {
    */
   mensaje: {
     contenido: { min: 0, max: 1000 },
+    /**
+     * Cuántas fotos admite un mensaje. El artboard 37 muestra una grilla de dos miniaturas
+     * con un "+3" encima de la segunda, o sea cinco: ese es el tope.
+     */
+    fotos: { maximo: 5 },
     /** Tamaño de página del historial y su techo. Ver "Paginación" en docs/api-chat-sala.md. */
     pagina: { porDefecto: 30, maximo: 50 },
   },

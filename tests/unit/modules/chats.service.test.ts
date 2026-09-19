@@ -78,8 +78,9 @@ function ultimoMensaje(opciones: {
   return { chatId, contenido, usuarioId, imagenUrl, fechaAlta };
 }
 
+/** Fila de `contarNoLeidosPorChat`: el conteo ya resuelto contra la marca del participante. */
 function conteo(chatId: number, cantidad: number) {
-  return { chatId, _count: { _all: cantidad } };
+  return { chatId, noLeidos: cantidad };
 }
 
 beforeEach(() => {
