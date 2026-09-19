@@ -141,15 +141,23 @@ Ver catálogos. Incluye `tipo_solicitud_secuencia_dias` para parametrizar ventan
 
 ### Chat
 
-`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto), FK `refugio_id` (nullable)
+`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable).
+
+`solicitud_id` es la solicitud que habilitó la sala (CONSTITUTION §7: no hay chat sin interacción previa). Es nullable porque las salas de coordinación por mascota perdida (HU-13.2) no salen de una solicitud. Un índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL` evita dos salas para la misma solicitud.
 
 ### Usuario_Chat
 
-Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id FK NOT NULL`, `usuario_id FK NOT NULL` + auditoría.
+Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id FK NOT NULL`, `usuario_id FK NOT NULL`, `usuario_chat_ultima_lectura` (nullable), `usuario_chat_ultima_entrega` (nullable) + auditoría.
+
+**Las dos marcas de tiempo son el estado de lectura y entrega de la sala, por participante.** Un mensaje ajeno cuenta como no leído si su `mensaje_fecha_alta` es posterior a `usuario_chat_ultima_lectura`; `ultima_entrega` es el mismo hecho un paso antes (le llegó al dispositivo, no lo abrió). Van acá y no en `Mensaje` porque `mensaje_leido` es un booleano **sin dueño**: con tres o más personas en la sala, el primero que abre le baja el contador al resto. Además es una escritura por sala en lugar de un UPDATE masivo sobre `mensaje`.
 
 ### Mensaje
 
-`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor).
+`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable).
+
+- **`mensaje_leido` quedó obsoleto.** Lo reemplazan las marcas de `Usuario_Chat`. Se sigue poblando para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo.
+- **`mensaje_imagen_url` es la PRIMERA de `mensaje_imagenes`**, desnormalizada para que el preview del listado no tenga que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`. Un mensaje admite hasta 5 fotos (`LIMITES.mensaje.fotos.maximo`).
+- **`mensaje_tipo = SOLICITUD`** es la tarjeta que PetHood inserta en la sala al enviarse una solicitud: la emite el usuario SISTEMA y lleva `solicitud_id`. No es una burbuja de texto y su `mensaje_contenido` va vacío — el texto lo pone la UI.
 
 **Nota de auditoría — excepción:** el mensaje **solo tiene alta**, no baja (consistente con la nota del documento de requisitos: "El mensaje solo va a tener alta, y el chat va a tener alta y baja"). No implementar endpoint de borrado de mensaje individual.
 

@@ -42,8 +42,13 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
   "chatId": 8,
   "contenido": "Dale, te espero el sábado a las 10",
   "imagenUrl": null,
+  "imagenes": [],
   "usuarioId": 41,
+  "tipo": "TEXTO",
+  "entregado": true,
   "leido": false,
+  "fechaLectura": null,
+  "solicitud": null,
   "fechaAlta": "2026-09-01T14:05:00.000Z"
 }
 ```
@@ -52,11 +57,85 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
 |---|---|
 | `id` | Id del mensaje. **Es la clave de deduplicación** (ver "Doble entrega") y el cursor de paginación |
 | `chatId` | Redundante dentro del historial, imprescindible en el evento de socket |
-| `contenido` | Texto, **sin truncar**. Cadena vacía (`""`) en un mensaje de solo foto |
-| `imagenUrl` | Ruta relativa, o `null` si el mensaje es solo texto |
+| `contenido` | Texto, **sin truncar**. Cadena vacía (`""`) en un mensaje de solo foto o en uno de tipo `SOLICITUD` |
+| `imagenUrl` | **Primera** foto, o `null`. Es siempre `imagenes[0]`: existe para los clientes que sólo saben de una |
+| `imagenes` | **Todas** las fotos, en el orden en que se enviaron. Vacío si el mensaje es solo texto. Hasta 5 |
 | `usuarioId` | **Id del emisor.** El cliente lo compara con su sesión para decidir el lado de la burbuja |
-| `leido` | `true` si el otro ya lo leyó → doble check |
+| `tipo` | `"TEXTO"` o `"SOLICITUD"`. Ver "Mensajes de sistema" |
+| `entregado` | Le llegó al destinatario, aunque no lo haya abierto → **segundo tilde** |
+| `leido` | El destinatario lo leyó → **doble tilde pintado**. Un mensaje leído está siempre entregado |
+| `fechaLectura` | Cuándo lo leyó, ISO 8601 crudo, o `null` si todavía no |
+| `solicitud` | Sólo en los de `tipo: "SOLICITUD"`. Ver "Mensajes de sistema" |
 | `fechaAlta` | ISO 8601 crudo |
+
+### ⚠️ `entregado` y `leido` son de la SALA, no del mensaje
+
+El estado no vive en el mensaje sino en cada participante: `usuario_chat_ultima_lectura` y
+`usuario_chat_ultima_entrega` dicen hasta qué momento tiene la sala leída y recibida. Un
+mensaje está `leido` cuando **todos los que no lo emitieron** tienen una marca posterior a su
+fecha.
+
+Dos consecuencias para el cliente:
+
+1. **Los tres estados avanzan de a bloques.** Cuando el otro abre la conversación, todos los
+   mensajes anteriores pasan a leídos de una, y comparten la misma `fechaLectura`. No hay
+   forma de que el mensaje 5 esté leído y el 4 no.
+2. **`leido` en un mensaje AJENO habla de vos**, no del otro: es "¿el destinatario lo leyó?",
+   y el destinatario de lo que te mandaron sos vos. El cliente sólo lo pinta en los propios.
+
+Esto reemplaza al booleano `mensaje_leido`, que no tenía dueño y rompía con tres o más
+participantes. La columna sigue existiendo en la base y poblándose, pero **ninguna respuesta
+de la API sale de ella**.
+
+### Mensajes de sistema: la solicitud embebida
+
+Un mensaje con `tipo: "SOLICITUD"` no es una burbuja: es la **tarjeta del pedido** que
+PetHood deja en la sala cuando se envía una solicitud. Lo emite el usuario SISTEMA (su
+`usuarioId` no es ninguno de los participantes), su `contenido` va vacío y trae la solicitud
+resuelta:
+
+```json
+{
+  "id": 400,
+  "chatId": 8,
+  "contenido": "",
+  "imagenUrl": null,
+  "imagenes": [],
+  "usuarioId": 1,
+  "tipo": "SOLICITUD",
+  "entregado": true,
+  "leido": true,
+  "fechaLectura": "2026-09-01T12:30:00.000Z",
+  "solicitud": {
+    "id": 1042,
+    "tipo": "Adopcion",
+    "estado": "Pendiente",
+    "fechaAlta": "2026-09-01T12:27:00.000Z",
+    "mascota": {
+      "id": 5,
+      "nombre": "Max",
+      "especie": "Perro",
+      "fechaNacimiento": "2024-02-12T00:00:00.000Z",
+      "imagenUrl": "/api/v1/archivos/publicaciones/max.jpg"
+    }
+  },
+  "fechaAlta": "2026-09-01T12:27:00.000Z"
+}
+```
+
+| Campo de `solicitud` | Qué es |
+|---|---|
+| `id` | Para navegar al detalle: `GET /solicitudes/:id`. **El chat no lo duplica** |
+| `tipo` | `"Adopcion"` o `"Transito"`, del catálogo |
+| `estado` | Estado **vigente**: "Pendiente", "Aceptada", "Rechazada"… El color lo decide el cliente |
+| `fechaAlta` | Cuándo se envió, ISO 8601 crudo |
+| `mascota.nombre` | Puede ser `null`: el texto de relleno lo pone el cliente |
+| `mascota.fechaNacimiento` | ISO crudo o `null`. **La edad la calcula el cliente**, igual que en HU-6.6 |
+| `mascota.imagenUrl` | La de la publicación, o la de la mascota si aquélla no tiene |
+
+El `estado` se resuelve **en el momento del pedido**, no cuando se creó el mensaje: si el
+refugio ya respondió, la tarjeta del historial muestra el estado nuevo. Es a propósito —
+una tarjeta que dijera "En revisión" para siempre mentiría.
 
 **No viene `esMio`.** Viaja `usuarioId` y el cliente compara: es un dato, no una vista. (El `esMio` que sí existe en el preview de HU-5.1 está ahí por otro motivo — evitarle al listado conocer al emisor de cada última línea.)
 
@@ -78,7 +157,21 @@ Con esto **la pantalla se pinta sola**, sin depender de lo que le haya pasado el
     "imagenUrl": "/api/v1/archivos/usuarios/ana.jpg",
     "activo": true
   },
-  "enLinea": true
+  "enLinea": true,
+  "minutosRespuesta": 120,
+  "solicitud": {
+    "id": 1042,
+    "tipo": "Adopcion",
+    "estado": "Pendiente",
+    "fechaAlta": "2026-09-01T12:27:00.000Z",
+    "mascota": {
+      "id": 5,
+      "nombre": "Max",
+      "especie": "Perro",
+      "fechaNacimiento": "2024-02-12T00:00:00.000Z",
+      "imagenUrl": "/api/v1/archivos/publicaciones/max.jpg"
+    }
+  }
 }
 ```
 
@@ -87,6 +180,17 @@ Con esto **la pantalla se pinta sola**, sin depender de lo que le haya pasado el
 | Campo | Qué es |
 |---|---|
 | `enLinea` | Snapshot de presencia al momento del pedido. **A partir de ahí lo actualiza `chat:presencia`** |
+| `minutosRespuesta` | En cuántos MINUTOS suele responder el contacto en esta sala, o `null`. Alimenta el "responde en ~2 h" del header |
+| `solicitud` | La que originó la sala, o `null`. Mismo objeto que el del mensaje de sistema. Alimenta el subtítulo "Solicitud #1042 · Max" |
+
+**`minutosRespuesta` viaja como número y no como texto** por el mismo motivo que las fechas
+van en ISO: "~2 h" es una decisión de UI y el redondeo depende del idioma.
+
+Se calcula sobre los últimos 60 mensajes de la sala, midiendo cada vez que el contacto
+contesta: desde el primer mensaje nuestro sin responder hasta su respuesta. Es la **mediana**
+y no el promedio — una sola respuesta al otro día corre un promedio a un número que no
+describe nada. Con menos de dos respuestas devuelve `null`: con un solo dato no hay
+tendencia, y es preferible no decir nada a inventar una expectativa.
 
 **Un refugio nunca viene `enLinea: true`**: es una institución, no una sesión. Sólo las personas se conectan.
 
@@ -166,12 +270,16 @@ Una sala sin mensajes devuelve **200** con `{ "mensajes": [], "hayMas": false, "
 
 Dos formatos, según lleve foto o no:
 
-**`multipart/form-data`** (texto y/o foto):
+**`multipart/form-data`** (texto y/o fotos):
 
 | Campo | Tipo | Obligatorio |
 |---|---|---|
 | `contenido` | texto, ≤1000 caracteres | Solo si no hay `foto` |
-| `foto` | jpg/png/webp, ≤5 MB | Solo si no hay `contenido` |
+| `foto` | jpg/png/webp, ≤5 MB cada una. **Se puede repetir hasta 5 veces** | Solo si no hay `contenido` |
+
+**El campo se sigue llamando `foto` aunque ahora acepte varias**: multipart admite repetir el
+mismo nombre, así que un cliente que manda una sola sigue funcionando sin cambiar nada. Las
+fotos se guardan **en el orden en que viajan**, y ese es el orden de `imagenes`.
 
 **`application/json`** (solo texto):
 
@@ -209,6 +317,7 @@ El objeto `Mensaje` completo, **ya persistido**: cuando el cliente recibe el 201
 | 400 | `VALIDACION` | El mensaje no puede superar los 1000 caracteres | Texto demasiado largo |
 | 400 | `ARCHIVO_INVALIDO` | La imagen debe ser jpg, png o webp | Formato no admitido |
 | 400 | `ARCHIVO_DEMASIADO_GRANDE` | La imagen supera el máximo de 5MB | Archivo pesado |
+| 400 | `DEMASIADOS_ARCHIVOS` | Podés subir hasta 5 fotos | Más de 5 en el mismo mensaje |
 | 409 | `CONTACTO_INACTIVO` | No podés escribirle: la cuenta de este contacto fue dada de baja | El otro se dio de baja |
 | 404 | `CHAT_SIN_CONTACTO` | Esta conversación ya no tiene contraparte | Sala sin ningún otro participante activo |
 
@@ -250,6 +359,40 @@ Dos vías, y conviene usar las dos:
 ### Errores
 
 Los de autenticación, más `403 SIN_ACCESO_AL_CHAT` y `404 NO_ENCONTRADO`.
+
+---
+
+## `POST /api/v1/chats/:chatId/entregados` — Acusar recibo
+
+Sin body. Marca como **entregados** todos los mensajes ajenos de la sala: es el segundo
+tilde del emisor.
+
+### Cuándo llamarlo
+
+**Apenas llega un `chat:mensaje-nuevo`**, estés donde estés: en la conversación, en el
+listado o en cualquier otra pantalla. Eso es lo que distingue entregado de leído — entregado
+significa "le llegó al dispositivo", no "lo abrió".
+
+Conviene **agrupar**: si entran cinco mensajes seguidos, un solo llamado al final los cubre a
+todos, porque el acuse es de sala y no de mensaje.
+
+**No** hace falta llamarlo al abrir la conversación: `/leidos` ya adelanta la entrega, porque
+no se puede haber leído algo que no llegó.
+
+### Respuesta 200
+
+```json
+{ "chatId": 8, "marcados": 2, "hasta": "2026-09-01T14:05:00.000Z" }
+```
+
+| Campo | Qué es |
+|---|---|
+| `marcados` | Cuántos pasaron de "sin entregar" a "entregado" en esta llamada. `0` al reacusar lo ya acusado, que es el caso normal con varios dispositivos |
+| `hasta` | La marca que quedó guardada: la fecha del último mensaje ajeno. `null` en una sala sin mensajes del otro |
+
+### Errores
+
+Los mismos de `/leidos`: autenticación, `403 SIN_ACCESO_AL_CHAT` y `404 NO_ENCONTRADO`.
 
 ---
 
@@ -352,15 +495,30 @@ socket.on('chat:mensaje-nuevo', (mensaje) => { /* ... */ });
 
 ### `chat:leido` — server → sala del chat
 
-Alguien leyó la conversación: **habilita el doble check**.
+Alguien leyó la conversación: **habilita el doble tilde pintado**.
 
 ```json
-{ "chatId": 8, "usuarioId": 41 }
+{ "chatId": 8, "usuarioId": 41, "hasta": "2026-09-01T14:05:00.000Z" }
 ```
 
-Al recibirlo, marcá como `leido: true` **todos tus propios mensajes de esa sala**. Es correcto porque marcar leído es una operación de sala entera, no de mensaje.
+Al recibirlo, marcá como leídos **tus propios mensajes de esa sala con `fechaAlta <= hasta`**.
+`hasta` evita tener que asumir que la lectura alcanzó a toda la conversación: si llegó un
+mensaje tuyo justo después, ése sigue sin leer.
 
-Sólo llega a quien tiene la conversación abierta; el que no la tiene abierta ve el estado correcto cuando entra.
+Sólo llega a quien tiene la conversación abierta; el que no la tiene abierta ve el estado
+correcto cuando entra.
+
+### `chat:entregado` — server → sala del chat
+
+A alguien **le llegaron** los mensajes, aunque no los haya abierto: es el **segundo tilde**.
+
+```json
+{ "chatId": 8, "usuarioId": 41, "hasta": "2026-09-01T14:05:00.000Z" }
+```
+
+Mismo payload y mismo tratamiento que `chat:leido`, un paso antes. Se emite cuando el otro
+llama a `POST /chats/:chatId/entregados`, tenga o no la sala abierta; lo escucha sólo quien
+está mirando la conversación, que es el único con burbujas que actualizar.
 
 ### `chat:no-leidos` — server → sala personal
 
@@ -471,7 +629,9 @@ Tampoco cambió `schema.prisma`: los campos de `Mensaje` (`contenido`, `leido`, 
 
 ### HU-4.3 — Notificación de mensaje nuevo
 
-El punto de enganche es **el mismo lugar donde hoy se emite `chat:mensaje-nuevo`**, en `chats.service.ts`. Ahí ya está calculada la lista de participantes activos, que es exactamente a quiénes hay que notificar.
+El punto de enganche es **el mismo lugar donde hoy se emite `chat:mensaje-nuevo`**, en `chats.service.ts`. Ahí ya está calculada la lista de participantes activos, que es exactamente a quiénes hay que notificar. Son dos lugares: `enviarMensaje` y `asegurarChatDeSolicitud`, que también emite (la tarjeta de la solicitud es un mensaje más).
+
+**El acuse de entrega le da a HU-4.3 un dato que antes no tenía:** con `usuario_chat_ultima_entrega` se puede saber si al destinatario ya le llegó el mensaje por socket, y por lo tanto si la push es redundante.
 
 Lo que falta decidir:
 
@@ -479,13 +639,15 @@ Lo que falta decidir:
 2. **Push vs. fila `Notificacion`**: el modelo `Notificacion` ya existe en el schema y no se está usando desde acá.
 3. **Agrupación**: 20 mensajes seguidos no son 20 notificaciones.
 
-### Deuda del modelo: `leido` no soporta chats grupales
+### Deuda del modelo: `leido` no soportaba chats grupales — ✅ resuelta
 
-Sigue vigente lo anotado en HU-5.1, y ahora con código que lo asume: `marcarMensajesLeidos` marca **toda la sala de una**, lo cual es correcto para dos participantes y **rompe con tres o más** — el primero que abra la sala le baja el badge al resto.
+Lo que este documento anotaba como pendiente ya está: el estado vive en
+`usuario_chat_ultima_lectura` / `usuario_chat_ultima_entrega`, una marca por participante, y
+no en el booleano `mensaje_leido`. El marcado dejó de ser un `UPDATE` masivo sobre `mensaje`
+y pasó a ser **una escritura por sala**, lo que además habilitó el acuse de entrega.
 
-La solución más barata sigue siendo una columna `usuario_chat_ultima_lectura` (timestamp) en `UsuarioChat`: los no leídos pasarían a ser los mensajes con `fecha_alta > ultima_lectura` y `usuario_id != yo`. Encaja mejor con el evento de lectura y es una sola escritura por sala abierta.
-
-**Es un cambio de estructura, así que quedó fuera de esta HU.** Hay que decidirlo antes de implementar chats grupales.
+`mensaje_leido` sigue en la base y se sigue poblando para no romper lecturas viejas, pero
+ninguna query lo consulta. **No usarlo en código nuevo.**
 
 ### Almacenamiento de imágenes en R2 — deuda transversal, no de esta HU
 
@@ -504,11 +666,15 @@ Ninguna de las dos justifica hoy un cambio: no hay "última conexión" que quede
 
 Sin cambios respecto de lo anotado en `api-chats.md`: se puede resolver en el cliente filtrando por `contacto.nombre` sobre el listado, que no pagina.
 
-### Creación de salas
+### Creación de salas — ✅ implementada para solicitudes
 
-Sigue sin implementarse, con las mismas cinco condiciones anotadas en `api-chats.md` (CONSTITUTION §7, fila de `UsuarioChat` para **todos** los participantes, `Chat.refugioId`, índice único parcial contra duplicados, y `chat_tipo` sin definir).
+Ver el detalle en `api-chats.md`. Resumen: al enviarse una solicitud se abre la sala con
+todos sus participantes y con la tarjeta del pedido adentro. Las cinco condiciones que se
+anotaban se cumplieron, incluida la fila de `UsuarioChat` para cada miembro del refugio —
+sin ella la sala no aparecería en GUI-31 ni dejaría entrar por REST ni por socket, porque
+**todo este módulo autoriza contra `UsuarioChat`**.
 
-Ahora hay una razón más para que estén bien: **esta HU autoriza todo contra `UsuarioChat`**. Una sala creada sin la fila del miembro del refugio no sólo no aparecería en GUI-31 — tampoco dejaría entrar a la conversación ni por REST ni por socket.
+**Falta la sala de HU-13.2** (mascota perdida/encontrada), que no nace de una solicitud.
 
 ### Auditoría de `Mensaje`
 
