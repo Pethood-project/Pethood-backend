@@ -115,7 +115,8 @@ Authorization: Bearer <token>
 | `ultimoMensaje.fecha` | ISO 8601 crudo |
 | `ultimoMensaje.esMio` | `true` si lo mandó el usuario autenticado → prefijo "Vos: ..." |
 | `ultimoMensaje.tieneImagen` | `true` si el mensaje trae foto. Con `contenido: ""` significa mensaje de solo imagen → mostrar "📷 Foto" |
-| `noLeidos` | Mensajes **del otro** que el usuario todavía no leyó. Número absoluto, no un delta |
+| `ultimoMensaje.tipo` | `"TEXTO"` o `"SOLICITUD"`. Con `SOLICITUD` el `contenido` va vacío: es la tarjeta de un pedido → mostrar "📄 Solicitud", con el mismo criterio que la foto |
+| `noLeidos` | Mensajes **del otro** que el usuario todavía no leyó. Número absoluto, no un delta. Sale de comparar la fecha de cada mensaje contra `usuario_chat_ultima_lectura` — ver la nota de abajo |
 | `fechaUltimaActividad` | **Clave de orden, nunca `null`.** Fecha del último mensaje o, si la sala está vacía, fecha de creación del chat |
 
 ### El contacto viene resuelto
@@ -182,7 +183,7 @@ No hay `400` (no recibe entrada que validar), ni `404` (un usuario sin chats es 
 | **`fechaUltimaActividad` viaja aparte** | Es la clave de orden y **nunca es `null`**: fecha del último mensaje, o la de creación del chat si la sala está vacía. Así el cliente reordena sin ramificar por el caso vacío. Una sala recién creada aparece arriba, que es correcto: es lo último que pasó. |
 | **Un contacto dado de baja NO oculta el chat** | Ocultarlo destruiría historial que el usuario puede necesitar: la conversación es el registro de un acuerdo sobre un animal. La regla 1 del proyecto (baja lógica, nunca DELETE) existe justamente para que el historial sobreviva; esconder el chat sería un delete de hecho. Tampoco se manda un "Usuario eliminado" armado en el server: va `activo: false` y el cliente decide el placeholder. No es fuga de privacidad — el usuario ya vio ese nombre y esos mensajes, es su propia conversación. |
 | **Un chat sin ningún participante activo se omite** | Sin contraparte no hay nombre ni avatar: la fila no se puede pintar. Es un dato inconsistente, no un caso de negocio — se saca del listado en vez de romper la pantalla entera, y `total` la descuenta. Mismo criterio que "una mascota sin estado vigente se omite" en HU-6.6. |
-| **`noLeidos` = mensajes del otro con `leido = false`** | `mensaje_leido` es un booleano **único por mensaje**, no por participante. En una sala de dos alcanza: el único que puede leer un mensaje es el que no lo mandó. Los propios se excluyen siempre, o el badge contaría los mensajes salientes del usuario. **Ojo: esto no escala a chats grupales** — ver "Pendientes". |
+| **`noLeidos` = mensajes del otro posteriores a mi última lectura** | El estado de lectura vive en `usuario_chat_ultima_lectura`, una marca de tiempo **por participante**, y no en el booleano `mensaje_leido`, que no tiene dueño. Los propios se excluyen siempre, o el badge contaría los mensajes salientes del usuario. Esto sí escala a chats grupales: cada uno tiene su marca y nadie le baja el contador a otro. |
 | **El endpoint no marca nada como leído** | Marcar como leído pasa al **abrir** la conversación (HU-5.2), no al listarla. Que el listado escribiera dejaría el badge en cero apenas se entra a la pestaña. |
 | **`esMio` y `tieneImagen`** | `esMio` habilita el prefijo "Vos: ..." sin que el cliente compare ids, y sale gratis. `tieneImagen` es necesario porque un mensaje puede ser **solo foto**: sin el flag el preview quedaría en blanco. |
 | **Ruta `/chats`, no `/conversaciones`** | Recurso en plural con el nombre de la entidad de `MODELO_DATOS.md`, igual que `/mascotas`, `/publicaciones` y `/favoritos`. |
@@ -256,23 +257,29 @@ Los cinco puntos que este documento marcaba como pendientes se resolvieron: auto
 
 Se puede resolver **en el cliente** filtrando por `contacto.nombre` sobre la lista que ya tiene, justamente porque este endpoint no pagina y devuelve el nombre ya resuelto. Si más adelante se hace en el servidor, va como query param opcional (`?contacto=`) con su schema Zod en `chats.dto.ts`, y **`total` tiene que seguir siendo el total de coincidencias**.
 
-### HU de creación de salas
+### Creación de salas — ✅ implementada para solicitudes
 
-No está implementada. Cuando se haga:
+Las salas ya no las crea sólo el seed: **al enviarse una solicitud de adopción o tránsito se abre la conversación**, con la tarjeta del pedido adentro (ver "Mensajes de sistema" en `api-chat-sala.md`). Vive en `chats.service.ts → asegurarChatDeSolicitud`, y la llama el módulo de solicitudes después de persistir.
 
-1. **CONSTITUTION §7 es la regla que la gobierna:** "chat habilitado solo tras interacción previa (solicitud de adopción o reporte de mascota perdida)". El servicio tiene que verificar esa interacción antes de crear la sala.
-2. **Crear la fila de `UsuarioChat` para TODOS los participantes**, incluido el miembro del refugio — si no, el refugio no ve la conversación en GUI-31.
-3. **Setear `Chat.refugioId`** cuando la contraparte sea un refugio, y dejarlo en `null` para la coordinación entre adoptantes de HU-13.2. De eso depende qué nombre e imagen muestra este listado.
-4. **Evitar salas duplicadas** para el mismo par. Conviene un índice único parcial sobre los participantes activos, como el de `favorito` — dos requests concurrentes pasarían los dos por cualquier chequeo de lectura previo.
-5. **`chat_tipo` sigue sin definirse.** Si el equipo confirma el enum, se convierte en un `enum` de Prisma y se documenta acá; mientras tanto no escribirlo.
+Las cinco condiciones que este documento anotaba se cumplieron:
 
-### Deuda del modelo: `leido` no soporta chats grupales
+1. **CONSTITUTION §7** — la interacción previa es la solicitud misma, ya persistida cuando se abre la sala.
+2. **Fila de `UsuarioChat` para TODOS** los participantes, incluidos los miembros del refugio: sin ellas el refugio no vería la conversación en GUI-31 ni podría entrar, porque la autorización del módulo es la membresía.
+3. **`Chat.refugioId`** se setea cuando la mascota es de un refugio; si la publicó una persona, la contraparte es esa persona y queda en `null`.
+4. **Sin salas duplicadas — la sala es entre las partes, no entre las solicitudes.** Antes de crear se busca la conversación viva que ya exista entre el solicitante y su contraparte (con refugio: cualquier sala de ese refugio donde el solicitante participe; sin refugio: la sala de los dos). Una segunda solicitud al mismo refugio deja su tarjeta **en la misma conversación**. `chat.solicitud_id` guarda sólo la que abrió la sala; cada tarjeta lleva la suya en `mensaje.solicitud_id`, y la cabecera muestra la **última**. El índice único parcial sobre `solicitud_id` cubre además dos requests concurrentes de la misma solicitud, y un reintento no deja dos tarjetas.
+5. **`chat_tipo` sigue sin definirse** y no se escribe.
 
-`mensaje_leido` es un booleano único por mensaje. Funciona para una sala de dos, pero **si `chat_tipo` llegara a admitir salas de 3 o más, el contador queda mal para todos**: un solo flag no puede expresar "leído por A pero no por B", y el primero que abra la sala le baja el badge al resto.
+**Falta todavía la sala de HU-13.2** (coordinación por mascota perdida/encontrada), que no sale de una solicitud: cuando se implemente, `chat.solicitud_id` queda en `null` y hace falta su propia regla de quiénes participan.
 
-La solución más barata sería una columna `usuario_chat_ultima_lectura` (timestamp) en `UsuarioChat`: los no leídos pasarían a ser los mensajes con `fecha_alta > ultima_lectura` y `usuario_id != yo`. Tiene dos ventajas extra: es **una sola escritura por sala abierta** en vez de un `UPDATE` masivo sobre `mensaje`, y encaja mejor con el evento `chat:leido` de websockets.
+Si la creación de la sala falla, **no se cae la solicitud**: ya está creada y confirmada al usuario. Queda registrado en consola y la sala se puede abrir en un intento posterior.
 
-**Es un cambio de estructura, así que quedó fuera de esta HU y también de HU-5.2**, que ya llegó y siguió el mismo criterio: su endpoint de marcado escribe **toda la sala de una**, lo cual es correcto para dos participantes y rompe con tres o más. Hay que decidirlo antes de implementar chats grupales.
+### Deuda del modelo: `leido` no soportaba chats grupales — ✅ resuelta
+
+`mensaje_leido` era un booleano único por mensaje: funcionaba para una sala de dos, pero **con 3 o más el contador quedaba mal para todos** porque un solo flag no puede expresar "leído por A pero no por B", y el primero que abría la sala le bajaba el badge al resto.
+
+Se implementó exactamente la solución que este documento venía proponiendo: **`usuario_chat_ultima_lectura`** (y su par `usuario_chat_ultima_entrega`) en `UsuarioChat`. Los no leídos son los mensajes con `fecha_alta > ultima_lectura` y `usuario_id != yo`. Ventajas que ya se cobraron: es **una sola escritura por sala** en vez de un `UPDATE` masivo sobre `mensaje`, encaja con los eventos de websocket, y habilitó el **acuse de entrega** (el segundo tilde), que el booleano no podía representar.
+
+`mensaje_leido` **sigue existiendo y poblándose** para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo. Ver `api-chat-sala.md`.
 
 ### Auditoría de `Mensaje`
 

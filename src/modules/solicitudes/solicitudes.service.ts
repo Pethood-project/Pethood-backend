@@ -12,6 +12,7 @@
  */
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
+import * as chats from '../chats/chats.service';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import type {
@@ -351,6 +352,16 @@ export async function crearSolicitud(
     entidad: 'Solicitud',
     entidadId: creada.id,
     detalle: `${datos.tipoSolicitud} sobre publicación ${datos.publicacionId}`,
+  });
+
+  // CONSTITUTION §7: la solicitud ES la interacción previa que habilita el chat, así que la
+  // sala se abre acá y con la tarjeta del pedido ya adentro.
+  //
+  // No se espera ni se propaga el error: la solicitud está creada y confirmada al usuario;
+  // que la sala no se haya podido abrir no puede convertir eso en un 500. Si falla, el chat
+  // simplemente no existe todavía y se puede abrir en el próximo intento.
+  await chats.asegurarChatDeSolicitud(creada.id).catch((err: unknown) => {
+    console.error('No se pudo abrir el chat de la solicitud', creada.id, err);
   });
 
   return aDetalleDto(creada);

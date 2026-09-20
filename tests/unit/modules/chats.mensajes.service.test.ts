@@ -10,7 +10,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../../src/middlewares/errorHandler';
 import * as repo from '../../../src/modules/chats/chats.repository';
 import * as service from '../../../src/modules/chats/chats.service';
+import { USUARIO_SISTEMA_ID } from '../../../src/shared/auditoria';
 import * as storage from '../../../src/shared/storage';
+import { LIMITES } from '../../../src/shared/validation/limits';
 import * as emisor from '../../../src/websockets/emisor';
 import * as presencia from '../../../src/websockets/presencia';
 
@@ -47,6 +49,7 @@ function sala(
     chat: {
       id: CHAT,
       fechaAlta: FECHA_VIEJA,
+      solicitudId: null,
       refugio: conRefugio
         ? {
             id: REFUGIO,
@@ -81,11 +84,19 @@ function mensaje(opciones: { id: number; fechaAlta?: Date; contenido?: string } 
     chatId: CHAT,
     contenido,
     imagenUrl: null,
+    imagenes: [],
+    tipo: 'TEXTO' as const,
+    solicitudId: null,
     usuarioId: OTRO,
     leido: false,
     fechaAlta,
     usuarioAlta: OTRO,
   };
+}
+
+/** Marca de lectura/entrega de un participante, como sale de `marcasDeParticipantes`. */
+function marca(usuarioId: number, lectura: Date | null, entrega: Date | null = lectura) {
+  return { usuarioId, ultimaLectura: lectura, ultimaEntrega: entrega };
 }
 
 beforeEach(() => {
@@ -95,8 +106,13 @@ beforeEach(() => {
   vi.mocked(repo.buscarSalaConContacto).mockResolvedValue(sala() as never);
   vi.mocked(repo.buscarRefugioDeUsuario).mockResolvedValue({ refugioId: null } as never);
   vi.mocked(repo.listarMensajes).mockResolvedValue([] as never);
-  vi.mocked(repo.marcarMensajesLeidos).mockResolvedValue(0);
-  vi.mocked(storage.guardarImagen).mockResolvedValue(URL_FOTO);
+  vi.mocked(repo.marcasDeParticipantes).mockResolvedValue([] as never);
+  vi.mocked(repo.ultimoMensajeAjeno).mockResolvedValue({ fechaAlta: FECHA } as never);
+  vi.mocked(repo.acusarHasta).mockResolvedValue(0);
+  vi.mocked(repo.ultimosMensajesParaRespuesta).mockResolvedValue([] as never);
+  vi.mocked(repo.buscarUltimaSolicitudDelChat).mockResolvedValue(null);
+  vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(null as never);
+  vi.mocked(storage.guardarImagenes).mockResolvedValue([URL_FOTO]);
   vi.mocked(presencia.estaEnLinea).mockReturnValue(false);
 });
 
@@ -196,6 +212,9 @@ describe('enviarMensaje', () => {
     chatId: CHAT,
     contenido: 'Hola',
     imagenUrl: null,
+    imagenes: [],
+    tipo: 'TEXTO' as const,
+    solicitudId: null,
     usuarioId: USUARIO,
     leido: false,
     fechaAlta: FECHA,
@@ -216,23 +235,48 @@ describe('enviarMensaje', () => {
   it('sólo foto, sin texto, es un mensaje válido', async () => {
     await service.enviarMensaje(
       { contenido: '' },
-      { usuarioId: USUARIO, chatId: CHAT, archivo: ARCHIVO },
+      { usuarioId: USUARIO, chatId: CHAT, archivos: [ARCHIVO] },
     );
 
     expect(repo.crearMensaje).toHaveBeenCalledWith(
-      expect.objectContaining({ contenido: '', imagenUrl: URL_FOTO }),
+      expect.objectContaining({ contenido: '', imagenes: [URL_FOTO] }),
     );
   });
 
   it('texto y foto juntos también: el modelo los admite', async () => {
     await service.enviarMensaje(
       { contenido: 'Mirá' },
-      { usuarioId: USUARIO, chatId: CHAT, archivo: ARCHIVO },
+      { usuarioId: USUARIO, chatId: CHAT, archivos: [ARCHIVO] },
     );
 
     expect(repo.crearMensaje).toHaveBeenCalledWith(
-      expect.objectContaining({ contenido: 'Mirá', imagenUrl: URL_FOTO }),
+      expect.objectContaining({ contenido: 'Mirá', imagenes: [URL_FOTO] }),
     );
+  });
+
+  it('varias fotos viajan en un solo mensaje, en orden', async () => {
+    const urls = [URL_FOTO, '/api/v1/archivos/chats/def.jpg'];
+    vi.mocked(storage.guardarImagenes).mockResolvedValue(urls);
+
+    await service.enviarMensaje(
+      { contenido: '' },
+      { usuarioId: USUARIO, chatId: CHAT, archivos: [ARCHIVO, ARCHIVO] },
+    );
+
+    expect(repo.crearMensaje).toHaveBeenCalledWith(expect.objectContaining({ imagenes: urls }));
+  });
+
+  it('más fotos que el máximo se rechazan sin tocar el storage', async () => {
+    const demasiadas = Array.from({ length: LIMITES.mensaje.fotos.maximo + 1 }, () => ARCHIVO);
+
+    await expect(
+      service.enviarMensaje(
+        { contenido: '' },
+        { usuarioId: USUARIO, chatId: CHAT, archivos: demasiadas },
+      ),
+    ).rejects.toMatchObject({ codigo: 'DEMASIADOS_ARCHIVOS', httpStatus: 400 });
+
+    expect(storage.guardarImagenes).not.toHaveBeenCalled();
   });
 
   it('no se le puede escribir a un contacto dado de baja', async () => {
@@ -255,11 +299,11 @@ describe('enviarMensaje', () => {
     await expect(
       service.enviarMensaje(
         { contenido: 'Hola' },
-        { usuarioId: USUARIO, chatId: CHAT, archivo: ARCHIVO },
+        { usuarioId: USUARIO, chatId: CHAT, archivos: [ARCHIVO] },
       ),
     ).rejects.toBeInstanceOf(AppError);
 
-    expect(storage.guardarImagen).not.toHaveBeenCalled();
+    expect(storage.guardarImagenes).not.toHaveBeenCalled();
   });
 
   it('si falla la escritura en base, borra la foto que ya había guardado', async () => {
@@ -268,11 +312,11 @@ describe('enviarMensaje', () => {
     await expect(
       service.enviarMensaje(
         { contenido: '' },
-        { usuarioId: USUARIO, chatId: CHAT, archivo: ARCHIVO },
+        { usuarioId: USUARIO, chatId: CHAT, archivos: [ARCHIVO] },
       ),
     ).rejects.toThrow('caída de base');
 
-    expect(storage.borrarImagen).toHaveBeenCalledWith(URL_FOTO);
+    expect(storage.borrarImagenes).toHaveBeenCalledWith([URL_FOTO]);
   });
 
   it('emite a TODOS los participantes, incluido el emisor', async () => {
@@ -309,7 +353,7 @@ describe('enviarMensaje', () => {
 
 describe('marcarLeidos', () => {
   it('devuelve el contador en cero para que HU-5.1 actualice el badge sin refetch', async () => {
-    vi.mocked(repo.marcarMensajesLeidos).mockResolvedValue(3);
+    vi.mocked(repo.acusarHasta).mockResolvedValue(3);
 
     await expect(service.marcarLeidos(USUARIO, CHAT)).resolves.toEqual({
       chatId: CHAT,
@@ -318,17 +362,23 @@ describe('marcarLeidos', () => {
     });
   });
 
+  it('marca hasta el último mensaje ajeno, no hasta el reloj del servidor', async () => {
+    await service.marcarLeidos(USUARIO, CHAT);
+
+    expect(repo.acusarHasta).toHaveBeenCalledWith(CHAT, USUARIO, 'lectura', FECHA);
+  });
+
   it('avisa a la sala y a los otros dispositivos de quien leyó', async () => {
-    vi.mocked(repo.marcarMensajesLeidos).mockResolvedValue(3);
+    vi.mocked(repo.acusarHasta).mockResolvedValue(3);
 
     await service.marcarLeidos(USUARIO, CHAT);
 
-    expect(emisor.emitirLeido).toHaveBeenCalledWith(CHAT, USUARIO);
+    expect(emisor.emitirLeido).toHaveBeenCalledWith(CHAT, USUARIO, FECHA.toISOString());
     expect(emisor.emitirNoLeidos).toHaveBeenCalledWith(USUARIO, CHAT, 0);
   });
 
   it('reabrir una sala ya leída no despierta a nadie', async () => {
-    vi.mocked(repo.marcarMensajesLeidos).mockResolvedValue(0);
+    vi.mocked(repo.acusarHasta).mockResolvedValue(0);
 
     const resultado = await service.marcarLeidos(USUARIO, CHAT);
 
@@ -337,12 +387,167 @@ describe('marcarLeidos', () => {
     expect(emisor.emitirNoLeidos).not.toHaveBeenCalled();
   });
 
+  it('una sala sin mensajes del otro no escribe nada', async () => {
+    vi.mocked(repo.ultimoMensajeAjeno).mockResolvedValue(null);
+
+    await expect(service.marcarLeidos(USUARIO, CHAT)).resolves.toEqual({
+      chatId: CHAT,
+      noLeidos: 0,
+      marcados: 0,
+    });
+
+    expect(repo.acusarHasta).not.toHaveBeenCalled();
+  });
+
   it('exige ser participante antes de escribir', async () => {
     vi.mocked(repo.buscarMembresiaActiva).mockResolvedValue(null);
 
     await expect(service.marcarLeidos(USUARIO, CHAT)).rejects.toBeInstanceOf(AppError);
 
-    expect(repo.marcarMensajesLeidos).not.toHaveBeenCalled();
+    expect(repo.acusarHasta).not.toHaveBeenCalled();
+  });
+});
+
+describe('marcarEntregados — el segundo tilde', () => {
+  it('acusa la entrega hasta el último mensaje ajeno y avisa a la sala', async () => {
+    vi.mocked(repo.acusarHasta).mockResolvedValue(2);
+
+    await expect(service.marcarEntregados(USUARIO, CHAT)).resolves.toEqual({
+      chatId: CHAT,
+      marcados: 2,
+      hasta: FECHA.toISOString(),
+    });
+
+    expect(repo.acusarHasta).toHaveBeenCalledWith(CHAT, USUARIO, 'entrega', FECHA);
+    expect(emisor.emitirEntregado).toHaveBeenCalledWith(CHAT, USUARIO, FECHA.toISOString());
+  });
+
+  it('reacusar lo ya entregado no despierta a nadie', async () => {
+    vi.mocked(repo.acusarHasta).mockResolvedValue(0);
+
+    await service.marcarEntregados(USUARIO, CHAT);
+
+    expect(emisor.emitirEntregado).not.toHaveBeenCalled();
+  });
+
+  it('exige ser participante', async () => {
+    vi.mocked(repo.buscarMembresiaActiva).mockResolvedValue(null);
+
+    await expect(service.marcarEntregados(USUARIO, CHAT)).rejects.toBeInstanceOf(AppError);
+
+    expect(repo.acusarHasta).not.toHaveBeenCalled();
+  });
+});
+
+describe('acuse de los mensajes del historial', () => {
+  const ANTES = new Date('2026-09-01T14:00:00.000Z');
+  const DESPUES = new Date('2026-09-01T14:10:00.000Z');
+
+  beforeEach(() => {
+    vi.mocked(repo.listarMensajes).mockResolvedValue([
+      { ...mensaje({ id: 1 }), usuarioId: USUARIO, fechaAlta: ANTES },
+    ] as never);
+  });
+
+  it('sin marcas del otro, el mensaje no está ni entregado ni leído', async () => {
+    const { mensajes } = await service.listarHistorial(USUARIO, CHAT, { limite: 30 });
+
+    expect(mensajes[0]).toMatchObject({ entregado: false, leido: false, fechaLectura: null });
+  });
+
+  it('entregado pero no leído: un solo tilde extra, sin hora de lectura', async () => {
+    vi.mocked(repo.marcasDeParticipantes).mockResolvedValue([
+      marca(USUARIO, null, null),
+      marca(OTRO, null, DESPUES),
+    ] as never);
+
+    const { mensajes } = await service.listarHistorial(USUARIO, CHAT, { limite: 30 });
+
+    expect(mensajes[0]).toMatchObject({ entregado: true, leido: false, fechaLectura: null });
+  });
+
+  it('leído: doble tilde y la hora en que el otro leyó', async () => {
+    vi.mocked(repo.marcasDeParticipantes).mockResolvedValue([
+      marca(USUARIO, null, null),
+      marca(OTRO, DESPUES),
+    ] as never);
+
+    const { mensajes } = await service.listarHistorial(USUARIO, CHAT, { limite: 30 });
+
+    expect(mensajes[0]).toMatchObject({
+      entregado: true,
+      leido: true,
+      fechaLectura: DESPUES.toISOString(),
+    });
+  });
+
+  it('una marca anterior al mensaje no lo alcanza', async () => {
+    vi.mocked(repo.marcasDeParticipantes).mockResolvedValue([
+      marca(OTRO, new Date('2026-08-31T00:00:00.000Z')),
+    ] as never);
+
+    const { mensajes } = await service.listarHistorial(USUARIO, CHAT, { limite: 30 });
+
+    expect(mensajes[0]!.leido).toBe(false);
+  });
+
+  it('la marca del propio autor no cuenta: leer lo que uno escribió no es acuse', async () => {
+    vi.mocked(repo.marcasDeParticipantes).mockResolvedValue([marca(USUARIO, DESPUES)] as never);
+
+    const { mensajes } = await service.listarHistorial(USUARIO, CHAT, { limite: 30 });
+
+    expect(mensajes[0]!.leido).toBe(false);
+  });
+});
+
+describe('minutosRespuesta de la cabecera', () => {
+  /** Mensajes en el orden en que los devuelve el repository: del más nuevo al más viejo. */
+  function conversacion(...pares: [number, string][]) {
+    return pares
+      .map(([minuto, quien]) => ({
+        usuarioId: quien === 'yo' ? USUARIO : OTRO,
+        fechaAlta: new Date(FECHA.getTime() + minuto * 60_000),
+      }))
+      .reverse();
+  }
+
+  it('con una sola respuesta no se arriesga a estimar', async () => {
+    vi.mocked(repo.ultimosMensajesParaRespuesta).mockResolvedValue(
+      conversacion([0, 'yo'], [30, 'otro']) as never,
+    );
+
+    const cabecera = await service.obtenerCabecera(USUARIO, CHAT);
+
+    expect(cabecera.minutosRespuesta).toBeNull();
+  });
+
+  it('toma la mediana de las demoras, así una respuesta al otro día no la corre', async () => {
+    vi.mocked(repo.ultimosMensajesParaRespuesta).mockResolvedValue(
+      conversacion(
+        [0, 'yo'],
+        [10, 'otro'],
+        [100, 'yo'],
+        [120, 'otro'],
+        [200, 'yo'],
+        [1_640, 'otro'],
+      ) as never,
+    );
+
+    // Demoras de 10, 20 y 1440 minutos: la mediana es 20, el promedio sería 490.
+    const cabecera = await service.obtenerCabecera(USUARIO, CHAT);
+
+    expect(cabecera.minutosRespuesta).toBe(20);
+  });
+
+  it('varios mensajes seguidos míos cuentan como una sola espera', async () => {
+    vi.mocked(repo.ultimosMensajesParaRespuesta).mockResolvedValue(
+      conversacion([0, 'yo'], [5, 'yo'], [30, 'otro'], [60, 'yo'], [90, 'otro']) as never,
+    );
+
+    // La primera espera arranca en el minuto 0 y no en el 5: 30 y 30 → mediana 30.
+    const cabecera = await service.obtenerCabecera(USUARIO, CHAT);
+
+    expect(cabecera.minutosRespuesta).toBe(30);
   });
 });
 
@@ -396,5 +601,154 @@ describe('obtenerCabecera', () => {
       codigo: 'SIN_ACCESO_AL_CHAT',
       httpStatus: 403,
     });
+  });
+});
+
+describe('asegurarChatDeSolicitud — la sala que nace de una solicitud', () => {
+  const SOLICITUD = 90;
+  const SOLICITANTE = 41;
+  const MIEMBRO_REFUGIO = 7;
+  const CHAT_NUEVO = 300;
+
+  /** Lo que devuelve `buscarSolicitudParaChat`. */
+  function solicitud(opciones: { deRefugio?: boolean; duenio?: number } = {}) {
+    const { deRefugio = true, duenio = 99 } = opciones;
+
+    return {
+      id: SOLICITUD,
+      fechaAlta: FECHA,
+      usuarioId: SOLICITANTE,
+      tipoSolicitud: { nombre: 'Adopcion' },
+      historicoEstados: [{ estadoSolicitud: { nombre: 'Pendiente' } }],
+      publicacion: {
+        id: 12,
+        imagenUrl: '/api/v1/archivos/publicaciones/max.jpg',
+        mascota: {
+          id: 5,
+          nombre: 'Max',
+          fechaNacimiento: FECHA_VIEJA,
+          imagenUrl: null,
+          refugioId: deRefugio ? REFUGIO : null,
+          usuarioId: duenio,
+          raza: { especie: { nombre: 'Perro' } },
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarMensajeDeSolicitud).mockResolvedValue(null);
+    vi.mocked(repo.buscarChatEntre).mockResolvedValue(null);
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(solicitud() as never);
+    vi.mocked(repo.listarMiembrosDeRefugio).mockResolvedValue([{ id: MIEMBRO_REFUGIO }] as never);
+    vi.mocked(repo.crearChatDeSolicitud).mockResolvedValue({ id: CHAT_NUEVO } as never);
+    vi.mocked(repo.crearMensaje).mockResolvedValue({
+      ...mensaje({ id: 500, contenido: '' }),
+      chatId: CHAT_NUEVO,
+      usuarioId: USUARIO_SISTEMA_ID,
+      tipo: 'SOLICITUD' as const,
+      solicitudId: SOLICITUD,
+    } as never);
+  });
+
+  it('crea la sala con el solicitante y los miembros del refugio', async () => {
+    await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBe(CHAT_NUEVO);
+
+    expect(repo.crearChatDeSolicitud).toHaveBeenCalledWith({
+      solicitudId: SOLICITUD,
+      refugioId: REFUGIO,
+      participantesIds: [SOLICITANTE, MIEMBRO_REFUGIO],
+      creadoPor: SOLICITANTE,
+    });
+  });
+
+  it('si la mascota no es de un refugio, la contraparte es su dueño', async () => {
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(
+      solicitud({ deRefugio: false, duenio: MIEMBRO_REFUGIO }) as never,
+    );
+
+    await service.asegurarChatDeSolicitud(SOLICITUD);
+
+    expect(repo.listarMiembrosDeRefugio).not.toHaveBeenCalled();
+    expect(repo.crearChatDeSolicitud).toHaveBeenCalledWith(
+      expect.objectContaining({
+        refugioId: null,
+        participantesIds: [SOLICITANTE, MIEMBRO_REFUGIO],
+      }),
+    );
+  });
+
+  it('deja la tarjeta de la solicitud, emitida por SISTEMA', async () => {
+    await service.asegurarChatDeSolicitud(SOLICITUD);
+
+    expect(repo.crearMensaje).toHaveBeenCalledWith({
+      chatId: CHAT_NUEVO,
+      usuarioId: USUARIO_SISTEMA_ID,
+      contenido: '',
+      imagenes: [],
+      tipo: 'SOLICITUD',
+      solicitudId: SOLICITUD,
+    });
+  });
+
+  it('el evento del mensaje nuevo lleva la tarjeta ya resuelta', async () => {
+    await service.asegurarChatDeSolicitud(SOLICITUD);
+
+    expect(emisor.emitirMensajeNuevo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tipo: 'SOLICITUD',
+        solicitud: expect.objectContaining({
+          id: SOLICITUD,
+          tipo: 'Adopcion',
+          estado: 'Pendiente',
+          mascota: expect.objectContaining({ nombre: 'Max', especie: 'Perro' }),
+        }),
+      }),
+      [SOLICITANTE, MIEMBRO_REFUGIO],
+    );
+  });
+
+  it('una segunda solicitud al mismo refugio cae en la conversación que ya existía', async () => {
+    vi.mocked(repo.buscarChatEntre).mockResolvedValue({ id: CHAT } as never);
+
+    await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBe(CHAT);
+
+    expect(repo.buscarChatEntre).toHaveBeenCalledWith(SOLICITANTE, { refugioId: REFUGIO });
+    expect(repo.crearChatDeSolicitud).not.toHaveBeenCalled();
+    // La tarjeta sí se deja, en la sala existente.
+    expect(repo.crearMensaje).toHaveBeenCalledWith(expect.objectContaining({ chatId: CHAT }));
+  });
+
+  it('con una persona del otro lado, la sala se reencuentra por los dos participantes', async () => {
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(
+      solicitud({ deRefugio: false, duenio: MIEMBRO_REFUGIO }) as never,
+    );
+
+    await service.asegurarChatDeSolicitud(SOLICITUD);
+
+    expect(repo.buscarChatEntre).toHaveBeenCalledWith(SOLICITANTE, { usuarioId: MIEMBRO_REFUGIO });
+  });
+
+  it('un reintento de la misma solicitud no deja dos tarjetas', async () => {
+    vi.mocked(repo.buscarMensajeDeSolicitud).mockResolvedValue({ chatId: CHAT } as never);
+
+    await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBe(CHAT);
+
+    expect(repo.crearChatDeSolicitud).not.toHaveBeenCalled();
+    expect(repo.crearMensaje).not.toHaveBeenCalled();
+  });
+
+  it('sin contraparte activa no hay conversación posible', async () => {
+    vi.mocked(repo.listarMiembrosDeRefugio).mockResolvedValue([] as never);
+
+    await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBeNull();
+
+    expect(repo.crearChatDeSolicitud).not.toHaveBeenCalled();
+  });
+
+  it('una solicitud inexistente no rompe: devuelve null', async () => {
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(null as never);
+
+    await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBeNull();
   });
 });

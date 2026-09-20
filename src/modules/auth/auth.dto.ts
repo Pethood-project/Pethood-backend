@@ -86,6 +86,18 @@ export interface RespuestaRecuperar {
 
 export type GoogleIdTokenBody = z.infer<typeof googleIdTokenBodySchema>;
 
+/**
+ * El refugio en el que trabaja la persona, o `null` si no pertenece a ninguno.
+ *
+ * Viaja en la sesión y no como un pedido aparte porque define qué ve la app apenas entra:
+ * la cabecera de GUI-31 lo nombra, y el chat ya distinguía al refugio del adoptante con un
+ * dato que el cliente no tenía.
+ */
+export const refugioDeSesionSchema = z.object({
+  id: z.number(),
+  nombre: z.string(),
+});
+
 export const usuarioPublicoSchema = z.object({
   id: z.number(),
   nombre: z.string(),
@@ -95,6 +107,7 @@ export const usuarioPublicoSchema = z.object({
   imagenUrl: z.string().nullable(),
   telefono: z.string().nullable().optional(),
   ubicacion: z.string().nullable().optional(),
+  refugio: refugioDeSesionSchema.nullable(),
 });
 
 export const respuestaAuthSchema = z.object({

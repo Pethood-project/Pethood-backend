@@ -41,6 +41,10 @@ function aRespuesta(usuario: UsuarioConRoles): RespuestaAuth {
       imagenUrl: usuario.imagenUrl,
       telefono: usuario.telefono,
       ubicacion: usuario.ubicacion,
+      // `null` en un adoptante. El token no lo lleva: la pertenencia se resuelve contra la
+      // base en cada request, para que sacar a alguien de un refugio tenga efecto sin
+      // esperar a que le venza la sesión.
+      refugio: usuario.refugio,
     },
     token: firmarToken({ usuarioId: usuario.id, email: usuario.email, roles: rolesApi }),
   };

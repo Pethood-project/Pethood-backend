@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { autenticar } from '../../middlewares/auth';
 import { comprimirImagen } from '../../middlewares/comprimirImagen';
-import { uploadImagenOpcional } from '../../middlewares/uploadImagen';
+import { uploadImagenesOpcional } from '../../middlewares/uploadImagen';
 import { validar } from '../../middlewares/validar';
+import { LIMITES } from '../../shared/validation/limits';
 import * as controller from './chats.controller';
 import { enviarMensajeSchema } from './chats.dto';
 
@@ -27,12 +28,15 @@ chatsRouter.get('/:chatId', controller.obtenerCabecera);
 // de body.
 chatsRouter.get('/:chatId/mensajes', controller.listarMensajes);
 
-// HU-5.2: envío. Acepta multipart (texto y/o foto) y JSON (sólo texto), en ese orden:
-// multer tiene que poblar `req.body` antes de que Zod lo valide, y la foto se comprime
-// antes de que el service la persista. Mismo pipeline que el alta de mascota (HU-6.1).
+// HU-5.2: envío. Acepta multipart (texto y/o fotos) y JSON (sólo texto), en ese orden:
+// multer tiene que poblar `req.body` antes de que Zod lo valide, y las fotos se comprimen
+// antes de que el service las persista. Mismo pipeline que el alta de mascota (HU-6.1).
+//
+// El campo sigue llamándose `foto` aunque ahora acepte varias: es el nombre que ya usa el
+// cliente y multipart admite repetirlo sin cambiar nada de su lado.
 chatsRouter.post(
   '/:chatId/mensajes',
-  uploadImagenOpcional('foto'),
+  uploadImagenesOpcional('foto', LIMITES.mensaje.fotos.maximo),
   comprimirImagen,
   validar(enviarMensajeSchema),
   controller.enviarMensaje,
@@ -41,3 +45,7 @@ chatsRouter.post(
 // HU-5.2: marcar la conversación como leída. Es POST y no PATCH porque no se edita un
 // recurso identificado: se ejecuta la acción "leí esta sala" sobre un conjunto de mensajes.
 chatsRouter.post('/:chatId/leidos', controller.marcarLeidos);
+
+// HU-5.2: acusar que los mensajes LLEGARON, aunque no se haya abierto la conversación. Es
+// el segundo tilde, y va por REST por lo mismo que el envío: el socket no escribe.
+chatsRouter.post('/:chatId/entregados', controller.marcarEntregados);
