@@ -110,6 +110,7 @@ beforeEach(() => {
   vi.mocked(repo.ultimoMensajeAjeno).mockResolvedValue({ fechaAlta: FECHA } as never);
   vi.mocked(repo.acusarHasta).mockResolvedValue(0);
   vi.mocked(repo.ultimosMensajesParaRespuesta).mockResolvedValue([] as never);
+  vi.mocked(repo.buscarUltimaSolicitudDelChat).mockResolvedValue(null);
   vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(null as never);
   vi.mocked(storage.guardarImagenes).mockResolvedValue([URL_FOTO]);
   vi.mocked(presencia.estaEnLinea).mockReturnValue(false);
@@ -636,7 +637,8 @@ describe('asegurarChatDeSolicitud — la sala que nace de una solicitud', () => 
   }
 
   beforeEach(() => {
-    vi.mocked(repo.buscarChatDeSolicitud).mockResolvedValue(null);
+    vi.mocked(repo.buscarMensajeDeSolicitud).mockResolvedValue(null);
+    vi.mocked(repo.buscarChatEntre).mockResolvedValue(null);
     vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(solicitud() as never);
     vi.mocked(repo.listarMiembrosDeRefugio).mockResolvedValue([{ id: MIEMBRO_REFUGIO }] as never);
     vi.mocked(repo.crearChatDeSolicitud).mockResolvedValue({ id: CHAT_NUEVO } as never);
@@ -706,8 +708,29 @@ describe('asegurarChatDeSolicitud — la sala que nace de una solicitud', () => 
     );
   });
 
-  it('no duplica la sala si la solicitud ya tiene una', async () => {
-    vi.mocked(repo.buscarChatDeSolicitud).mockResolvedValue({ id: CHAT } as never);
+  it('una segunda solicitud al mismo refugio cae en la conversación que ya existía', async () => {
+    vi.mocked(repo.buscarChatEntre).mockResolvedValue({ id: CHAT } as never);
+
+    await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBe(CHAT);
+
+    expect(repo.buscarChatEntre).toHaveBeenCalledWith(SOLICITANTE, { refugioId: REFUGIO });
+    expect(repo.crearChatDeSolicitud).not.toHaveBeenCalled();
+    // La tarjeta sí se deja, en la sala existente.
+    expect(repo.crearMensaje).toHaveBeenCalledWith(expect.objectContaining({ chatId: CHAT }));
+  });
+
+  it('con una persona del otro lado, la sala se reencuentra por los dos participantes', async () => {
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(
+      solicitud({ deRefugio: false, duenio: MIEMBRO_REFUGIO }) as never,
+    );
+
+    await service.asegurarChatDeSolicitud(SOLICITUD);
+
+    expect(repo.buscarChatEntre).toHaveBeenCalledWith(SOLICITANTE, { usuarioId: MIEMBRO_REFUGIO });
+  });
+
+  it('un reintento de la misma solicitud no deja dos tarjetas', async () => {
+    vi.mocked(repo.buscarMensajeDeSolicitud).mockResolvedValue({ chatId: CHAT } as never);
 
     await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBe(CHAT);
 

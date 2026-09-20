@@ -265,7 +265,7 @@ Las cinco condiciones que este documento anotaba se cumplieron:
 1. **CONSTITUTION §7** — la interacción previa es la solicitud misma, ya persistida cuando se abre la sala.
 2. **Fila de `UsuarioChat` para TODOS** los participantes, incluidos los miembros del refugio: sin ellas el refugio no vería la conversación en GUI-31 ni podría entrar, porque la autorización del módulo es la membresía.
 3. **`Chat.refugioId`** se setea cuando la mascota es de un refugio; si la publicó una persona, la contraparte es esa persona y queda en `null`.
-4. **Sin salas duplicadas:** `chat.solicitud_id` con índice único parcial (`WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL`), más el chequeo previo. El índice es el que cubre dos requests concurrentes.
+4. **Sin salas duplicadas — la sala es entre las partes, no entre las solicitudes.** Antes de crear se busca la conversación viva que ya exista entre el solicitante y su contraparte (con refugio: cualquier sala de ese refugio donde el solicitante participe; sin refugio: la sala de los dos). Una segunda solicitud al mismo refugio deja su tarjeta **en la misma conversación**. `chat.solicitud_id` guarda sólo la que abrió la sala; cada tarjeta lleva la suya en `mensaje.solicitud_id`, y la cabecera muestra la **última**. El índice único parcial sobre `solicitud_id` cubre además dos requests concurrentes de la misma solicitud, y un reintento no deja dos tarjetas.
 5. **`chat_tipo` sigue sin definirse** y no se escribe.
 
 **Falta todavía la sala de HU-13.2** (coordinación por mascota perdida/encontrada), que no sale de una solicitud: cuando se implemente, `chat.solicitud_id` queda en `null` y hace falta su propia regla de quiénes participan.

@@ -301,11 +301,55 @@ export function crearMensaje(datos: {
 
 // ─────────────── Salas que nacen de una solicitud (CONSTITUTION §7) ───────────────
 
-/** La sala viva de una solicitud, si ya se creó. */
-export function buscarChatDeSolicitud(solicitudId: number) {
+/**
+ * La sala viva que ya existe entre el solicitante y su contraparte, si la hay.
+ *
+ * Con refugio, la contraparte es la institución: cualquier sala del refugio donde el
+ * solicitante participe, sin importar qué miembro la atendió. Sin refugio, es la persona
+ * que publicó: la sala donde los dos participan y que no pertenece a ningún refugio.
+ *
+ * Es lo que hace que una segunda solicitud al mismo refugio caiga en la misma conversación
+ * en vez de abrir otra: la relación es entre las partes, no entre las solicitudes.
+ */
+export function buscarChatEntre(
+  solicitanteId: number,
+  contraparte: { refugioId: number } | { usuarioId: number },
+) {
   return prisma.chat.findFirst({
-    where: { solicitudId, fechaBaja: null },
+    where: {
+      fechaBaja: null,
+      ...('refugioId' in contraparte
+        ? { refugioId: contraparte.refugioId }
+        : { refugioId: null }),
+      participantes: { some: { usuarioId: solicitanteId, fechaBaja: null } },
+      ...('usuarioId' in contraparte
+        ? { AND: [{ participantes: { some: { usuarioId: contraparte.usuarioId, fechaBaja: null } } }] }
+        : {}),
+    },
+    orderBy: { fechaAlta: 'asc' },
     select: { id: true },
+  });
+}
+
+/** ¿Esta solicitud ya dejó su tarjeta en alguna sala? Evita repetirla en un reintento. */
+export function buscarMensajeDeSolicitud(solicitudId: number) {
+  return prisma.mensaje.findFirst({
+    where: { tipo: 'SOLICITUD', solicitudId },
+    select: { chatId: true },
+  });
+}
+
+/**
+ * La solicitud más reciente de la sala: la última tarjeta que se dejó en ella.
+ *
+ * Una conversación puede acumular varias solicitudes (dos mascotas del mismo refugio, un
+ * segundo intento). La cabecera muestra la vigente, que es la última.
+ */
+export function buscarUltimaSolicitudDelChat(chatId: number) {
+  return prisma.mensaje.findFirst({
+    where: { chatId, tipo: 'SOLICITUD', solicitudId: { not: null } },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { solicitudId: true },
   });
 }
 

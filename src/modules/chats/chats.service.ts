@@ -384,12 +384,18 @@ export async function obtenerCabecera(usuarioId: number, chatId: number): Promis
     throw new AppError('CHAT_SIN_CONTACTO', 'Esta conversación ya no tiene contraparte', 404);
   }
 
-  const [ultimos, solicitud] = await Promise.all([
+  const [ultimos, ultimaSolicitud] = await Promise.all([
     repo.ultimosMensajesParaRespuesta(chatId, MENSAJES_PARA_RESPUESTA),
-    sala.chat.solicitudId === null
-      ? Promise.resolve(null)
-      : repo.buscarSolicitudParaChat(sala.chat.solicitudId),
+    repo.buscarUltimaSolicitudDelChat(chatId),
   ]);
+
+  // La cabecera nombra la solicitud VIGENTE de la sala —la última tarjeta—, no la que la
+  // abrió: una conversación con un refugio acumula pedidos y `chat.solicitudId` es sólo el
+  // primero.
+  const solicitud =
+    ultimaSolicitud?.solicitudId == null
+      ? null
+      : await repo.buscarSolicitudParaChat(ultimaSolicitud.solicitudId);
 
   // El tiempo de respuesta se mide contra QUIEN CONTESTA, que es una persona aunque la
   // contraparte se muestre como refugio: un refugio no emite mensajes, los emite su gente.
@@ -609,8 +615,14 @@ export async function marcarEntregados(usuarioId: number, chatId: number): Promi
 const CONTENIDO_MENSAJE_SOLICITUD = '';
 
 /**
- * Abre la sala de una solicitud, si todavía no existe, y deja en ella la tarjeta del
- * pedido.
+ * Deja la tarjeta de una solicitud en la conversación con su contraparte, abriéndola si
+ * todavía no existe.
+ *
+ * **La sala es entre las partes, no entre las solicitudes.** Un adoptante que pide una
+ * segunda mascota al mismo refugio —o vuelve a intentar con la misma— sigue en la
+ * conversación que ya tenía, y la tarjeta nueva aparece ahí. Se abre una sala nueva sólo
+ * cuando no hay ninguna viva entre los dos. `chat.solicitudId` queda como la que la ABRIÓ;
+ * cada tarjeta lleva la suya en `mensaje.solicitudId`.
  *
  * Es el único lugar donde se crean chats, y por eso concentra las condiciones que
  * `docs/api-chats.md` venía anotando:
@@ -621,17 +633,18 @@ const CONTENIDO_MENSAJE_SOLICITUD = '';
  *    refugio: la autorización del módulo es la membresía, así que sin ellas el refugio no
  *    vería la conversación en GUI-31 ni podría entrar.
  * 3. **`Chat.refugioId`** cuando la contraparte es un refugio: de eso depende qué nombre e
- *    imagen muestra el listado.
- * 4. **Sin salas duplicadas**: se chequea antes y hay un índice único parcial detrás, porque
- *    dos solicitudes concurrentes pasarían las dos por cualquier lectura previa.
+ *    imagen muestra el listado, y es la clave con la que se reencuentra la sala.
+ * 4. **Sin salas duplicadas**: se busca la existente antes de crear, y el índice único
+ *    parcial sobre `solicitud_id` cubre dos requests concurrentes de la misma solicitud.
  * 5. **`chat_tipo` no se escribe**: sus valores siguen sin definirse en MODELO_DATOS.md.
  *
  * No lanza: si algo falla, la solicitud ya se creó y no tiene por qué caerse por no haber
  * podido abrir la sala. Devuelve el id del chat o `null`.
  */
 export async function asegurarChatDeSolicitud(solicitudId: number): Promise<number | null> {
-  const existente = await repo.buscarChatDeSolicitud(solicitudId);
-  if (existente) return existente.id;
+  // Idempotente: un reintento no deja dos tarjetas de la misma solicitud.
+  const yaAnunciada = await repo.buscarMensajeDeSolicitud(solicitudId);
+  if (yaAnunciada) return yaAnunciada.chatId;
 
   const solicitud = await repo.buscarSolicitudParaChat(solicitudId);
   if (!solicitud) return null;
@@ -653,18 +666,27 @@ export async function asegurarChatDeSolicitud(solicitudId: number): Promise<numb
   // rechaza antes de llegar acá).
   if (participantesIds.length < 2) return null;
 
-  const chat = await repo.crearChatDeSolicitud({
-    solicitudId,
-    refugioId: refugioId ?? null,
-    participantesIds,
-    // El alta es del solicitante: es quien disparó la interacción que habilita la sala.
-    creadoPor: solicitud.usuarioId,
-  });
+  const existente = await repo.buscarChatEntre(
+    solicitud.usuarioId,
+    refugioId ? { refugioId } : { usuarioId: mascota.usuarioId },
+  );
+
+  const chatId =
+    existente?.id ??
+    (
+      await repo.crearChatDeSolicitud({
+        solicitudId,
+        refugioId: refugioId ?? null,
+        participantesIds,
+        // El alta es del solicitante: es quien disparó la interacción que habilita la sala.
+        creadoPor: solicitud.usuarioId,
+      })
+    ).id;
 
   // La tarjeta la emite SISTEMA y no el solicitante: no es algo que él haya escrito, y con
   // su autoría se pintaría como una burbuja propia en su pantalla.
   const mensaje = await repo.crearMensaje({
-    chatId: chat.id,
+    chatId,
     usuarioId: USUARIO_SISTEMA_ID,
     contenido: CONTENIDO_MENSAJE_SOLICITUD,
     imagenes: [],
@@ -677,5 +699,5 @@ export async function asegurarChatDeSolicitud(solicitudId: number): Promise<numb
     participantesIds,
   );
 
-  return chat.id;
+  return chatId;
 }

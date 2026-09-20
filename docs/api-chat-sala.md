@@ -181,7 +181,7 @@ Con esto **la pantalla se pinta sola**, sin depender de lo que le haya pasado el
 |---|---|
 | `enLinea` | Snapshot de presencia al momento del pedido. **A partir de ahí lo actualiza `chat:presencia`** |
 | `minutosRespuesta` | En cuántos MINUTOS suele responder el contacto en esta sala, o `null`. Alimenta el "responde en ~2 h" del header |
-| `solicitud` | La que originó la sala, o `null`. Mismo objeto que el del mensaje de sistema. Alimenta el subtítulo "Solicitud #1042 · Max" |
+| `solicitud` | La solicitud **vigente** de la sala —la última tarjeta que se dejó—, o `null` si no hay ninguna. Una conversación con un refugio acumula pedidos; acá va el más reciente. Alimenta el subtítulo "Solicitud #1042 · Max" |
 
 **`minutosRespuesta` viaja como número y no como texto** por el mismo motivo que las fechas
 van en ISO: "~2 h" es una decisión de UI y el redondeo depende del idioma.
