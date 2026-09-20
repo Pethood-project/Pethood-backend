@@ -75,7 +75,7 @@ function ultimoMensaje(opciones: {
     imagenUrl = null,
   } = opciones;
 
-  return { chatId, contenido, usuarioId, imagenUrl, fechaAlta };
+  return { chatId, contenido, usuarioId, imagenUrl, tipo: 'TEXTO' as const, fechaAlta };
 }
 
 /** Fila de `contarNoLeidosPorChat`: el conteo ya resuelto contra la marca del participante. */
@@ -102,6 +102,19 @@ describe('listarConversaciones — lista vacía', () => {
 
     expect(repo.ultimoMensajePorChat).not.toHaveBeenCalled();
     expect(repo.contarNoLeidosPorChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('listarConversaciones — preview de la tarjeta de solicitud', () => {
+  it('cuando lo último es una solicitud, el preview lo dice con tipo y contenido vacío', async () => {
+    vi.mocked(repo.listarChatsActivosDeUsuario).mockResolvedValue([membresia({ chatId: 1 })] as never);
+    vi.mocked(repo.ultimoMensajePorChat).mockResolvedValue([
+      { ...ultimoMensaje({ chatId: 1, fechaAlta: RECIENTE, contenido: '' }), tipo: 'SOLICITUD' },
+    ] as never);
+
+    const { chats } = await service.listarConversaciones(USUARIO);
+
+    expect(chats[0]!.ultimoMensaje).toMatchObject({ tipo: 'SOLICITUD', contenido: '' });
   });
 });
 
@@ -188,6 +201,7 @@ describe('listarConversaciones — vista previa del último mensaje', () => {
 
     expect(chats[0]!.ultimoMensaje).toEqual({
       contenido: largo,
+      tipo: 'TEXTO',
       fecha: '2026-09-01T14:05:00.000Z',
       esMio: false,
       tieneImagen: false,

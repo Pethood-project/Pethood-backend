@@ -115,6 +115,7 @@ Authorization: Bearer <token>
 | `ultimoMensaje.fecha` | ISO 8601 crudo |
 | `ultimoMensaje.esMio` | `true` si lo mandó el usuario autenticado → prefijo "Vos: ..." |
 | `ultimoMensaje.tieneImagen` | `true` si el mensaje trae foto. Con `contenido: ""` significa mensaje de solo imagen → mostrar "📷 Foto" |
+| `ultimoMensaje.tipo` | `"TEXTO"` o `"SOLICITUD"`. Con `SOLICITUD` el `contenido` va vacío: es la tarjeta de un pedido → mostrar "📄 Solicitud", con el mismo criterio que la foto |
 | `noLeidos` | Mensajes **del otro** que el usuario todavía no leyó. Número absoluto, no un delta. Sale de comparar la fecha de cada mensaje contra `usuario_chat_ultima_lectura` — ver la nota de abajo |
 | `fechaUltimaActividad` | **Clave de orden, nunca `null`.** Fecha del último mensaje o, si la sala está vacía, fecha de creación del chat |
 

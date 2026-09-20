@@ -46,6 +46,11 @@ export interface UltimoMensajeDto {
   esMio: boolean;
   /** Un mensaje puede ser sólo foto: sin esto el preview quedaría vacío. */
   tieneImagen: boolean;
+  /**
+   * `SOLICITUD` cuando lo último de la sala es la tarjeta de una solicitud: su `contenido`
+   * va vacío y el cliente pone el texto ("Solicitud"), igual que con la foto.
+   */
+  tipo: 'TEXTO' | 'SOLICITUD';
 }
 
 /**

@@ -132,6 +132,7 @@ function aConversacion(
             fecha: ultimo.fechaAlta.toISOString(),
             esMio: ultimo.usuarioId === usuarioId,
             tieneImagen: ultimo.imagenUrl !== null,
+            tipo: ultimo.tipo,
           }
         : null,
       noLeidos: noLeidos.get(chat.id) ?? 0,

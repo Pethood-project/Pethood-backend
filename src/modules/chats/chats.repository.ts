@@ -81,6 +81,7 @@ export interface UltimoMensajeFila {
   contenido: string;
   usuarioId: number;
   imagenUrl: string | null;
+  tipo: TipoMensaje;
   fechaAlta: Date;
 }
 
@@ -108,6 +109,7 @@ export function ultimoMensajePorChat(chatIds: number[]): Promise<UltimoMensajeFi
            m."mensaje_contenido"  AS "contenido",
            m."usuario_id"         AS "usuarioId",
            m."mensaje_imagen_url" AS "imagenUrl",
+           m."mensaje_tipo"       AS "tipo",
            m."mensaje_fecha_alta" AS "fechaAlta"
       FROM "mensaje" m
      WHERE m."chat_id" IN (${Prisma.join(chatIds)})
