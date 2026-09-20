@@ -63,4 +63,66 @@ describe('uploadImagen + comprimirImagen (integración)', () => {
     expect(res.status).toBe(400);
     expect(body.error.codigo).toBe('ARCHIVO_INVALIDO');
   });
+
+  it('recorta y rota la imagen antes de comprimir cuando vienen esos parámetros', async () => {
+    const original = await sharp({
+      create: { width: 2000, height: 1000, channels: 3, background: { r: 100, g: 150, b: 200 } },
+    })
+      .jpeg({ quality: 100 })
+      .toBuffer();
+
+    const form = new FormData();
+    form.append('imagen', new Blob([original], { type: 'image/jpeg' }), 'test.jpg');
+    form.append('cropX', '0');
+    form.append('cropY', '0');
+    form.append('cropWidth', '1000');
+    form.append('cropHeight', '1000');
+    form.append('rotacion', '90');
+
+    const res = await fetch(`${baseUrl}/test`, { method: 'POST', body: form });
+    const body = (await res.json()) as { size: number; mimetype: string };
+
+    expect(res.status).toBe(200);
+    expect(body.mimetype).toBe('image/jpeg');
+    expect(body.size).toBeLessThan(original.length);
+  });
+
+  it('rechaza un recorte que excede el tamaño de la imagen', async () => {
+    const original = await sharp({
+      create: { width: 500, height: 500, channels: 3, background: { r: 100, g: 150, b: 200 } },
+    })
+      .jpeg({ quality: 100 })
+      .toBuffer();
+
+    const form = new FormData();
+    form.append('imagen', new Blob([original], { type: 'image/jpeg' }), 'test.jpg');
+    form.append('cropX', '0');
+    form.append('cropY', '0');
+    form.append('cropWidth', '600');
+    form.append('cropHeight', '600');
+
+    const res = await fetch(`${baseUrl}/test`, { method: 'POST', body: form });
+    const body = (await res.json()) as { error: { codigo: string; mensaje: string } };
+
+    expect(res.status).toBe(400);
+    expect(body.error.codigo).toBe('RECORTE_INVALIDO');
+  });
+
+  it('rechaza una rotación fuera de los ángulos permitidos', async () => {
+    const original = await sharp({
+      create: { width: 500, height: 500, channels: 3, background: { r: 100, g: 150, b: 200 } },
+    })
+      .jpeg({ quality: 100 })
+      .toBuffer();
+
+    const form = new FormData();
+    form.append('imagen', new Blob([original], { type: 'image/jpeg' }), 'test.jpg');
+    form.append('rotacion', '45');
+
+    const res = await fetch(`${baseUrl}/test`, { method: 'POST', body: form });
+    const body = (await res.json()) as { error: { codigo: string; mensaje: string } };
+
+    expect(res.status).toBe(400);
+    expect(body.error.codigo).toBe('VALIDACION');
+  });
 });

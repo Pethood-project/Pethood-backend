@@ -44,6 +44,8 @@ export const LIMITES = {
   imagen: {
     tamanioMaximoBytes: 5 * 1024 * 1024,
     formatos: ['image/jpeg', 'image/png', 'image/webp'],
+    /** Recorte (crop) mínimo aceptado antes de comprimir, para no guardar un recuadro casi vacío. */
+    recorteMinimoPx: 10,
   },
 
   /** Comprobante de historia clínica: además de imagen, admite pdf (REQUISITOS.md §4). */

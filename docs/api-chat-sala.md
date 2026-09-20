@@ -275,11 +275,17 @@ Dos formatos, según lleve foto o no:
 | Campo | Tipo | Obligatorio |
 |---|---|---|
 | `contenido` | texto, ≤1000 caracteres | Solo si no hay `foto` |
+<<<<<<< HEAD
 | `foto` | jpg/png/webp, ≤5 MB cada una. **Se puede repetir hasta 5 veces** | Solo si no hay `contenido` |
 
 **El campo se sigue llamando `foto` aunque ahora acepte varias**: multipart admite repetir el
 mismo nombre, así que un cliente que manda una sola sigue funcionando sin cambiar nada. Las
 fotos se guardan **en el orden en que viajan**, y ese es el orden de `imagenes`.
+=======
+| `foto` | jpg/png/webp, ≤5 MB | Solo si no hay `contenido` |
+| `rotacion` | `90` \| `180` \| `270` | No — sin rotación por defecto |
+| `cropX`, `cropY`, `cropWidth`, `cropHeight` | enteros ≥0, en píxeles sobre la `foto` original | No — los cuatro juntos o ninguno |
+>>>>>>> origin/dev
 
 **`application/json`** (solo texto):
 
@@ -289,7 +295,7 @@ fotos se guardan **en el orden en que viajan**, y ese es el orden de `imagenes`.
 
 **Texto y foto pueden ir juntos** — el pie de foto es un mensaje válido. Lo que no se acepta es un mensaje sin ninguno de los dos.
 
-La foto se comprime en el servidor (`sharp`, ancho máx. 1600px) antes de persistirse, igual que en el alta de mascota.
+La foto se recorta (si vino `cropX`/`cropY`/`cropWidth`/`cropHeight`) y rota (si vino `rotacion`) antes de comprimirse en el servidor (`sharp`, ancho máx. 1600px), igual que en el alta de mascota. El recorte se aplica primero y sus coordenadas son siempre sobre la imagen original que se subió, no sobre una ya rotada. `RECORTE_INVALIDO` (400) si el rectángulo excede la imagen; `VALIDACION` (400) si `rotacion` no es 0/90/180/270 o si el recorte viene incompleto.
 
 ### Respuesta 201
 
