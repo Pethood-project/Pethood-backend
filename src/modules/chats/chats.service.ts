@@ -262,7 +262,8 @@ function acuseDe(
 
   // Leído implica entregado aunque la marca de entrega se haya perdido: no se puede leer
   // algo que no llegó.
-  const entregado = leido || destinatarios.every((destinatario) => cubre(destinatario.ultimaEntrega));
+  const entregado =
+    leido || destinatarios.every((destinatario) => cubre(destinatario.ultimaEntrega));
 
   const fechaLectura = leido
     ? new Date(
@@ -407,8 +408,7 @@ export async function obtenerCabecera(usuarioId: number, chatId: number): Promis
     contacto,
     // Un refugio es una institución, no una sesión: sólo las personas se conectan.
     enLinea: contacto.tipo === 'USUARIO' && estaEnLinea(contacto.id),
-    minutosRespuesta:
-      quienResponde === null ? null : minutosDeRespuesta(ultimos, quienResponde),
+    minutosRespuesta: quienResponde === null ? null : minutosDeRespuesta(ultimos, quienResponde),
     solicitud: solicitud === null ? null : aSolicitudEnChat(solicitud),
   };
 }

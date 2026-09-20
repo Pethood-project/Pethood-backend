@@ -107,7 +107,9 @@ describe('listarConversaciones — lista vacía', () => {
 
 describe('listarConversaciones — preview de la tarjeta de solicitud', () => {
   it('cuando lo último es una solicitud, el preview lo dice con tipo y contenido vacío', async () => {
-    vi.mocked(repo.listarChatsActivosDeUsuario).mockResolvedValue([membresia({ chatId: 1 })] as never);
+    vi.mocked(repo.listarChatsActivosDeUsuario).mockResolvedValue([
+      membresia({ chatId: 1 }),
+    ] as never);
     vi.mocked(repo.ultimoMensajePorChat).mockResolvedValue([
       { ...ultimoMensaje({ chatId: 1, fechaAlta: RECIENTE, contenido: '' }), tipo: 'SOLICITUD' },
     ] as never);

@@ -320,12 +320,14 @@ export function buscarChatEntre(
   return prisma.chat.findFirst({
     where: {
       fechaBaja: null,
-      ...('refugioId' in contraparte
-        ? { refugioId: contraparte.refugioId }
-        : { refugioId: null }),
+      ...('refugioId' in contraparte ? { refugioId: contraparte.refugioId } : { refugioId: null }),
       participantes: { some: { usuarioId: solicitanteId, fechaBaja: null } },
       ...('usuarioId' in contraparte
-        ? { AND: [{ participantes: { some: { usuarioId: contraparte.usuarioId, fechaBaja: null } } }] }
+        ? {
+            AND: [
+              { participantes: { some: { usuarioId: contraparte.usuarioId, fechaBaja: null } } },
+            ],
+          }
         : {}),
     },
     orderBy: { fechaAlta: 'asc' },
