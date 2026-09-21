@@ -39,6 +39,26 @@ export const LIMITES = {
     motivo: { min: 1, max: 500 },
   },
 
+  /** Formulario de contacto público (spec 015, HU-15.2). */
+  consultaSoporte: {
+    nombreCompleto: { min: 2, max: 100 },
+    email: { max: 100 },
+    asunto: { min: 5, max: 100 },
+    mensaje: { min: 10, max: 1000 },
+  },
+
+  /** Solo web-admin (spec 015, HU-15.3) — no hay contraparte en la app mobile, no se mirrorea. */
+  faq: {
+    pregunta: { min: 5, max: 200 },
+    respuesta: { min: 5, max: 2000 },
+    orden: { min: 1, max: 999 },
+  },
+
+  faqCategoria: {
+    nombre: { min: 2, max: 50 },
+    descripcion: { max: 200 },
+  },
+
   fecha: { anioMinimo: 1900 },
 
   imagen: {

@@ -147,3 +147,16 @@ export function idSchema(etiqueta: string) {
     .int(`${etiqueta} no es válido`)
     .positive(`${etiqueta} no es válido`);
 }
+
+/** Entero dentro de un rango (ej. el orden de una FAQ). Coerciona: llega como string en query/form. */
+export function enteroSchema(opciones: { min: number; max: number; etiqueta: string }) {
+  const { min, max, etiqueta } = opciones;
+  return z.coerce
+    .number({
+      required_error: `${etiqueta} es obligatorio`,
+      invalid_type_error: `${etiqueta} no es válido`,
+    })
+    .int(`${etiqueta} no es válido`)
+    .min(min, `${etiqueta} debe estar entre ${min} y ${max}`)
+    .max(max, `${etiqueta} debe estar entre ${min} y ${max}`);
+}
