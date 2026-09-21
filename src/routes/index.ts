@@ -12,6 +12,7 @@ import { mascotasRouter } from '../modules/mascotas/mascotas.routes';
 import { publicacionesRouter } from '../modules/publicaciones/publicaciones.routes';
 import { solicitudesRouter } from '../modules/solicitudes/solicitudes.routes';
 import { seguimientoRouter } from '../modules/seguimiento/seguimiento.routes';
+import { soporteRouter } from '../modules/soporte/soporte.routes';
 
 export const apiRouter = Router();
 
@@ -36,6 +37,7 @@ apiRouter.use('/chats', chatsRouter);
 apiRouter.use('/', catalogosRouter);
 apiRouter.use('/', historiaClinicaRouter); // spec 005
 apiRouter.use('/', seguimientoRouter); // spec 011
+apiRouter.use('/', soporteRouter); // spec 015
 
 // Módulos (descomentar a medida que se implementan las specs):
 // apiRouter.use('/usuarios', usuariosRouter);    // spec 001
