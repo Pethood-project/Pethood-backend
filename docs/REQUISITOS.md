@@ -211,6 +211,7 @@ Todos los filtros son de selección múltiple (ver tabla de validez, sección 4)
 
 - **HU-15.1 Consulta de manual de usuario y FAQs** — contenido estático, tipo landing page.
 - **HU-15.2 Canal de contacto y formulario de soporte**.
+- **HU-15.3 Gestión de FAQs (contenido administrable)** — **PENDIENTE**. Catálogo mantenible desde web-admin, modelado con dos tablas `Faq` + `Faq_Categoria` (ver `MODELO_DATOS.md`). No implementar hasta que se apruebe la resolución; cuando se implemente, reemplaza el enfoque estático de la consulta de HU-15.1.
 
 ## 7. Reglas de validación detalladas — casos más ricos
 

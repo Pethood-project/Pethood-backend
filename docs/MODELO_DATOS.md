@@ -81,7 +81,7 @@ Ver catálogos arriba.
 **Campos agregados por el diseño de GUI-24 (2026-08-17):** tampoco están en el diagrama de clases.
 
 | Campo | Tipo | Para qué |
-|---|---|---|
+| --- | --- | --- |
 | `publicacion_imagenes` | `text[]` | Hasta 5 fotos. **El orden del array es el orden de la galería**: la primera es la portada. `publicacion_imagen_url` se mantiene sincronizado con esa portada para no romper lo que ya lee ese campo. Si no se suben fotos propias, se hereda la de la mascota. |
 | `publicacion_personalidad` | `text[]` | Rasgos elegidos como pastillas (≤25 caracteres cada uno). Hoy las opciones están fijas en el frontend; cuando se definan, deberían pasar a ser un catálogo como Especie o Raza. |
 | `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
@@ -178,7 +178,7 @@ Representa el hogar de tránsito de un usuario/adoptante — no es una entidad d
 **Campos agregados fuera del diagrama de clases (HU-7.1)** — el formulario de solicitud pregunta cosas que el diagrama no contemplaba; ver `REQUISITOS.md` §10:
 
 | Campo | Tipo | Qué responde |
-|---|---|---|
+| --- | --- | --- |
 | `hogar_espacio_exterior` | texto: `Balcon` \| `Patio` \| `Jardin` \| `Ninguno` | "¿Tenés espacios al aire libre?" |
 | `hogar_detalle_mascotas` | texto, nullable | "¿Cuáles?", solo si `hogar_tiene_mascotas` |
 | `hogar_tiene_ninios` | boolean | "¿Vive algún niño en tu casa?" |
@@ -220,6 +220,16 @@ Ver catálogos.
 ### Reporte_Problema
 
 `reporte_problema_id`, `reporte_problema_motivo`, `rporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema` y sus datos de auditoría. No hay relación con ninguna tabla.
+
+### Faq_Categoria
+
+`faq_categoria_id PK`, `faq_categoria_nombre`, `faq_categoria_descripcion` + auditoría. Catálogo de agrupación de preguntas frecuentes (ej. Adopciones, Refugios, Cuenta).
+
+### Faq
+
+`faq_id PK`, `faq_pregunta`, `faq_respuesta`, `faq_orden`, FK `faq_categoria_id FK NOT NULL` + auditoría.
+
+**Estado (HU-15.3 — PENDIENTE):** contenido administrable por web-admin. No modelar/migrar hasta que la HU se apruebe.
 
 ## Entidades cuya existencia formal hay que confirmar
 
@@ -308,6 +318,9 @@ Ver catálogos.
   -> Usuario (reportante)
   -> Mascota (opcional)
   -> Estado_Animal_Perdido
+
+- Faq
+  -> Faq_Categoria
 
 ## Cómo usar este documento desde Claude Code
 
