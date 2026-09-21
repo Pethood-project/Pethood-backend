@@ -219,7 +219,11 @@ Ver catálogos.
 
 ### Reporte_Problema
 
-`reporte_problema_id`, `reporte_problema_motivo`, `rporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema` y sus datos de auditoría. No hay relación con ninguna tabla.
+`reporte_problema_id`, `reporte_problema_motivo`, `reporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema` y sus datos de auditoría. No hay relación con ninguna tabla.
+
+### Consulta_Soporte
+
+`consulta_soporte_id PK`, `consulta_soporte_nombre_completo`, `consulta_soporte_email`, `consulta_soporte_asunto`, `consulta_soporte_mensaje`, `consulta_soporte_resuelta` (boolean, default `false`) + auditoría. Mensajes del formulario de contacto (HU-15.2), enviados por cualquier persona sin sesión. El admin los lee y los marca como resueltos en web-admin. Sin relación con ninguna tabla: al no haber usuario autenticado, `usuario_alta` es el usuario SISTEMA. No confundir con `Reporte_Problema` (moderación, HU-3).
 
 ### Faq_Categoria
 
@@ -229,7 +233,7 @@ Ver catálogos.
 
 `faq_id PK`, `faq_pregunta`, `faq_respuesta`, `faq_orden`, FK `faq_categoria_id FK NOT NULL` + auditoría.
 
-**Estado (HU-15.3 — PENDIENTE):** contenido administrable por web-admin. No modelar/migrar hasta que la HU se apruebe.
+**HU-15.3:** contenido administrable por web-admin, sin tocar código. Ver spec 015.
 
 ## Entidades cuya existencia formal hay que confirmar
 
