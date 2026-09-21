@@ -2,9 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import { apiRouter } from './routes';
 import { errorHandler } from './middlewares/errorHandler';
+import { env } from './config/env';
 import { DIRECTORIO_UPLOADS, RUTA_PUBLICA_ARCHIVOS } from './shared/storage';
 
 export const app = express();
+
+app.set('trust proxy', env.TRUST_PROXY);
 
 app.use(cors());
 app.use(express.json());

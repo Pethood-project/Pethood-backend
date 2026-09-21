@@ -22,6 +22,7 @@ import { seedComunidad } from './seed/comunidad';
 import { seedFavoritos } from './seed/favoritos';
 import { seedMascotas } from './seed/mascotas';
 import { seedSolicitudes } from './seed/solicitudes';
+import { seedSoporte } from './seed/soporte';
 import { seedUsuarios } from './seed/usuarios';
 
 async function main() {
@@ -42,6 +43,7 @@ async function main() {
   await seedSolicitudes(catalogos, actores, mascotas);
   await seedChats(sistemaId, actores);
   await seedComunidad(catalogos, actores, mascotas);
+  await seedSoporte(sistemaId);
 
   log('');
   log('✅ Seed completo.');

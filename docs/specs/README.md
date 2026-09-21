@@ -14,7 +14,7 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 ## Índice
 
 | Nº | Spec | Sprint | Estado |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 001 | Gestión de Perfiles y Autenticación | 1 | BORRADOR |
 | 002 | Publicación de Mascotas | 2 | pendiente |
 | 003 | Adopción y Favoritos | 3 | BORRADOR |
@@ -26,3 +26,4 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 009 | Dashboards y Reportes (Admin) | 12 | APROBADA |
 | 010 | Dashboard de Refugio | 12 | APROBADA |
 | 011 | Seguimiento Post-Adopción (HU-9.1, HU-9.2) | 7 | APROBADA |
+| 015 | Soporte (HU-15.1, HU-15.2, HU-15.3) | 13 | BORRADOR |

@@ -209,8 +209,9 @@ Todos los filtros son de selección múltiple (ver tabla de validez, sección 4)
 
 ### Módulo 15: Soporte
 
-- **HU-15.1 Consulta de manual de usuario y FAQs** — contenido estático, tipo landing page.
-- **HU-15.2 Canal de contacto y formulario de soporte**.
+- **HU-15.1 Consulta de manual de usuario y FAQs** — pública, sin sesión. El manual es texto estático (frontend); las FAQs salen del catálogo de HU-15.3.
+- **HU-15.2 Canal de contacto y formulario de soporte** — público, sin sesión. Las consultas se guardan en `Consulta_Soporte` y las lee el admin en web-admin (sin envío de mails por ahora).
+- **HU-15.3 Gestión de FAQs (contenido administrable)** — catálogo mantenible desde web-admin sin tocar código, modelado con `Faq` + `Faq_Categoria` (ver `MODELO_DATOS.md`). Spec 015.
 
 ## 7. Reglas de validación detalladas — casos más ricos
 
@@ -279,7 +280,7 @@ Ver tabla completa en el PDF original (sección 20.2). Resumen de mapeo HU → e
 - Módulo 12 (campañas): `Campaña`, `Usuario`, `Estado_Mascota` (¿posible referencia cruzada rara en la matriz original entre Campaña y Estado_Mascota — revisar si es error del documento fuente o si hay una relación real no evidente en el diagrama de clases).
 - Módulo 13 (perdidas y encontradas): `Usuario`, `Animal_Perdido`, `Estado_Animal_Perdido`.
 - Módulo 14 (dashboards): agregaciones sobre todo lo anterior.
-- Módulo 15 (soporte): sin entidad de dominio, contenido estático.
+- Módulo 15 (soporte): `Consulta_Soporte`, `Faq_Categoria`, `Faq` (sin relación con las demás entidades). No usa `Reporte_Problema`, que es de moderación (módulo 3).
 
 ## 10. Ambigüedades detectadas en el documento fuente (no resolver solo)
 

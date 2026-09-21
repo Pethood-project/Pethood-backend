@@ -1,5 +1,7 @@
 /** Validación de texto reutilizable. Funciones puras, sin dependencias. */
 
+const REGEX_SOLO_LETRAS = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+$/;
+
 export type ResultadoTexto = { valido: true; valor: string } | { valido: false; error: string };
 
 /** Concuerda en género con el artículo de la etiqueta ("La ubicación" → obligatoria). */
@@ -28,6 +30,8 @@ export interface OpcionesTexto {
    */
   errorObligatorio?: string;
   errorLongitud?: string;
+  /** Solo letras y espacios (REQUISITOS §4: nombres solo alfabéticos). */
+  soloLetras?: boolean;
 }
 
 /**
@@ -36,7 +40,15 @@ export interface OpcionesTexto {
  * porque para quien lo escribió el campo tenía contenido.
  */
 export function validarTexto(valor: unknown, opciones: OpcionesTexto): ResultadoTexto {
-  const { min = 0, max, etiqueta, obligatorio = true, errorObligatorio, errorLongitud } = opciones;
+  const {
+    min = 0,
+    max,
+    etiqueta,
+    obligatorio = true,
+    errorObligatorio,
+    errorLongitud,
+    soloLetras = false,
+  } = opciones;
   const recortado = typeof valor === 'string' ? valor.trim() : '';
 
   const porLongitud = errorLongitud ?? mensajeLongitud(etiqueta, min, max);
@@ -49,6 +61,10 @@ export function validarTexto(valor: unknown, opciones: OpcionesTexto): Resultado
 
   if (recortado.length < min || recortado.length > max) {
     return { valido: false, error: porLongitud };
+  }
+
+  if (soloLetras && !REGEX_SOLO_LETRAS.test(recortado)) {
+    return { valido: false, error: `${etiqueta} solo puede tener letras` };
   }
 
   return { valido: true, valor: recortado };

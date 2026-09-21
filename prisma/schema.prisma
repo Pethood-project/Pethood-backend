@@ -895,6 +895,63 @@ model ReporteProblema {
   @@map("reporte_problema")
 }
 
+// ─────────────── SOPORTE (spec 015) ───────────────
+
+// Formulario de contacto público (HU-15.2). Sin sesión, así que usuario_alta = SISTEMA.
+model ConsultaSoporte {
+  id             Int     @id @default(autoincrement()) @map("consulta_soporte_id")
+  nombreCompleto String  @map("consulta_soporte_nombre_completo")
+  email          String  @map("consulta_soporte_email")
+  asunto         String  @map("consulta_soporte_asunto")
+  mensaje        String  @map("consulta_soporte_mensaje")
+  resuelta       Boolean @default(false) @map("consulta_soporte_resuelta")
+
+  usuarioAlta         Int       @map("consulta_soporte_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("consulta_soporte_fecha_alta")
+  usuarioModificacion Int?      @map("consulta_soporte_usuario_modificacion")
+  fechaModificacion   DateTime? @map("consulta_soporte_fecha_modificacion")
+  usuarioBaja         Int?      @map("consulta_soporte_usuario_baja")
+  fechaBaja           DateTime? @map("consulta_soporte_fecha_baja")
+
+  @@map("consulta_soporte")
+}
+
+model FaqCategoria {
+  id          Int     @id @default(autoincrement()) @map("faq_categoria_id")
+  nombre      String  @map("faq_categoria_nombre")
+  descripcion String? @map("faq_categoria_descripcion")
+
+  usuarioAlta         Int       @map("faq_categoria_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("faq_categoria_fecha_alta")
+  usuarioModificacion Int?      @map("faq_categoria_usuario_modificacion")
+  fechaModificacion   DateTime? @map("faq_categoria_fecha_modificacion")
+  usuarioBaja         Int?      @map("faq_categoria_usuario_baja")
+  fechaBaja           DateTime? @map("faq_categoria_fecha_baja")
+
+  faqs Faq[]
+
+  @@map("faq_categoria")
+}
+
+model Faq {
+  id             Int    @id @default(autoincrement()) @map("faq_id")
+  pregunta       String @map("faq_pregunta")
+  respuesta      String @map("faq_respuesta")
+  orden          Int    @map("faq_orden")
+  faqCategoriaId Int    @map("faq_categoria_id")
+
+  usuarioAlta         Int       @map("faq_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("faq_fecha_alta")
+  usuarioModificacion Int?      @map("faq_usuario_modificacion")
+  fechaModificacion   DateTime? @map("faq_fecha_modificacion")
+  usuarioBaja         Int?      @map("faq_usuario_baja")
+  fechaBaja           DateTime? @map("faq_fecha_baja")
+
+  faqCategoria FaqCategoria @relation(fields: [faqCategoriaId], references: [id])
+
+  @@map("faq")
+}
+
 // El log de auditoría de CONSTITUTION.md §4 ("Operaciones críticas registran entrada en
 // LogAuditoria") NO vive en la base — se implementa como archivo de texto append-only
 // (ver logs/ en la raíz del repo, ya contemplado en .gitignore) en el middleware de
