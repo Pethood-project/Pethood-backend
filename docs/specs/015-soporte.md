@@ -1,6 +1,6 @@
 # Spec 015 — Soporte (HU-15.1, HU-15.2, HU-15.3)
 
-**Estado:** BORRADOR
+**Estado:** APROBADA
 **Sprint:** 13 (Fase 13 del ROADMAP: en paralelo, sin dependencias, baja prioridad) · **Responsable:** ncorrea-13 · **Última actualización:** 2026-09-21
 
 ## 1. Objetivo
@@ -26,7 +26,7 @@ Ver `MODELO_DATOS.md`. Esta spec introduce **tres tablas nuevas** (una migració
 - **`ConsultaSoporte`** (nueva, HU-15.2), tabla `consulta_soporte`:
 
 | Campo | Tipo | Notas |
-|---|---|---|
+| --- | --- | --- |
 | `consulta_soporte_id` | PK autoincremental | |
 | `consulta_soporte_nombre_completo` | String | |
 | `consulta_soporte_email` | String | Correo de contacto |
@@ -34,7 +34,8 @@ Ver `MODELO_DATOS.md`. Esta spec introduce **tres tablas nuevas** (una migració
 | `consulta_soporte_mensaje` | String | Texto largo |
 | `consulta_soporte_resuelta` | Boolean, default `false` | Lo marca el admin |
 
-  + auditoría estándar. Quien envía no está autenticado, así que `usuarioAlta` = `USUARIO_SISTEMA_ID` (mismo criterio que los cron jobs). El endpoint no lee el JWT aunque venga.
+- auditoría estándar. Quien envía no está autenticado, así que `usuarioAlta` = `USUARIO_SISTEMA_ID` (mismo criterio que los cron jobs). El endpoint no lee el JWT aunque venga.
+
 - **`FaqCategoria`** (nueva, HU-15.3): `faq_categoria_id`, `faq_categoria_nombre`, `faq_categoria_descripcion` + auditoría.
 - **`Faq`** (nueva, HU-15.3): `faq_id`, `faq_pregunta`, `faq_respuesta`, `faq_orden`, FK `faq_categoria_id` NOT NULL + auditoría.
 
@@ -69,7 +70,7 @@ Módulo nuevo: `src/modules/soporte/` (scaffold de 5 archivos). Errores siempre 
 ### FAQs (HU-15.1 y HU-15.3)
 
 | Método | Ruta | Auth | Descripción |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | GET | /api/v1/faqs | pública | FAQs activas agrupadas por categoría, ordenadas por `orden` |
 | GET | /api/v1/admin/faq-categorias | JWT, admin | Listar categorías |
 | POST | /api/v1/admin/faq-categorias | JWT, admin | Crear categoría |
@@ -106,7 +107,7 @@ Errores: `400 VALIDACION`, `404 FAQ_NO_ENCONTRADA`, `404 CATEGORIA_NO_ENCONTRADA
 ### Formulario de contacto (HU-15.2)
 
 | Método | Ruta | Auth | Descripción |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | POST | /api/v1/soporte/consultas | pública, con rate limit por IP | Enviar una consulta |
 | GET | /api/v1/admin/soporte/consultas?resuelta=false | JWT, admin | Listar consultas, más nuevas primero, filtro opcional por `resuelta` |
 | PATCH | /api/v1/admin/soporte/consultas/:id/resolver | JWT, admin | Marcar como resuelta |
