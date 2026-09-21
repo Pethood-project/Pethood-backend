@@ -18,6 +18,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET debe tener al menos 16 caracteres'),
   JWT_EXPIRES_IN: z.string().default('7d'),
+  // Saltos de proxy delante del server (0 = ninguno). El rate limit por IP lo necesita para ver la IP real.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   GOOGLE_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
