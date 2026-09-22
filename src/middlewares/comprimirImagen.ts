@@ -32,8 +32,13 @@ async function editarYComprimir(
 ): Promise<void> {
   const formato = FORMATO_POR_MIME[archivo.mimetype];
 
-  // No es una imagen conocida (ej. el pdf de un comprobante de historia clínica): recortar y
-  // rotar no aplican, se ignoran esos parámetros y el buffer queda tal cual.
+  // No es una imagen conocida: el pdf de un comprobante de historia clínica, o un video del
+  // chat. Recortar, rotar y recomprimir no aplican, así que esos parámetros se ignoran y el
+  // buffer queda tal cual.
+  //
+  // **El video se guarda sin transcodificar, a propósito.** Procesarlo necesitaría `ffmpeg`,
+  // una dependencia nativa pesada que complicaría el deploy; en su lugar el tamaño se acota
+  // en el origen (5 MB de tope duro en multer, y el cliente limita la duración).
   if (!formato) return;
 
   let pipeline = sharp(archivo.buffer);
@@ -72,11 +77,17 @@ async function comprimir(archivo: Express.Multer.File): Promise<void> {
 
 /**
  * Comprime asíncronamente las imágenes subidas, tanto la de `uploadImagen`/`uploadDocumento`
- * como las de `uploadImagenes`. Además, si el archivo llegó por un campo único (`req.file`) y
- * el body trae `rotacion` y/o `cropX`/`cropY`/`cropWidth`/`cropHeight`, recorta y rota antes
- * de comprimir (historia clínica, seguimiento y fotos de chat comparten este pipeline). Las
- * subidas múltiples (`req.files`) no admiten estos parámetros: un solo rectángulo no aplica a
- * varias imágenes distintas.
+ * como las de `uploadImagenes`. Además, si el mensaje trae **una sola** imagen y el body
+ * incluye `rotacion` y/o `cropX`/`cropY`/`cropWidth`/`cropHeight`, la recorta y rota antes de
+ * comprimir (historia clínica, seguimiento, publicaciones y fotos de chat comparten este
+ * pipeline).
+ *
+ * **El criterio es la cantidad de archivos, no por qué middleware entraron.** Antes se
+ * miraba `req.file`, que sólo pobla `upload.single`: cuando el chat pasó a aceptar varias
+ * fotos (`upload.array`) el recorte y la rotación dejaron de aplicarse ahí en silencio,
+ * aunque el contrato los siguiera documentando. Con una sola imagen los parámetros valen
+ * venga por donde venga; con dos o más se ignoran, porque un único rectángulo no puede
+ * aplicarse a imágenes distintas.
  *
  * No decide dónde ni cómo se persisten las imágenes — eso es del módulo que lo use.
  */
@@ -90,24 +101,24 @@ export async function comprimirImagen(
     ...(Array.isArray(req.files) ? req.files : []),
   ];
 
+  const unica = archivos.length === 1 ? archivos[0] : undefined;
+
   if (archivos.length === 0) {
     next();
     return;
   }
 
   try {
-    if (req.file) {
+    if (unica) {
       const rotacion = parsearRotacion(req.body?.rotacion);
       if (!rotacion.valido) throw new AppError('VALIDACION', rotacion.error, 400);
 
       const recorte = parsearRecorte(req.body ?? {});
       if (!recorte.valido) throw new AppError('VALIDACION', recorte.error, 400);
 
-      await editarYComprimir(req.file, rotacion.valor, recorte.valor);
-    }
-
-    if (Array.isArray(req.files)) {
-      await Promise.all(req.files.map(comprimir));
+      await editarYComprimir(unica, rotacion.valor, recorte.valor);
+    } else {
+      await Promise.all(archivos.map(comprimir));
     }
 
     next();

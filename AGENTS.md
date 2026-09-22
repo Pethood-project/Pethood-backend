@@ -14,6 +14,7 @@ Plataforma híbrida de gestión de adopción de mascotas que conecta **adoptante
 - `docs/ROADMAP.md` — plan de desarrollo por fases y dependencias entre módulos.
 - `docs/ARQUITECTURA.md` — árbol de directorios de este repo y de `pethood-frontend`, convención de branches.
 - `docs/specs/` — una spec aprobada por módulo antes de codificarlo.
+- `docs/DEUDA_TECNICA.md` — lo que sabemos que está a medias o postergado, en **los dos repos**. Consultarlo antes de "arreglar" algo que parece roto: puede ser una decisión tomada y anotada. Si la deuda es de un módulo va en su contrato de API; acá sólo la transversal.
 
 No se leen completas en cada cambio: consultá solo lo que la tarea toque.
 
@@ -21,6 +22,7 @@ No se leen completas en cada cambio: consultá solo lo que la tarea toque.
 - Implementás funcionalidad nueva → buscá la HU en `docs/REQUISITOS.md` y respetá sus criterios de aceptación literales (textos de error, límites de caracteres, nombres de botones): son consigna académica evaluable.
 - Creás un módulo o directorio nuevo → mirá el árbol de directorios en `docs/ARQUITECTURA.md`.
 - Dudás en prioridades o dependencias entre módulos → `docs/ROADMAP.md`.
+- Encontrás algo que parece un bug o una decisión rara → fijate primero en `docs/DEUDA_TECNICA.md`; y si dejás deuda nueva, anotala ahí antes de cerrar el PR.
 - Duda sobre un principio no negociable → `docs/CONSTITUTION.md` (sus reglas operativas ya viven resumidas en «Reglas transversales», más abajo).
 
 ## Arquitectura general del proyecto

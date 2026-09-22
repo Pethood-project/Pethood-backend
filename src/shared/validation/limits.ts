@@ -68,6 +68,37 @@ export const LIMITES = {
     recorteMinimoPx: 10,
   },
 
+  /**
+   * Video adjunto de un mensaje de chat. Hoy es el ÚNICO lugar del proyecto que acepta
+   * video: el resto de los módulos sigue siendo sólo imagen o pdf.
+   *
+   * **⚠️ EXCEPCIÓN EXPLÍCITA a los 5 MB de REQUISITOS.md §4.** Ese tope es la regla
+   * transversal para imágenes y documentos, y **para video no alcanza**: un teléfono graba
+   * 1080p a unos 13 Mbps, así que en 5 MB entran **3 segundos**. La duración útil que pidió
+   * el equipo es 15 s, que a 1080p pesan ~25 MB; 30 MB deja margen sin habilitar un 4K de 15 s
+   * (~84 MB), que se rechaza con un mensaje claro.
+   *
+   * Bajar el peso en vez de subir el tope **no es una opción disponible**: recomprimir en el
+   * servidor necesita `ffmpeg` y hacerlo en el cliente necesita un módulo nativo de
+   * transcodificación, que rompería las pruebas con Expo Go. `expo-image-picker` sólo deja
+   * bajar la calidad de grabación en iOS, no en Android.
+   *
+   * **Las imágenes siguen con su tope de 5 MB**: este número es el techo de multer para el
+   * request, y `validarTamanioAdjuntos` aplica el límite que corresponde a cada archivo.
+   *
+   * **`duracionMaximaSegundos` lo hace cumplir el CLIENTE, no el backend.** Medir la
+   * duración en el servidor necesita `ffmpeg`. El backend hace cumplir lo que sí puede
+   * verificar barato: formato y peso.
+   *
+   * Los tres formatos son los que producen los clientes reales: Android graba `mp4`, iOS
+   * graba `mov` (`video/quicktime`) y el navegador suele dar `webm`.
+   */
+  video: {
+    tamanioMaximoBytes: 30 * 1024 * 1024,
+    duracionMaximaSegundos: 15,
+    formatos: ['video/mp4', 'video/quicktime', 'video/webm'],
+  },
+
   /** Comprobante de historia clínica: además de imagen, admite pdf (REQUISITOS.md §4). */
   documento: {
     tamanioMaximoBytes: 5 * 1024 * 1024,
@@ -121,6 +152,15 @@ export const LIMITES = {
      * con un "+3" encima de la segunda, o sea cinco: ese es el tope.
      */
     fotos: { maximo: 5 },
+    /**
+     * Cuántos videos admite un mensaje, y con qué puede convivir.
+     *
+     * Uno solo y sin mezclar con fotos: la grilla del artboard 37 tiene disposiciones
+     * distintas para 1, 2, 3 y 4+ miniaturas, y meter un video en el medio obliga a
+     * resolver el visor, la miniatura y la validación de un caso que ninguna HU pidió.
+     * El día que haga falta, se levanta acá.
+     */
+    videos: { maximo: 1, mezclaConFotos: false },
     /** Tamaño de página del historial y su techo. Ver "Paginación" en docs/api-chat-sala.md. */
     pagina: { porDefecto: 30, maximo: 50 },
   },

@@ -23,6 +23,7 @@ import type { TipoMensaje } from '@prisma/client';
 import { AppError } from '../../middlewares/errorHandler';
 import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
+import { clasificarAdjuntos, esMimeDeVideo, tipoDeUrl } from '../../shared/adjuntos';
 import { estaEnLinea } from '../../websockets/presencia';
 import * as emisor from '../../websockets/emisor';
 import { LIMITES } from '../../shared/validation/limits';
@@ -132,6 +133,7 @@ function aConversacion(
             fecha: ultimo.fechaAlta.toISOString(),
             esMio: ultimo.usuarioId === usuarioId,
             tieneImagen: ultimo.imagenUrl !== null,
+            tieneVideo: ultimo.imagenUrl !== null && tipoDeUrl(ultimo.imagenUrl) === 'VIDEO',
             tipo: ultimo.tipo,
           }
         : null,
@@ -285,6 +287,9 @@ function aMensajeDto(
     contenido: mensaje.contenido,
     imagenUrl: mensaje.imagenUrl,
     imagenes: mensaje.imagenes,
+    // Las mismas URLs que `imagenes`, cada una con su tipo. `imagenes` se conserva tal cual
+    // para no romper a los clientes que ya la consumen.
+    adjuntos: clasificarAdjuntos(mensaje.imagenes),
     usuarioId: mensaje.usuarioId,
     tipo: mensaje.tipo,
     ...acuseDe(mensaje, marcas),
@@ -492,7 +497,29 @@ export async function enviarMensaje(
   if (archivos.length > LIMITES.mensaje.fotos.maximo) {
     throw new AppError(
       'DEMASIADOS_ARCHIVOS',
-      `Podés subir hasta ${LIMITES.mensaje.fotos.maximo} fotos`,
+      `Podés subir hasta ${LIMITES.mensaje.fotos.maximo} archivos`,
+      400,
+    );
+  }
+
+  // Un video por mensaje y sin mezclar con fotos: la grilla del artboard 37 tiene
+  // disposiciones propias para 1, 2, 3 y 4+ miniaturas y un video en el medio obliga a
+  // resolver miniatura, visor y validación de un caso que ninguna HU pidió. El middleware
+  // no puede hacer cumplir esto: mira un archivo por vez, no el conjunto.
+  const videos = archivos.filter((archivo) => esMimeDeVideo(archivo.mimetype));
+
+  if (videos.length > LIMITES.mensaje.videos.maximo) {
+    throw new AppError('DEMASIADOS_ARCHIVOS', 'Podés adjuntar un solo video por mensaje', 400);
+  }
+
+  if (
+    !LIMITES.mensaje.videos.mezclaConFotos &&
+    videos.length > 0 &&
+    videos.length !== archivos.length
+  ) {
+    throw new AppError(
+      'ADJUNTOS_MEZCLADOS',
+      'Mandá el video solo: no se puede combinar con fotos en el mismo mensaje',
       400,
     );
   }

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { autenticar } from '../../middlewares/auth';
 import { comprimirImagen } from '../../middlewares/comprimirImagen';
-import { uploadImagenesOpcional } from '../../middlewares/uploadImagen';
+import { uploadAdjuntosChatOpcional, validarTamanioAdjuntos } from '../../middlewares/uploadImagen';
 import { validar } from '../../middlewares/validar';
 import { LIMITES } from '../../shared/validation/limits';
 import * as controller from './chats.controller';
@@ -32,11 +32,14 @@ chatsRouter.get('/:chatId/mensajes', controller.listarMensajes);
 // multer tiene que poblar `req.body` antes de que Zod lo valide, y las fotos se comprimen
 // antes de que el service las persista. Mismo pipeline que el alta de mascota (HU-6.1).
 //
-// El campo sigue llamándose `foto` aunque ahora acepte varias: es el nombre que ya usa el
-// cliente y multipart admite repetirlo sin cambiar nada de su lado.
+// El campo sigue llamándose `foto` aunque acepte varias y aunque ahora también acepte video:
+// es el nombre que ya usa el cliente y multipart admite repetirlo sin cambiar nada de su
+// lado. Renombrarlo a `adjunto` obligaría a versionar el endpoint por un tema de nombre.
 chatsRouter.post(
   '/:chatId/mensajes',
-  uploadImagenesOpcional('foto', LIMITES.mensaje.fotos.maximo),
+  uploadAdjuntosChatOpcional('foto', LIMITES.mensaje.fotos.maximo),
+  // Antes de comprimir: después, el peso que se mide ya no es el que subió el usuario.
+  validarTamanioAdjuntos,
   comprimirImagen,
   validar(enviarMensajeSchema),
   controller.enviarMensaje,
