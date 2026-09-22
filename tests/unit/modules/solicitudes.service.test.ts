@@ -523,12 +523,17 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
   };
 
   /** Publicación solicitable: viva, de otro dueño y con la mascota "Disponible". */
-  function publicacionDisponible(estadoMascota = 'Disponible', duenio = MIEMBRO_REFUGIO) {
+  function publicacionDisponible(
+    estadoMascota = 'Disponible',
+    duenio = MIEMBRO_REFUGIO,
+    refugioId: number | null = null,
+  ) {
     return {
       id: PUBLICACION,
       mascota: {
         id: 8,
         usuarioId: duenio,
+        refugioId,
         historicoEstados: [{ estadoMascota: { nombre: estadoMascota } }],
       },
     };
@@ -653,6 +658,36 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
     await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).rejects.toMatchObject({
       codigo: 'PUBLICACION_PROPIA',
     });
+  });
+
+  it('en ámbito REFUGIO tampoco se puede solicitar una mascota del propio refugio, aunque la haya cargado otro miembro', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, 1),
+      verificado: true,
+    } as never);
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue(
+      publicacionDisponible('Disponible', MIEMBRO_REFUGIO, 1) as never,
+    );
+
+    await expect(
+      service.crearSolicitud({ ...NUEVA, ambito: 'REFUGIO' }, SOLICITANTE),
+    ).rejects.toMatchObject({
+      codigo: 'PUBLICACION_PROPIA',
+    });
+  });
+
+  it('en ámbito PERSONAL sí puede solicitar una mascota de su propio refugio: el switch hace de cuenta que es un adoptante más', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, 1),
+      verificado: true,
+    } as never);
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue(
+      publicacionDisponible('Disponible', MIEMBRO_REFUGIO, 1) as never,
+    );
+
+    await expect(
+      service.crearSolicitud({ ...NUEVA, ambito: 'PERSONAL' }, SOLICITANTE),
+    ).resolves.toMatchObject({ estado: { nombre: 'Pendiente' } });
   });
 
   it('no se puede solicitar una mascota que ya no está disponible', async () => {
@@ -805,6 +840,50 @@ describe('obtenerElegibilidad (chequeo previo de HU-7.1)', () => {
       solicitudAbiertaId: null,
     });
     expect(repo.buscarVivaDeUsuarioEnPublicacion).not.toHaveBeenCalled();
+  });
+
+  it('sobre la propia mascota, PUBLICACION_PROPIA gana sobre el resto de los motivos', async () => {
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue({
+      id: 40,
+      mascota: { id: 8, usuarioId: SOLICITANTE, refugioId: null, historicoEstados: [] },
+    } as never);
+
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40)).resolves.toMatchObject({
+      puedeSolicitar: false,
+      motivo: 'PUBLICACION_PROPIA',
+      mensaje: 'No podés solicitar tu propia mascota',
+    });
+  });
+
+  it('en ámbito REFUGIO también bloquea sobre una publicación del propio refugio, aunque la haya cargado otro miembro', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, 1),
+      verificado: true,
+    } as never);
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue({
+      id: 40,
+      mascota: { id: 8, usuarioId: MIEMBRO_REFUGIO, refugioId: 1, historicoEstados: [] },
+    } as never);
+
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40, 'REFUGIO')).resolves.toMatchObject({
+      motivo: 'PUBLICACION_PROPIA',
+    });
+  });
+
+  it('en ámbito PERSONAL no bloquea una publicación del propio refugio: el switch hace de cuenta que es un adoptante más', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, 1),
+      verificado: true,
+    } as never);
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue({
+      id: 40,
+      mascota: { id: 8, usuarioId: MIEMBRO_REFUGIO, refugioId: 1, historicoEstados: [] },
+    } as never);
+
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40, 'PERSONAL')).resolves.toMatchObject({
+      puedeSolicitar: true,
+      motivo: null,
+    });
   });
 });
 

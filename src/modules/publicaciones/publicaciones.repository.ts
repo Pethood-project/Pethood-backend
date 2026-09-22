@@ -86,7 +86,12 @@ const RELACIONES_FEED = {
  *
  * Se excluyen las mascotas propias y las que ya guardó en favoritos: sobre unas y otras no
  * habría nada que decidir — `agregarFavorito` rechaza las propias con 403 y las guardadas
- * ya son un sí.
+ * ya son un sí. Lo personal se excluye siempre; lo del refugio del usuario (`actorRefugioId`)
+ * solo si `filtros.ambito` es `REFUGIO` — en `PERSONAL` el switch hace de cuenta que es un
+ * adoptante más, así que sí puede ver (y guardar/solicitar) lo que publicó su propio
+ * refugio. Mismo criterio que `esMascotaPropia` en `shared/ambito.ts`, expresado en SQL:
+ * excluir "usuarioId = mío" Y excluir "refugioId = el mío" son dos condiciones en AND, que
+ * por De Morgan equivalen a excluir la unión de las dos.
  *
  * El estado vigente se filtra con `some` en vez de mirar la última fila del histórico
  * porque tiene que resolverse en SQL: si se descartara en memoria, `total` y la
@@ -94,7 +99,11 @@ const RELACIONES_FEED = {
  * mantenga la invariante de una sola fila activa por mascota, que es como escribe el
  * resto del backend.
  */
-function condicionesFeed(usuarioId: number, filtros: FiltrosFeedDto): Prisma.PublicacionWhereInput {
+function condicionesFeed(
+  usuarioId: number,
+  filtros: FiltrosFeedDto,
+  actorRefugioId: number | null,
+): Prisma.PublicacionWhereInput {
   const mascota: Prisma.MascotaWhereInput = {
     fechaBaja: null,
     usuarioId: { not: usuarioId },
@@ -103,6 +112,10 @@ function condicionesFeed(usuarioId: number, filtros: FiltrosFeedDto): Prisma.Pub
       some: { fechaBaja: null, estadoMascota: { nombre: ESTADO_VISIBLE_EN_FEED } },
     },
   };
+
+  if (filtros.ambito === 'REFUGIO' && actorRefugioId !== null) {
+    mascota.refugioId = { not: actorRefugioId };
+  }
 
   if (filtros.especieId !== undefined) {
     mascota.raza = { especieId: filtros.especieId };
@@ -139,9 +152,13 @@ function condicionesFeed(usuarioId: number, filtros: FiltrosFeedDto): Prisma.Pub
  * de recomendación definido todavía, y lo más nuevo primero es determinístico, así que la
  * paginación no repite ni saltea tarjetas entre páginas.
  */
-export function listarFeed(usuarioId: number, filtros: FiltrosFeedDto) {
+export function listarFeed(
+  usuarioId: number,
+  filtros: FiltrosFeedDto,
+  actorRefugioId: number | null,
+) {
   return prisma.publicacion.findMany({
-    where: condicionesFeed(usuarioId, filtros),
+    where: condicionesFeed(usuarioId, filtros, actorRefugioId),
     include: RELACIONES_FEED,
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
     skip: filtros.desplazamiento,
@@ -150,8 +167,12 @@ export function listarFeed(usuarioId: number, filtros: FiltrosFeedDto) {
 }
 
 /** Total que matchea los filtros, para saber si quedan páginas por traer. */
-export function contarFeed(usuarioId: number, filtros: FiltrosFeedDto) {
-  return prisma.publicacion.count({ where: condicionesFeed(usuarioId, filtros) });
+export function contarFeed(
+  usuarioId: number,
+  filtros: FiltrosFeedDto,
+  actorRefugioId: number | null,
+) {
+  return prisma.publicacion.count({ where: condicionesFeed(usuarioId, filtros, actorRefugioId) });
 }
 
 /**

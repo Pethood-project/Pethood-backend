@@ -93,6 +93,11 @@ export function buscarMascotaActiva(mascotaId: number) {
   return prisma.mascota.findFirst({ where: { id: mascotaId, fechaBaja: null } });
 }
 
+/** Para resolver si la mascota es del refugio del propio usuario (ver `esPropiaDelActor`). */
+export function buscarUsuario(usuarioId: number) {
+  return prisma.usuario.findFirst({ where: { id: usuarioId, fechaBaja: null } });
+}
+
 /**
  * Sólo se puede guardar una mascota que esté ofrecida en adopción. Se mira al agregar y
  * NO al listar: si después la publicación se da de baja, el favorito sigue visible con el

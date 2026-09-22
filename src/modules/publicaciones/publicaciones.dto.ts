@@ -1,7 +1,17 @@
 import { z } from 'zod';
+import { AMBITOS } from '../../shared/ambito';
 import { LIMITES } from '../../shared/validation/limits';
 import { idSchema, textoOpcionalSchema, textoSchema } from '../../shared/validation/schemas';
 import { validarTexto } from '../../shared/validation/text';
+
+/**
+ * Con qué cuenta consulta: la personal o la del refugio (ver `shared/ambito.ts`). Decide si
+ * una mascota del refugio del usuario cuenta como "propia" para el feed y la ficha.
+ */
+const ambitoSchema = z
+  .enum(AMBITOS, { errorMap: () => ({ message: 'El ámbito no es válido' }) })
+  .optional()
+  .default('PERSONAL');
 
 /** Hasta 5 fotos por publicación; el orden recibido es el orden de la galería. */
 export const MAXIMO_IMAGENES = 5;
@@ -102,9 +112,13 @@ export const filtrosFeedSchema = z.object({
     .optional()
     .default(FEED_LIMITE_POR_DEFECTO),
   desplazamiento: z.coerce.number().int().min(0).optional().default(0),
+  ambito: ambitoSchema,
 });
 
 export type FiltrosFeedDto = z.infer<typeof filtrosFeedSchema>;
+
+/** Query de `GET /publicaciones/:id`: solo necesita saber con qué cuenta se consulta. */
+export const fichaPublicacionQuerySchema = z.object({ ambito: ambitoSchema });
 
 /** Mascota tal como la necesitan la tarjeta del feed y la ficha completa. */
 export interface MascotaPublicadaDto {
@@ -140,6 +154,13 @@ export interface PublicacionFeedDto {
   refugio: { id: number; nombre: string; direccion: string } | null;
   /** Si el usuario que consulta ya la tiene guardada. */
   enFavoritos: boolean;
+  /**
+   * Si la mascota es del usuario que consulta (o de su mismo refugio). El feed nunca la
+   * devuelve en `true` porque ya excluye esas publicaciones; la ficha (`GET /:id`) sí puede,
+   * para que el frontend oculte "Solicitar adopción" y el corazón de favoritos sobre la
+   * propia mascota.
+   */
+  esPropia: boolean;
 }
 
 export interface FeedPublicacionesDto {
