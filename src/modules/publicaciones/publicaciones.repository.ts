@@ -167,7 +167,11 @@ export function listarFeed(
 }
 
 /** Total que matchea los filtros, para saber si quedan páginas por traer. */
-export function contarFeed(usuarioId: number, filtros: FiltrosFeedDto, actorRefugioId: number | null) {
+export function contarFeed(
+  usuarioId: number,
+  filtros: FiltrosFeedDto,
+  actorRefugioId: number | null,
+) {
   return prisma.publicacion.count({ where: condicionesFeed(usuarioId, filtros, actorRefugioId) });
 }
 

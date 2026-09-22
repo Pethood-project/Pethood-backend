@@ -31,5 +31,7 @@ export function esMascotaPropia(
   ambito: Ambito,
 ): boolean {
   if (mascota.usuarioId === actor.id) return true;
-  return ambito === 'REFUGIO' && mascota.refugioId !== null && mascota.refugioId === actor.refugioId;
+  return (
+    ambito === 'REFUGIO' && mascota.refugioId !== null && mascota.refugioId === actor.refugioId
+  );
 }

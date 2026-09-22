@@ -193,7 +193,9 @@ describe('agregarFavorito', () => {
   it('propaga un error de base que no sea el de duplicado', async () => {
     vi.mocked(repo.crear).mockRejectedValue(new Error('se cayó la base'));
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toThrow('se cayó la base');
+    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toThrow(
+      'se cayó la base',
+    );
   });
 });
 
@@ -342,6 +344,8 @@ describe('formato de error', () => {
   it('los errores son AppError, así el errorHandler los traduce al formato de la API', async () => {
     vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(null as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toBeInstanceOf(AppError);
+    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toBeInstanceOf(
+      AppError,
+    );
   });
 });

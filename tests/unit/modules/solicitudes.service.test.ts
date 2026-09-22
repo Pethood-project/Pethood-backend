@@ -880,9 +880,10 @@ describe('obtenerElegibilidad (chequeo previo de HU-7.1)', () => {
       mascota: { id: 8, usuarioId: MIEMBRO_REFUGIO, refugioId: 1, historicoEstados: [] },
     } as never);
 
-    await expect(
-      service.obtenerElegibilidad(SOLICITANTE, 40, 'PERSONAL'),
-    ).resolves.toMatchObject({ puedeSolicitar: true, motivo: null });
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40, 'PERSONAL')).resolves.toMatchObject({
+      puedeSolicitar: true,
+      motivo: null,
+    });
   });
 });
 

@@ -154,8 +154,6 @@ describe('formato de error', () => {
   it('los errores son AppError, así el errorHandler los traduce al formato de la API', async () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(null as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).rejects.toBeInstanceOf(
-      AppError,
-    );
+    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).rejects.toBeInstanceOf(AppError);
   });
 });
