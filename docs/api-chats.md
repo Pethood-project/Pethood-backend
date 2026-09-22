@@ -114,7 +114,8 @@ Authorization: Bearer <token>
 | `ultimoMensaje.contenido` | **Sin truncar.** El recorte visual es del cliente |
 | `ultimoMensaje.fecha` | ISO 8601 crudo |
 | `ultimoMensaje.esMio` | `true` si lo mandó el usuario autenticado → prefijo "Vos: ..." |
-| `ultimoMensaje.tieneImagen` | `true` si el mensaje trae foto. Con `contenido: ""` significa mensaje de solo imagen → mostrar "📷 Foto" |
+| `ultimoMensaje.tieneImagen` | `true` si el mensaje trae foto **o video**. Con `contenido: ""` significa mensaje de solo adjunto → mostrar "📷 Foto" |
+| `ultimoMensaje.tieneVideo` | `true` si ese adjunto es un video → mostrar "🎥 Video" en vez de "📷 Foto". Viaja aparte para que un cliente viejo, que no lo conoce, siga mostrando "Foto" y no una línea vacía |
 | `ultimoMensaje.tipo` | `"TEXTO"` o `"SOLICITUD"`. Con `SOLICITUD` el `contenido` va vacío: es la tarjeta de un pedido → mostrar "📄 Solicitud", con el mismo criterio que la foto |
 | `noLeidos` | Mensajes **del otro** que el usuario todavía no leyó. Número absoluto, no un delta. Sale de comparar la fecha de cada mensaje contra `usuario_chat_ultima_lectura` — ver la nota de abajo |
 | `fechaUltimaActividad` | **Clave de orden, nunca `null`.** Fecha del último mensaje o, si la sala está vacía, fecha de creación del chat |
@@ -162,7 +163,7 @@ No hay `400` (no recibe entrada que validar), ni `404` (un usuario sin chats es 
 1. **El badge de la pestaña sale de `total`**, y el de cada fila de `noLeidos`.
 2. **El "Hace 5 min" se calcula en el cliente** a partir de `fechaUltimaActividad`. No lo cachees ya formateado.
 3. **Preview vacío:** si `ultimoMensaje` es `null`, la sala se abrió pero nadie escribió todavía — poné tu propio placeholder ("Todavía no hay mensajes"). El backend no manda ese texto a propósito.
-4. **Mensaje de solo foto:** `contenido: ""` con `tieneImagen: true` → mostrar "📷 Foto" en vez de una línea en blanco.
+4. **Mensaje de solo foto:** `contenido: ""` con `tieneImagen: true` → mostrar "📷 Foto" en vez de una línea en blanco. Si además viene `tieneVideo: true`, el texto es "🎥 Video".
 5. **Contacto inactivo:** `activo: false` significa que la cuenta del otro se dio de baja. Grisá la fila o mostrá una leyenda; la conversación **se sigue pudiendo leer**. Bloquear el envío es tarea de HU-5.2.
 6. **Estados de la pantalla:** cargando / vacío / error. El vacío es `total: 0`, no un error.
 7. **Refrescar al entrar a la pantalla alcanza.** Esta HU no tiene tiempo real y ninguno de sus criterios de aceptación lo pide.

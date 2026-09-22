@@ -207,6 +207,7 @@ describe('listarConversaciones — vista previa del último mensaje', () => {
       fecha: '2026-09-01T14:05:00.000Z',
       esMio: false,
       tieneImagen: false,
+      tieneVideo: false,
     });
   });
 

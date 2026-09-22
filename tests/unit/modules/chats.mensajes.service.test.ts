@@ -31,6 +31,8 @@ const FECHA_VIEJA = new Date('2026-08-20T09:00:00.000Z');
 
 const ARCHIVO = { buffer: Buffer.from('foto'), mimetype: 'image/jpeg' };
 const URL_FOTO = '/api/v1/archivos/chats/abc.jpg';
+const VIDEO = { buffer: Buffer.from('video'), mimetype: 'video/mp4' };
+const URL_VIDEO = '/api/v1/archivos/chats/abc.mp4';
 
 /** Fila de UsuarioChat con su chat, como sale de `buscarSalaConContacto`. */
 function sala(
@@ -277,6 +279,72 @@ describe('enviarMensaje', () => {
     ).rejects.toMatchObject({ codigo: 'DEMASIADOS_ARCHIVOS', httpStatus: 400 });
 
     expect(storage.guardarImagenes).not.toHaveBeenCalled();
+  });
+
+  it('un video solo es un mensaje válido', async () => {
+    vi.mocked(storage.guardarImagenes).mockResolvedValue([URL_VIDEO]);
+
+    await service.enviarMensaje(
+      { contenido: '' },
+      { usuarioId: USUARIO, chatId: CHAT, archivos: [VIDEO] },
+    );
+
+    expect(repo.crearMensaje).toHaveBeenCalledWith(
+      expect.objectContaining({ imagenes: [URL_VIDEO] }),
+    );
+  });
+
+  it('un video con pie de texto también', async () => {
+    vi.mocked(storage.guardarImagenes).mockResolvedValue([URL_VIDEO]);
+
+    await service.enviarMensaje(
+      { contenido: 'Mirá cómo juega' },
+      { usuarioId: USUARIO, chatId: CHAT, archivos: [VIDEO] },
+    );
+
+    expect(repo.crearMensaje).toHaveBeenCalledWith(
+      expect.objectContaining({ contenido: 'Mirá cómo juega', imagenes: [URL_VIDEO] }),
+    );
+  });
+
+  it('dos videos en el mismo mensaje se rechazan sin tocar el storage', async () => {
+    await expect(
+      service.enviarMensaje(
+        { contenido: '' },
+        { usuarioId: USUARIO, chatId: CHAT, archivos: [VIDEO, VIDEO] },
+      ),
+    ).rejects.toMatchObject({ codigo: 'DEMASIADOS_ARCHIVOS', httpStatus: 400 });
+
+    expect(storage.guardarImagenes).not.toHaveBeenCalled();
+  });
+
+  it('mezclar un video con fotos se rechaza sin tocar el storage', async () => {
+    await expect(
+      service.enviarMensaje(
+        { contenido: '' },
+        { usuarioId: USUARIO, chatId: CHAT, archivos: [ARCHIVO, VIDEO] },
+      ),
+    ).rejects.toMatchObject({ codigo: 'ADJUNTOS_MEZCLADOS', httpStatus: 400 });
+
+    expect(storage.guardarImagenes).not.toHaveBeenCalled();
+  });
+
+  it('el DTO devuelve cada adjunto con su tipo ya resuelto', async () => {
+    vi.mocked(storage.guardarImagenes).mockResolvedValue([URL_VIDEO]);
+    vi.mocked(repo.crearMensaje).mockResolvedValue({
+      ...enviado,
+      imagenUrl: URL_VIDEO,
+      imagenes: [URL_VIDEO],
+    } as never);
+
+    const dto = await service.enviarMensaje(
+      { contenido: '' },
+      { usuarioId: USUARIO, chatId: CHAT, archivos: [VIDEO] },
+    );
+
+    expect(dto.adjuntos).toEqual([{ url: URL_VIDEO, tipo: 'VIDEO' }]);
+    // `imagenes` sigue intacta: los clientes viejos no se enteran del cambio.
+    expect(dto.imagenes).toEqual([URL_VIDEO]);
   });
 
   it('no se le puede escribir a un contacto dado de baja', async () => {

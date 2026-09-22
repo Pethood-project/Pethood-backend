@@ -9,6 +9,7 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
 import { idSchema, textoOpcionalNoNuloSchema } from '../../shared/validation/schemas';
+import type { AdjuntoMensaje } from '../../shared/adjuntos';
 
 /**
  * El otro lado de la conversación, YA RESUELTO por el backend.
@@ -46,6 +47,12 @@ export interface UltimoMensajeDto {
   esMio: boolean;
   /** Un mensaje puede ser sólo foto: sin esto el preview quedaría vacío. */
   tieneImagen: boolean;
+  /**
+   * El adjunto del último mensaje es un video y no una foto. Viaja aparte de `tieneImagen`
+   * —que sigue en `true`— para no romper a los clientes que sólo conocen ese campo: los
+   * viejos muestran "Foto" y los nuevos pueden mostrar "Video".
+   */
+  tieneVideo: boolean;
   /**
    * `SOLICITUD` cuando lo último de la sala es la tarjeta de una solicitud: su `contenido`
    * va vacío y el cliente pone el texto ("Solicitud"), igual que con la foto.
@@ -114,6 +121,15 @@ export interface MensajeDto {
   imagenUrl: string | null;
   /** Todas las fotos, en el orden en que se enviaron. Vacío si el mensaje es solo texto. */
   imagenes: string[];
+  /**
+   * Las MISMAS URLs de `imagenes`, cada una con su tipo ya resuelto por el backend.
+   *
+   * Existe porque `imagenes` hoy puede traer un video y su nombre ya no alcanza para saber
+   * qué hay adentro. El cliente no deduce el tipo de la extensión: lo recibe, igual que
+   * recibe el contacto del listado ya resuelto. `imagenes` se mantiene sin tocar para no
+   * romper a los clientes que ya la consumen.
+   */
+  adjuntos: AdjuntoMensaje[];
   /** Id del emisor. El cliente decide de qué lado de la burbuja va. */
   usuarioId: number;
   /**

@@ -43,6 +43,7 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
   "contenido": "Dale, te espero el sábado a las 10",
   "imagenUrl": null,
   "imagenes": [],
+  "adjuntos": [],
   "usuarioId": 41,
   "tipo": "TEXTO",
   "entregado": true,
@@ -59,7 +60,8 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
 | `chatId` | Redundante dentro del historial, imprescindible en el evento de socket |
 | `contenido` | Texto, **sin truncar**. Cadena vacía (`""`) en un mensaje de solo foto o en uno de tipo `SOLICITUD` |
 | `imagenUrl` | **Primera** foto, o `null`. Es siempre `imagenes[0]`: existe para los clientes que sólo saben de una |
-| `imagenes` | **Todas** las fotos, en el orden en que se enviaron. Vacío si el mensaje es solo texto. Hasta 5 |
+| `imagenes` | **Todas** las fotos, en el orden en que se enviaron. Vacío si el mensaje es solo texto. Hasta 5. Puede contener la URL de un video |
+| `adjuntos` | Las **mismas** URLs de `imagenes`, cada una con su `tipo`: `{ url, tipo: "IMAGEN" \| "VIDEO" }`. Es el campo a usar de ahora en más |
 | `usuarioId` | **Id del emisor.** El cliente lo compara con su sesión para decidir el lado de la burbuja |
 | `tipo` | `"TEXTO"` o `"SOLICITUD"`. Ver "Mensajes de sistema" |
 | `entregado` | Le llegó al destinatario, aunque no lo haya abierto → **segundo tilde** |
@@ -101,6 +103,7 @@ resuelta:
   "contenido": "",
   "imagenUrl": null,
   "imagenes": [],
+  "adjuntos": [],
   "usuarioId": 1,
   "tipo": "SOLICITUD",
   "entregado": true,
@@ -275,17 +278,79 @@ Dos formatos, según lleve foto o no:
 | Campo | Tipo | Obligatorio |
 |---|---|---|
 | `contenido` | texto, ≤1000 caracteres | Solo si no hay `foto` |
-<<<<<<< HEAD
-| `foto` | jpg/png/webp, ≤5 MB cada una. **Se puede repetir hasta 5 veces** | Solo si no hay `contenido` |
+| `foto` | jpg/png/webp (≤5 MB) — o **un video** mp4/mov/webm (≤30 MB). **Se puede repetir hasta 5 veces** | Solo si no hay `contenido` |
+| `rotacion` | `90` \| `180` \| `270` | No — sin rotación por defecto. **Sólo con una `foto`** |
+| `cropX`, `cropY`, `cropWidth`, `cropHeight` | enteros ≥0, en píxeles sobre la `foto` original | No — los cuatro juntos o ninguno. **Sólo con una `foto`** |
 
-**El campo se sigue llamando `foto` aunque ahora acepte varias**: multipart admite repetir el
-mismo nombre, así que un cliente que manda una sola sigue funcionando sin cambiar nada. Las
-fotos se guardan **en el orden en que viajan**, y ese es el orden de `imagenes`.
-=======
-| `foto` | jpg/png/webp, ≤5 MB | Solo si no hay `contenido` |
-| `rotacion` | `90` \| `180` \| `270` | No — sin rotación por defecto |
-| `cropX`, `cropY`, `cropWidth`, `cropHeight` | enteros ≥0, en píxeles sobre la `foto` original | No — los cuatro juntos o ninguno |
->>>>>>> origin/dev
+**El campo se sigue llamando `foto` aunque acepte varias**: multipart admite repetir el mismo
+nombre, así que un cliente que manda una sola sigue funcionando sin cambiar nada. Las fotos se
+guardan **en el orden en que viajan**, y ese es el orden de `imagenes`.
+
+**`rotacion` y el recorte sólo se aplican cuando el mensaje lleva UNA sola foto.** Un único
+rectángulo no puede aplicarse a imágenes distintas, así que con dos o más adjuntos esos
+parámetros se ignoran. No es un error: el mensaje se envía igual y las fotos se comprimen sin
+editar.
+
+### Video (HU-5.2, ampliación)
+
+El campo `foto` también acepta **un** video. Se llama igual a propósito: es el nombre que el
+cliente ya manda y multipart no distingue por nombre, así que renombrarlo a `adjunto`
+obligaría a versionar el endpoint por una cuestión cosmética.
+
+| Regla | Valor | Quién la hace cumplir |
+|---|---|---|
+| Formatos | `video/mp4`, `video/quicktime` (.mov de iOS), `video/webm` | Backend (`multer`), 400 `ARCHIVO_INVALIDO` |
+| Tamaño | **≤30 MB** — excepción explícita a los 5 MB de REQUISITOS.md §4, ver abajo | Backend, 400 `ARCHIVO_DEMASIADO_GRANDE` |
+| Duración | ≤15 s | **El cliente.** Ver abajo |
+| Cantidad | 1 por mensaje | Backend, 400 `DEMASIADOS_ARCHIVOS` |
+| Mezcla con fotos | No se permite | Backend, 400 `ADJUNTOS_MEZCLADOS` |
+| Pie de texto | Sí, igual que con una foto | — |
+
+#### Por qué 30 MB y no 5
+
+Los 5 MB de REQUISITOS.md §4 son la regla transversal para imágenes y documentos, y **para
+video no alcanzan**. Un teléfono graba 1080p a unos 13 Mbps:
+
+| Calidad | 15 s pesan | En 5 MB entran |
+|---|---|---|
+| 480p | 3,8 MB | 20 s |
+| 720p | 9,4 MB | 8 s |
+| **1080p (lo normal)** | **24,9 MB** | **3 s** |
+| 4K | 84,4 MB | 0,9 s |
+
+Con 5 MB el usuario manda **3 segundos**, que no sirve para nada. 30 MB cubren los 15 s a
+1080p con margen y siguen rechazando un 4K de 15 s, que se avisa con un mensaje claro.
+
+**Bajar el peso en vez de subir el tope no era una opción disponible:** recomprimir en el
+servidor necesita `ffmpeg`, y hacerlo en el cliente necesita un módulo nativo de
+transcodificación que rompería las pruebas con Expo Go. `expo-image-picker` sólo permite
+bajar la calidad de grabación en iOS, no en Android.
+
+> **Esto hay que reflejarlo en REQUISITOS.md §4**, que hoy dice 5 MB para todo archivo. Es
+> una excepción acotada al video de chat: imágenes y documentos siguen en 5 MB, en todos los
+> módulos y también en el chat.
+
+**Las imágenes del chat siguen topeadas en 5 MB.** El `fileSize` de multer es uno por
+instancia y no conoce el mimetype hasta que el archivo ya entró, así que el techo del request
+es el del video (30 MB) y después `validarTamanioAdjuntos` le aplica a cada archivo el tope de
+su tipo. Corre **antes** de comprimir: una vez que `sharp` achicó la imagen, el peso que se
+mide ya no es el que subió el usuario.
+
+**La duración la hace cumplir el cliente, no el backend.** Medirla en el servidor necesita
+`ffmpeg`. Los 15 segundos existen para que el usuario no elija de la galería un video largo y
+se lo rechacen **después** de haberlo subido entero.
+
+**El video se guarda tal cual, sin transcodificar ni recomprimir.** `sharp` no procesa video
+y `comprimirImagen` lo deja pasar. Tampoco se genera miniatura en el servidor: la tarjeta con
+el ícono de reproducir la arma el cliente.
+
+**`rotacion` y el recorte no aplican a un video**: se ignoran aunque vengan.
+
+> ⚠️ **Deuda conocida de almacenamiento.** Los adjuntos de chat van a disco local
+> (`uploads/chats/`) y **en Render el disco es efímero: cada deploy los borra**. Ya era así
+> con las fotos; con videos de hasta 30 MB el problema se acelera. La migración a object
+> storage es un PR propio que tiene que tocar todos los módulos a la vez (ver el cierre de
+> este documento) — `shared/r2.ts` ya existe pero hoy sólo lo usa la foto de perfil.
 
 **`application/json`** (solo texto):
 
@@ -295,7 +360,13 @@ fotos se guardan **en el orden en que viajan**, y ese es el orden de `imagenes`.
 
 **Texto y foto pueden ir juntos** — el pie de foto es un mensaje válido. Lo que no se acepta es un mensaje sin ninguno de los dos.
 
-La foto se recorta (si vino `cropX`/`cropY`/`cropWidth`/`cropHeight`) y rota (si vino `rotacion`) antes de comprimirse en el servidor (`sharp`, ancho máx. 1600px), igual que en el alta de mascota. El recorte se aplica primero y sus coordenadas son siempre sobre la imagen original que se subió, no sobre una ya rotada. `RECORTE_INVALIDO` (400) si el rectángulo excede la imagen; `VALIDACION` (400) si `rotacion` no es 0/90/180/270 o si el recorte viene incompleto.
+La foto única se recorta (si vinieron `cropX`/`cropY`/`cropWidth`/`cropHeight`) y rota (si vino `rotacion`) antes de comprimirse en el servidor (`sharp`, ancho máx. 1600px), igual que en el alta de mascota. El recorte se aplica primero y sus coordenadas son siempre sobre la imagen original que se subió, no sobre una ya rotada. `RECORTE_INVALIDO` (400) si el rectángulo excede la imagen; `VALIDACION` (400) si `rotacion` no es 0/90/180/270 o si el recorte viene incompleto.
+
+**`adjuntos` reemplaza a `imagenes` sin romperla.** Desde que un mensaje puede llevar video,
+el nombre `imagenes` dejó de describir lo que trae: `adjuntos` es la misma lista con el tipo
+ya resuelto por el backend, **el cliente no deduce nada de la extensión del archivo**. Es el
+mismo criterio con el que el listado entrega el contacto ya resuelto. `imagenes` e
+`imagenUrl` se mantienen intactas para no romper a los clientes que ya las consumen.
 
 ### Respuesta 201
 
@@ -321,9 +392,12 @@ El objeto `Mensaje` completo, **ya persistido**: cuando el cliente recibe el 201
 | 403 | `SIN_ACCESO_AL_CHAT` | No tenés acceso a esta conversación | No sos participante activo |
 | 400 | `MENSAJE_VACIO` | Escribí un mensaje o adjuntá una foto | Ni texto ni foto |
 | 400 | `VALIDACION` | El mensaje no puede superar los 1000 caracteres | Texto demasiado largo |
-| 400 | `ARCHIVO_INVALIDO` | La imagen debe ser jpg, png o webp | Formato no admitido |
-| 400 | `ARCHIVO_DEMASIADO_GRANDE` | La imagen supera el máximo de 5MB | Archivo pesado |
-| 400 | `DEMASIADOS_ARCHIVOS` | Podés subir hasta 5 fotos | Más de 5 en el mismo mensaje |
+| 400 | `ARCHIVO_INVALIDO` | Adjuntá una imagen (jpg, png o webp) o un video (mp4, mov o webm) | Formato no admitido |
+| 400 | `ARCHIVO_DEMASIADO_GRANDE` | La imagen supera el máximo de 5MB | Imagen pesada |
+| 400 | `ARCHIVO_DEMASIADO_GRANDE` | El video supera el máximo de 30MB | Video pesado |
+| 400 | `DEMASIADOS_ARCHIVOS` | Podés subir hasta 5 archivos | Más de 5 en el mismo mensaje |
+| 400 | `DEMASIADOS_ARCHIVOS` | Podés adjuntar un solo video por mensaje | Más de un video |
+| 400 | `ADJUNTOS_MEZCLADOS` | Mandá el video solo: no se puede combinar con fotos en el mismo mensaje | Video + foto juntos |
 | 409 | `CONTACTO_INACTIVO` | No podés escribirle: la cuenta de este contacto fue dada de baja | El otro se dio de baja |
 | 404 | `CHAT_SIN_CONTACTO` | Esta conversación ya no tiene contraparte | Sala sin ningún otro participante activo |
 

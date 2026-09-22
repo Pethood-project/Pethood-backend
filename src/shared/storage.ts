@@ -15,6 +15,11 @@ const EXTENSION_POR_MIME: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'application/pdf': 'pdf',
+  // Video: hoy sólo lo sube el chat. La extensión no es cosmética — es lo único que
+  // distingue un video de una foto en `mensaje_imagenes`, que guarda las dos cosas.
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
 };
 
 /** Guarda la imagen (ya comprimida) y devuelve la URL pública que se persiste en base. */
