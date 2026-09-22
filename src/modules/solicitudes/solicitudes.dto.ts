@@ -4,6 +4,7 @@
  * genéricas salen de `shared/validation`; acá solo se compone lo propio de Solicitud.
  */
 import { z } from 'zod';
+import { AMBITOS } from '../../shared/ambito';
 import { esPasada, parsearFecha } from '../../shared/validation/dates';
 import { LIMITES } from '../../shared/validation/limits';
 import {
@@ -26,6 +27,15 @@ export const ESPACIOS_EXTERIORES = ['Balcon', 'Patio', 'Jardin', 'Ninguno'] as c
  * período. No es el mensaje genérico de campo vacío: la HU lo fija palabra por palabra.
  */
 const FALTA_PERIODO = 'Tenés que completar el campo';
+
+/**
+ * Con qué cuenta solicita: la personal o la del refugio (ver `shared/ambito.ts`). Sin dato
+ * se asume personal, que es lo único que existe para quien no pertenece a un refugio.
+ */
+const ambitoSchema = z
+  .enum(AMBITOS, { errorMap: () => ({ message: 'El ámbito no es válido' }) })
+  .optional()
+  .default('PERSONAL');
 
 /** Paso 2: el hogar del solicitante. Viaja anidado para no mezclarlo con la solicitud. */
 const hogarSchema = z.object({
@@ -74,6 +84,7 @@ export const crearSolicitudSchema = z
     fechaInicioTransito: z.unknown().optional(),
     fechaFinTransito: z.unknown().optional(),
     hogar: hogarSchema,
+    ambito: ambitoSchema,
   })
   .transform((datos, ctx) => {
     const esTransito = datos.tipoSolicitud === 'Transito';
@@ -197,6 +208,7 @@ export const idSolicitudSchema = idSchema('El id de la solicitud');
 /** La publicación es opcional: sin ella solo se evalúa al usuario. */
 export const filtrosElegibilidadSchema = z.object({
   publicacionId: idSchema('La publicación').optional(),
+  ambito: ambitoSchema,
 });
 
 export type FiltrosElegibilidadDto = z.infer<typeof filtrosElegibilidadSchema>;
@@ -209,7 +221,7 @@ export type FiltrosElegibilidadDto = z.infer<typeof filtrosElegibilidadSchema>;
 export interface ElegibilidadDto {
   puedeSolicitar: boolean;
   /** `null` cuando puede solicitar. */
-  motivo: 'NO_VERIFICADO' | 'LIMITE_ALCANZADO' | 'YA_SOLICITADA' | null;
+  motivo: 'PUBLICACION_PROPIA' | 'NO_VERIFICADO' | 'LIMITE_ALCANZADO' | 'YA_SOLICITADA' | null;
   /** Texto literal de la HU para ese motivo, o `null`. */
   mensaje: string | null;
   verificado: boolean;

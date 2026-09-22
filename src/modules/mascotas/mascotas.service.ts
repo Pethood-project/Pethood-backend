@@ -6,10 +6,12 @@ import {
   ESTADOS_QUE_HABILITAN_PUBLICACION,
   ESTADOS_SELECCIONABLES_EN_ALTA,
 } from '../catalogos/catalogos.service';
+import { obtenerPublicacionActivaIdDeMascota } from '../publicaciones/publicaciones.service';
 import type {
   AmbitoMascotas,
   CrearMascotaDto,
   EditarMascotaDto,
+  FichaMascotaDto,
   MascotaCreadaDto,
 } from './mascotas.dto';
 import * as repo from './mascotas.repository';
@@ -309,6 +311,41 @@ export async function eliminarMascota(
   });
 
   return { id: mascotaId, publicacionesDadasDeBaja };
+}
+
+/**
+ * Ficha de una mascota (HU-6.4: verla individualmente desde "Mis mascotas").
+ *
+ * Autorización más amplia que `exigirMascotaPropia`: alcanza con haberla cargado uno mismo
+ * o con pertenecer al mismo refugio, igual criterio que `listarPorAmbito` usa para el
+ * listado — un compañero del refugio ve la ficha aunque no sea quien la dio de alta.
+ */
+export async function obtenerMascota(
+  mascotaId: number,
+  usuarioId: number,
+): Promise<FichaMascotaDto> {
+  const mascota = await repo.buscarPorIdConRelaciones(mascotaId);
+
+  if (!mascota || mascota.historicoEstados.length === 0) {
+    throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
+  }
+
+  const esPropietario = mascota.usuarioId === usuarioId;
+  const esDelMismoRefugio =
+    mascota.refugioId !== null && (await esUsuarioDelRefugio(usuarioId, mascota.refugioId));
+
+  if (!esPropietario && !esDelMismoRefugio) {
+    throw new AppError('NO_AUTORIZADO', 'Esa mascota no es tuya', 403);
+  }
+
+  const publicacionActivaId = await obtenerPublicacionActivaIdDeMascota(mascotaId);
+
+  return { ...aDto(mascota as MascotaConRelaciones), publicacionActivaId };
+}
+
+async function esUsuarioDelRefugio(usuarioId: number, refugioId: number): Promise<boolean> {
+  const usuario = await repo.buscarUsuario(usuarioId);
+  return usuario?.refugioId === refugioId;
 }
 
 /**

@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../../src/middlewares/errorHandler';
 import * as repo from '../../../src/modules/mascotas/mascotas.repository';
 import * as service from '../../../src/modules/mascotas/mascotas.service';
+import { obtenerPublicacionActivaIdDeMascota } from '../../../src/modules/publicaciones/publicaciones.service';
 import { borrarImagen, guardarImagen } from '../../../src/shared/storage';
 import { registrarAuditoria } from '../../../src/shared/logAuditoria';
 import type { CrearMascotaDto } from '../../../src/modules/mascotas/mascotas.dto';
 
 vi.mock('../../../src/modules/mascotas/mascotas.repository');
+vi.mock('../../../src/modules/publicaciones/publicaciones.service');
 vi.mock('../../../src/shared/storage');
 vi.mock('../../../src/shared/logAuditoria');
 
@@ -62,6 +64,7 @@ beforeEach(() => {
     nombre: 'Labrador',
   } as never);
   vi.mocked(guardarImagen).mockResolvedValue('/api/v1/archivos/mascotas/x.jpg');
+  vi.mocked(obtenerPublicacionActivaIdDeMascota).mockResolvedValue(null);
 });
 
 /** Fila cruda de Mascota tal como la devuelve buscarPorId, sin relaciones. */
@@ -451,5 +454,88 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
     ] as never);
 
     await expect(service.eliminarMascota(10, 2)).resolves.toMatchObject({ id: 10 });
+  });
+});
+
+describe('obtenerMascota — ficha individual (HU-6.4)', () => {
+  it('404 si la mascota no existe', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(null as never);
+
+    await expect(service.obtenerMascota(10, 2)).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+      httpStatus: 404,
+    });
+  });
+
+  it('404 si la mascota no tiene un estado vigente', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue({
+      ...mascotaCreada(ESTADOS.Disponible),
+      historicoEstados: [],
+    } as never);
+
+    await expect(service.obtenerMascota(10, 2)).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('devuelve la ficha al dueño', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible) as never,
+    );
+
+    await expect(service.obtenerMascota(10, 2)).resolves.toMatchObject({ id: 10 });
+  });
+
+  it('403 si no es el dueño y no pertenece al mismo refugio', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible, 1) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 9, refugioId: null } as never);
+
+    await expect(service.obtenerMascota(10, 9)).rejects.toMatchObject({
+      codigo: 'NO_AUTORIZADO',
+      httpStatus: 403,
+    });
+  });
+
+  it('403 si pertenece a otro refugio', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible, 1) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 9, refugioId: 2 } as never);
+
+    await expect(service.obtenerMascota(10, 9)).rejects.toMatchObject({
+      codigo: 'NO_AUTORIZADO',
+    });
+  });
+
+  it('un compañero del mismo refugio sí puede ver la ficha aunque no la haya creado', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible, 1) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 9, refugioId: 1 } as never);
+
+    await expect(service.obtenerMascota(10, 9)).resolves.toMatchObject({ id: 10 });
+  });
+
+  it('sin publicación activa, publicacionActivaId viaja en null', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible) as never,
+    );
+
+    await expect(service.obtenerMascota(10, 2)).resolves.toMatchObject({
+      publicacionActivaId: null,
+    });
+  });
+
+  it('con publicación activa, devuelve su id para el botón "Ver publicación asociada"', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible) as never,
+    );
+    vi.mocked(obtenerPublicacionActivaIdDeMascota).mockResolvedValue(55);
+
+    await expect(service.obtenerMascota(10, 2)).resolves.toMatchObject({
+      publicacionActivaId: 55,
+    });
   });
 });

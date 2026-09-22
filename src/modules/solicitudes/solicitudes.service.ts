@@ -13,6 +13,7 @@
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
 import * as chats from '../chats/chats.service';
+import { esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import type {
@@ -188,6 +189,11 @@ const ESPACIOS_CON_PATIO = ['Patio', 'Jardin'];
  * decir cosas distintas: los dos caminos leen de acá.
  */
 const BLOQUEOS = {
+  PUBLICACION_PROPIA: {
+    codigo: 'PUBLICACION_PROPIA',
+    mensaje: 'No podés solicitar tu propia mascota',
+    estado: 403,
+  },
   NO_VERIFICADO: {
     codigo: 'USUARIO_NO_VERIFICADO',
     mensaje: 'Tenés que verificarte antes de solicitar una adopción',
@@ -219,6 +225,7 @@ type MotivoBloqueo = keyof typeof BLOQUEOS;
 async function evaluarElegibilidad(
   usuarioId: number,
   publicacionId?: number,
+  ambito: Ambito = 'PERSONAL',
 ): Promise<ElegibilidadDto> {
   const usuario = await repo.buscarUsuarioConRefugio(usuarioId);
 
@@ -232,8 +239,20 @@ async function evaluarElegibilidad(
     ? await repo.buscarVivaDeUsuarioEnPublicacion(usuarioId, publicacionId)
     : null;
 
-  const motivo: MotivoBloqueo | null =
-    FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR && !usuario.verificado
+  // Se resuelve acá (y no solo al crear) para que el botón de la ficha ya nazca oculto o
+  // deshabilitado sobre la propia mascota, en vez de dejar que el usuario complete el
+  // formulario y recién se entere con el 403 del POST. `ambito` decide si "propia" incluye
+  // lo del refugio o solo lo personal — ver `shared/ambito.ts`.
+  const publicacion = publicacionId
+    ? await repo.buscarPublicacionParaSolicitar(publicacionId)
+    : null;
+  const esPropia = publicacion
+    ? esMascotaPropia(publicacion.mascota, { id: usuario.id, refugioId: usuario.refugioId }, ambito)
+    : false;
+
+  const motivo: MotivoBloqueo | null = esPropia
+    ? 'PUBLICACION_PROPIA'
+    : FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR && !usuario.verificado
       ? 'NO_VERIFICADO'
       : abierta
         ? 'YA_SOLICITADA'
@@ -257,13 +276,18 @@ async function evaluarElegibilidad(
 export function obtenerElegibilidad(
   usuarioId: number,
   publicacionId?: number,
+  ambito: Ambito = 'PERSONAL',
 ): Promise<ElegibilidadDto> {
-  return evaluarElegibilidad(usuarioId, publicacionId);
+  return evaluarElegibilidad(usuarioId, publicacionId, ambito);
 }
 
 /** Misma evaluación, pero cortando con el error que le corresponde a cada motivo. */
-async function exigirPuedeSolicitar(usuarioId: number, publicacionId: number): Promise<void> {
-  const { motivo } = await evaluarElegibilidad(usuarioId, publicacionId);
+async function exigirPuedeSolicitar(
+  usuarioId: number,
+  publicacionId: number,
+  ambito: Ambito,
+): Promise<void> {
+  const { motivo } = await evaluarElegibilidad(usuarioId, publicacionId, ambito);
 
   if (motivo) {
     const { codigo, mensaje, estado } = BLOQUEOS[motivo];
@@ -301,7 +325,7 @@ export async function crearSolicitud(
   datos: CrearSolicitudDto,
   usuarioId: number,
 ): Promise<SolicitudDetalleDto> {
-  await exigirPuedeSolicitar(usuarioId, datos.publicacionId);
+  await exigirPuedeSolicitar(usuarioId, datos.publicacionId, datos.ambito);
 
   const publicacion = await repo.buscarPublicacionParaSolicitar(datos.publicacionId);
 
@@ -309,10 +333,8 @@ export async function crearSolicitud(
     throw new AppError('NO_ENCONTRADO', 'La publicación no existe', 404);
   }
 
-  // Misma regla que favoritos: sobre la propia mascota no hay nada que solicitar.
-  if (publicacion.mascota.usuarioId === usuarioId) {
-    throw new AppError('PUBLICACION_PROPIA', 'No podés solicitar tu propia mascota', 403);
-  }
+  // La propia (mascota personal o del mismo refugio) ya cortó arriba en
+  // `exigirPuedeSolicitar` con PUBLICACION_PROPIA — mismo criterio que favoritos.
 
   const estadoMascota = publicacion.mascota.historicoEstados[0]?.estadoMascota.nombre;
   if (estadoMascota !== ESTADO_SOLICITABLE) {

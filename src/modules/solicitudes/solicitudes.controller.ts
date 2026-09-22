@@ -30,8 +30,8 @@ function idDeRuta(req: Request): number {
 /** HU-7.1: si puede abrir el formulario, y si no, con qué cartel se lo frena. */
 export async function elegibilidad(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { publicacionId } = parsearOFallar(filtrosElegibilidadSchema, req.query);
-    res.json(await service.obtenerElegibilidad(req.usuario!.usuarioId, publicacionId));
+    const { publicacionId, ambito } = parsearOFallar(filtrosElegibilidadSchema, req.query);
+    res.json(await service.obtenerElegibilidad(req.usuario!.usuarioId, publicacionId, ambito));
   } catch (err) {
     next(err);
   }

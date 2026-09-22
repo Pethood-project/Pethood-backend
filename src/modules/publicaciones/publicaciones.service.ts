@@ -1,4 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { aFechaISO } from '../../shared/validation/dates';
@@ -128,7 +129,11 @@ export async function crearPublicacion(
 
 type PublicacionConRelaciones = NonNullable<Awaited<ReturnType<typeof repo.buscarActivaPorId>>>;
 
-function aFeedDto(publicacion: PublicacionConRelaciones, enFavoritos: boolean): PublicacionFeedDto {
+function aFeedDto(
+  publicacion: PublicacionConRelaciones,
+  enFavoritos: boolean,
+  esPropia: boolean,
+): PublicacionFeedDto {
   const { mascota } = publicacion;
   const estado = mascota.historicoEstados[0]!.estadoMascota;
 
@@ -164,6 +169,7 @@ function aFeedDto(publicacion: PublicacionConRelaciones, enFavoritos: boolean): 
     },
     refugio: mascota.refugio,
     enFavoritos,
+    esPropia,
   };
 }
 
@@ -178,20 +184,28 @@ export async function listarFeed(
   usuarioId: number,
   filtros: FiltrosFeedDto,
 ): Promise<FeedPublicacionesDto> {
+  const usuario = await repo.buscarUsuario(usuarioId);
+
+  if (!usuario) {
+    throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
+  }
+
   const [publicaciones, total] = await Promise.all([
-    repo.listarFeed(usuarioId, filtros),
-    repo.contarFeed(usuarioId, filtros),
+    repo.listarFeed(usuarioId, filtros, usuario.refugioId),
+    repo.contarFeed(usuarioId, filtros, usuario.refugioId),
   ]);
 
-  // El feed ya excluye las guardadas, así que acá `enFavoritos` es siempre false. Se deja
-  // explícito para que la tarjeta y la ficha lean el mismo campo.
-  return { total, publicaciones: publicaciones.map((pub) => aFeedDto(pub, false)) };
+  // El feed ya excluye las propias y las guardadas (con el criterio de `filtros.ambito`),
+  // así que acá `enFavoritos` y `esPropia` son siempre false. Se deja explícito para que la
+  // tarjeta y la ficha lean el mismo campo.
+  return { total, publicaciones: publicaciones.map((pub) => aFeedDto(pub, false, false)) };
 }
 
-/** Ficha completa de una publicación, con el estado de favorito ya resuelto. */
+/** Ficha completa de una publicación, con el estado de favorito y de propiedad ya resueltos. */
 export async function obtenerPublicacion(
   publicacionId: number,
   usuarioId: number,
+  ambito: Ambito = 'PERSONAL',
 ): Promise<PublicacionFeedDto> {
   const publicacion = await repo.buscarActivaPorId(publicacionId);
 
@@ -204,9 +218,32 @@ export async function obtenerPublicacion(
     throw new AppError('NO_ENCONTRADO', 'Esa publicación ya no está disponible', 404);
   }
 
-  const favoritas = await repo.filtrarFavoritas(usuarioId, [publicacion.mascotaId]);
+  const usuario = await repo.buscarUsuario(usuarioId);
 
-  return aFeedDto(publicacion, favoritas.has(publicacion.mascotaId));
+  if (!usuario) {
+    throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
+  }
+
+  const favoritas = await repo.filtrarFavoritas(usuarioId, [publicacion.mascotaId]);
+  const esPropia = esMascotaPropia(
+    publicacion.mascota,
+    { id: usuario.id, refugioId: usuario.refugioId },
+    ambito,
+  );
+
+  return aFeedDto(publicacion, favoritas.has(publicacion.mascotaId), esPropia);
+}
+
+/**
+ * Id de la publicación activa de una mascota, si tiene una. Lo consume `mascotas.service`
+ * para la ficha de detalle (HU-6.4): el botón "Ver publicación asociada" solo aparece con
+ * un id, no con un booleano, porque de ahí sale directo el link a la ficha.
+ */
+export async function obtenerPublicacionActivaIdDeMascota(
+  mascotaId: number,
+): Promise<number | null> {
+  const publicacion = await repo.buscarActivaDeMascota(mascotaId);
+  return publicacion?.id ?? null;
 }
 
 export { MAXIMO_ACTIVAS_POR_ADOPTANTE };

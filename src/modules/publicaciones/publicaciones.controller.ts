@@ -1,7 +1,11 @@
 import type { NextFunction, Request, Response } from 'express';
 import { AppError } from '../../middlewares/errorHandler';
 import { parsearId } from '../../shared/validation/numbers';
-import { crearPublicacionSchema, filtrosFeedSchema } from './publicaciones.dto';
+import {
+  crearPublicacionSchema,
+  fichaPublicacionQuerySchema,
+  filtrosFeedSchema,
+} from './publicaciones.dto';
 import * as service from './publicaciones.service';
 
 /**
@@ -50,7 +54,13 @@ export async function obtener(req: Request, res: Response, next: NextFunction): 
     const id = parsearId(req.params.id);
     if (id === null) throw new AppError('VALIDACION', 'La publicación no es válida', 400);
 
-    res.json(await service.obtenerPublicacion(id, req.usuario!.usuarioId));
+    const resultado = fichaPublicacionQuerySchema.safeParse(req.query);
+    if (!resultado.success) {
+      const primero = resultado.error.issues[0];
+      throw new AppError('VALIDACION', primero?.message ?? 'Filtros inválidos', 400);
+    }
+
+    res.json(await service.obtenerPublicacion(id, req.usuario!.usuarioId, resultado.data.ambito));
   } catch (err) {
     next(err);
   }
