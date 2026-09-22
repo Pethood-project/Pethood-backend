@@ -3,6 +3,7 @@
  * decimales) salen de `shared/validation`; acá solo se compone lo propio de Mascota.
  */
 import { z } from 'zod';
+import { AMBITOS } from '../../shared/ambito';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
@@ -22,9 +23,11 @@ export const DESTINOS = ['PROPIA', 'ADOPCION'] as const;
 
 /**
  * Qué conjunto de mascotas se pide en el listado. Un miembro de refugio tiene los dos:
- * las que cargó a título personal y las del refugio al que pertenece.
+ * las que cargó a título personal y las del refugio al que pertenece. Mismo enum que
+ * `shared/ambito.ts` usa para decidir si una mascota es "propia" en favoritos/solicitudes;
+ * se re-exporta con este nombre porque ya lo importan `mascotas.service.ts` y el frontend.
  */
-export const AMBITOS_MASCOTAS = ['PERSONAL', 'REFUGIO'] as const;
+export const AMBITOS_MASCOTAS = AMBITOS;
 export type AmbitoMascotas = (typeof AMBITOS_MASCOTAS)[number];
 
 /** Llega por query string, así que es opcional: sin dato, el ámbito personal. */
@@ -117,4 +120,12 @@ export interface MascotaCreadaDto {
   usuarioId: number;
   /** Si el estado actual permite ofrecer la mascota en adopción. */
   habilitaPublicacion: boolean;
+}
+
+/**
+ * Ficha de detalle (HU-6.4): igual que el listado, más el id de la publicación activa para
+ * el botón "Ver publicación asociada". `null` si la mascota no está publicada.
+ */
+export interface FichaMascotaDto extends MascotaCreadaDto {
+  publicacionActivaId: number | null;
 }

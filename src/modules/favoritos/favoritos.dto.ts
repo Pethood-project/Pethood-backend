@@ -3,6 +3,7 @@
  * salen de `shared/validation`; acá sólo se compone lo propio de Favorito.
  */
 import { z } from 'zod';
+import { AMBITOS } from '../../shared/ambito';
 import { idSchema } from '../../shared/validation/schemas';
 
 // La etiqueta es "El id de la mascota" y no "La mascota" por dos razones: `idSchema` arma
@@ -10,6 +11,12 @@ import { idSchema } from '../../shared/validation/schemas';
 // exactamente con el que devuelve el DELETE cuando el id viene mal en la URL.
 export const agregarFavoritoSchema = z.object({
   mascotaId: idSchema('El id de la mascota'),
+  // Con qué cuenta guarda: la personal o la del refugio (ver `shared/ambito.ts`). Sin dato
+  // se asume personal, que es lo único que existe para quien no pertenece a un refugio.
+  ambito: z
+    .enum(AMBITOS, { errorMap: () => ({ message: 'El ámbito no es válido' }) })
+    .optional()
+    .default('PERSONAL'),
 });
 
 export type AgregarFavoritoDto = z.infer<typeof agregarFavoritoSchema>;

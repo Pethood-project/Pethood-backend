@@ -82,3 +82,12 @@ export async function listarMias(req: Request, res: Response, next: NextFunction
     next(err);
   }
 }
+
+/** HU-6.4. Ficha individual de una mascota propia o del refugio del usuario. */
+export async function obtener(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json(await service.obtenerMascota(idDeRuta(req), req.usuario!.usuarioId));
+  } catch (err) {
+    next(err);
+  }
+}

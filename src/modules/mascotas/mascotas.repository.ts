@@ -74,6 +74,22 @@ export function buscarPorId(mascotaId: number) {
   return prisma.mascota.findFirst({ where: { id: mascotaId, fechaBaja: null } });
 }
 
+/** Mascota activa por id con las relaciones que necesita la ficha de detalle (HU-6.4). */
+export function buscarPorIdConRelaciones(mascotaId: number) {
+  return prisma.mascota.findFirst({
+    where: { id: mascotaId, fechaBaja: null },
+    include: {
+      raza: { include: { especie: true } },
+      historicoEstados: {
+        where: { fechaBaja: null },
+        include: { estadoMascota: true },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+    },
+  });
+}
+
 export function actualizar(mascotaId: number, datos: DatosEdicionMascota, usuarioModifica: number) {
   return prisma.mascota.update({
     where: { id: mascotaId },

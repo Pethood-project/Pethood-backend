@@ -18,9 +18,13 @@ function mascotaIdDeRuta(req: Request): number {
 /** HU-7.2. 201 si se guardó recién, 200 si ya estaba: las dos son un final correcto. */
 export async function agregar(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { mascotaId } = req.body as AgregarFavoritoDto;
+    const { mascotaId, ambito } = req.body as AgregarFavoritoDto;
 
-    const { favorito, yaEstaba } = await service.agregarFavorito(mascotaId, req.usuario!.usuarioId);
+    const { favorito, yaEstaba } = await service.agregarFavorito(
+      mascotaId,
+      req.usuario!.usuarioId,
+      ambito,
+    );
 
     res.status(yaEstaba ? 200 : 201).json(favorito);
   } catch (err) {

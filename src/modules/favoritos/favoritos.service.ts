@@ -13,6 +13,7 @@
  */
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../middlewares/errorHandler';
+import { esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { aFechaISO } from '../../shared/validation/dates';
 import type { FavoritoAgregadoDto, ListaFavoritosDto, MascotaFavoritaDto } from './favoritos.dto';
 import * as repo from './favoritos.repository';
@@ -63,6 +64,7 @@ function esDuplicado(err: unknown): boolean {
 export async function agregarFavorito(
   mascotaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<ResultadoAgregado> {
   const mascota = await repo.buscarMascotaActiva(mascotaId);
 
@@ -70,9 +72,15 @@ export async function agregarFavorito(
     throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
   }
 
-  // Guardarse la propia mascota no tiene sentido y ensuciaría el listado de GUI-12.
-  // La propiedad se resuelve igual que en HU-6.2/6.3: quien creó el registro.
-  if (mascota.usuarioId === usuarioId) {
+  const usuario = await repo.buscarUsuario(usuarioId);
+
+  if (!usuario) {
+    throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
+  }
+
+  // Guardarse la propia mascota no tiene sentido y ensuciaría el listado de GUI-12. La del
+  // refugio solo cuenta como propia en ámbito REFUGIO — ver `shared/ambito.ts`.
+  if (esMascotaPropia(mascota, { id: usuario.id, refugioId: usuario.refugioId }, ambito)) {
     throw new AppError('MASCOTA_PROPIA', 'No podés guardar en favoritos una mascota tuya', 403);
   }
 

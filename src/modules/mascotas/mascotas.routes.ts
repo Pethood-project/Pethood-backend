@@ -8,6 +8,9 @@ export const mascotasRouter = Router();
 
 mascotasRouter.get('/mias', autenticar, controller.listarMias);
 
+// Ficha individual (HU-6.4). Va después de /mias para que ese literal no caiga acá.
+mascotasRouter.get('/:id', autenticar, controller.obtener);
+
 // La imagen se comprime antes de que el controller la persista.
 mascotasRouter.post('/', autenticar, uploadImagen('foto'), comprimirImagen, controller.crear);
 
