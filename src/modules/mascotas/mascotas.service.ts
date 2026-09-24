@@ -1,4 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
 import { aFechaISO } from '../../shared/validation/dates';
@@ -8,7 +9,6 @@ import {
 } from '../catalogos/catalogos.service';
 import { obtenerPublicacionActivaIdDeMascota } from '../publicaciones/publicaciones.service';
 import type {
-  AmbitoMascotas,
   CrearMascotaDto,
   EditarMascotaDto,
   FichaMascotaDto,
@@ -32,7 +32,9 @@ export interface ContextoCreacion {
   archivo?: { buffer: Buffer; mimetype: string };
 }
 
-export type ContextoEdicion = ContextoCreacion;
+export interface ContextoEdicion extends ContextoCreacion {
+  ambito: Ambito;
+}
 
 export interface ResultadoEliminacion {
   id: number;
@@ -82,19 +84,40 @@ async function exigirUsuarioVerificado(usuarioId: number) {
 }
 
 /**
- * Propiedad = ser quien creó el registro (precondición de HU-6.2 y HU-6.3). Se resuelve
- * siempre en el backend: esconder el botón en la UI no alcanza. Un compañero del mismo
- * refugio tampoco pasa, igual que en publicaciones.service.ts.
+ * La mascota tiene que ser del perfil con el que se está operando (ver `shared/ambito.ts`):
+ * desde la vista personal no se toca nada del refugio, y viceversa. Mismo 404 que si no
+ * existiera, porque desde ese perfil no se ve.
  */
-async function exigirMascotaPropia(mascotaId: number, usuarioId: number) {
+async function exigirMascotaDelAmbito(
+  mascota: { usuarioId: number; refugioId: number | null },
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<void> {
+  const usuario = await repo.buscarUsuario(usuarioId);
+
+  if (!usuario || !esMascotaDelAmbito(mascota, usuario, ambito)) {
+    throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
+  }
+}
+
+/**
+ * Propiedad = ser quien creó el registro (precondición de HU-6.2 y HU-6.3), y desde el
+ * perfil al que pertenece la mascota. Se resuelve siempre en el backend: esconder el botón
+ * en la UI no alcanza. Un compañero del mismo refugio tampoco pasa, igual que en
+ * publicaciones.service.ts.
+ */
+async function exigirMascotaPropia(mascotaId: number, usuarioId: number, ambito: Ambito) {
   const mascota = await repo.buscarPorId(mascotaId);
 
   if (!mascota) {
     throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
   }
+
   if (mascota.usuarioId !== usuarioId) {
     throw new AppError('NO_AUTORIZADO', 'Esa mascota no es tuya', 403);
   }
+
+  await exigirMascotaDelAmbito(mascota, usuarioId, ambito);
 
   return mascota;
 }
@@ -204,7 +227,7 @@ export async function editarMascota(
   datos: EditarMascotaDto,
   contexto: ContextoEdicion,
 ): Promise<MascotaCreadaDto> {
-  const mascota = await exigirMascotaPropia(mascotaId, contexto.usuarioId);
+  const mascota = await exigirMascotaPropia(mascotaId, contexto.usuarioId, contexto.ambito);
 
   const camposCambiados = Object.entries(datos)
     .filter(([, valor]) => valor !== undefined)
@@ -283,8 +306,9 @@ export async function editarMascota(
 export async function eliminarMascota(
   mascotaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<ResultadoEliminacion> {
-  await exigirMascotaPropia(mascotaId, usuarioId);
+  await exigirMascotaPropia(mascotaId, usuarioId, ambito);
 
   const solicitudes = await repo.listarSolicitudesDeMascota(mascotaId);
   const hayAbiertas = solicitudes.some((solicitud) => {
@@ -316,13 +340,14 @@ export async function eliminarMascota(
 /**
  * Ficha de una mascota (HU-6.4: verla individualmente desde "Mis mascotas").
  *
- * Autorización más amplia que `exigirMascotaPropia`: alcanza con haberla cargado uno mismo
- * o con pertenecer al mismo refugio, igual criterio que `listarPorAmbito` usa para el
- * listado — un compañero del refugio ve la ficha aunque no sea quien la dio de alta.
+ * Autorización más amplia que `exigirMascotaPropia`: alcanza con que sea del perfil con el
+ * que se consulta, igual criterio que `listarPorAmbito` usa para el listado — en la vista de
+ * refugio un compañero ve la ficha aunque no sea quien la dio de alta.
  */
 export async function obtenerMascota(
   mascotaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<FichaMascotaDto> {
   const mascota = await repo.buscarPorIdConRelaciones(mascotaId);
 
@@ -330,37 +355,22 @@ export async function obtenerMascota(
     throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
   }
 
-  const esPropietario = mascota.usuarioId === usuarioId;
-  const esDelMismoRefugio =
-    mascota.refugioId !== null && (await esUsuarioDelRefugio(usuarioId, mascota.refugioId));
-
-  if (!esPropietario && !esDelMismoRefugio) {
-    throw new AppError('NO_AUTORIZADO', 'Esa mascota no es tuya', 403);
-  }
+  await exigirMascotaDelAmbito(mascota, usuarioId, ambito);
 
   const publicacionActivaId = await obtenerPublicacionActivaIdDeMascota(mascotaId);
 
   return { ...aDto(mascota as MascotaConRelaciones), publicacionActivaId };
 }
 
-async function esUsuarioDelRefugio(usuarioId: number, refugioId: number): Promise<boolean> {
-  const usuario = await repo.buscarUsuario(usuarioId);
-  return usuario?.refugioId === refugioId;
-}
-
 /**
- * Listado de mascotas del ámbito pedido.
+ * Listado de mascotas del perfil con el que se consulta.
  *
  * Un miembro de refugio tiene dos conjuntos separados: las mascotas que cargó como
- * persona y las del refugio. El cliente elige cuál quiere con `ambito`; sin ese dato se
- * devuelven las personales, que es lo que ve un adoptante común.
- *
- * Pedir el ámbito del refugio sin pertenecer a uno es un error y no una lista vacía: la
- * app no debería llegar a preguntarlo, y devolver vacío escondería el bug.
+ * persona y las del refugio, y el switch decide cuál ve (ver `shared/ambito.ts`).
  */
 export async function listarMisMascotas(
   usuarioId: number,
-  ambito: AmbitoMascotas = 'PERSONAL',
+  ambito: Ambito,
 ): Promise<MascotaCreadaDto[]> {
   let filtro: { usuarioId: number } | { refugioId: number } = { usuarioId };
 

@@ -26,7 +26,21 @@ function exigirChatId(req: Request): number {
  */
 export async function listar(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    res.json(await service.listarConversaciones(req.usuario!.usuarioId));
+    res.json(await service.listarConversaciones(req.usuario!.usuarioId, req.ambito!));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Guard de todas las rutas de sala: la conversación tiene que ser del perfil activo. */
+export async function exigirAmbitoDelChat(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    await service.exigirChatDelAmbito(req.usuario!.usuarioId, exigirChatId(req), req.ambito!);
+    next();
   } catch (err) {
     next(err);
   }

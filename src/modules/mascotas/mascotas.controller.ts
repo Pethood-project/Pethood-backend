@@ -1,9 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
-import { ROL_API } from '../../shared/roles';
 import { parsearId } from '../../shared/validation/numbers';
-import { ambitoMascotasSchema, crearMascotaSchema, editarMascotaSchema } from './mascotas.dto';
+import { crearMascotaSchema, editarMascotaSchema } from './mascotas.dto';
 import * as service from './mascotas.service';
 
 /** Traduce el primer issue de Zod al formato de error de la API. */
@@ -32,12 +31,13 @@ function idDeRuta(req: Request): number {
 /**
  * El formulario llega como multipart, así que el body no pasa por validarBody: primero
  * hay que dejar que multer lo parsee. La validación se hace acá, ya con el `actor`
- * puesto desde el token para que el cliente no pueda elegirlo.
+ * puesto desde el ámbito del pedido: un miembro de refugio en su perfil personal carga una
+ * mascota personal, y en la vista de refugio una del refugio. `autenticar` ya garantizó que
+ * el ámbito REFUGIO solo llega de alguien que pertenece a uno.
  */
 export async function crear(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const roles = req.usuario?.roles ?? [];
-    const actor = roles.includes(ROL_API.MIEMBRO_REFUGIO) ? 'REFUGIO' : 'ADOPTANTE';
+    const actor = req.ambito === 'REFUGIO' ? 'REFUGIO' : 'ADOPTANTE';
 
     const mascota = await service.crearMascota(
       parsearOFallar(crearMascotaSchema, { ...req.body, actor }),
@@ -56,7 +56,7 @@ export async function editar(req: Request, res: Response, next: NextFunction): P
     const mascota = await service.editarMascota(
       idDeRuta(req),
       parsearOFallar(editarMascotaSchema, req.body),
-      { usuarioId: req.usuario!.usuarioId, archivo: req.file },
+      { usuarioId: req.usuario!.usuarioId, ambito: req.ambito!, archivo: req.file },
     );
 
     res.json(mascota);
@@ -68,7 +68,7 @@ export async function editar(req: Request, res: Response, next: NextFunction): P
 /** HU-6.3. Baja lógica; devuelve cuántas publicaciones se retiraron junto con la mascota. */
 export async function eliminar(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    res.json(await service.eliminarMascota(idDeRuta(req), req.usuario!.usuarioId));
+    res.json(await service.eliminarMascota(idDeRuta(req), req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -76,17 +76,16 @@ export async function eliminar(req: Request, res: Response, next: NextFunction):
 
 export async function listarMias(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const ambito = parsearOFallar(ambitoMascotasSchema, req.query.ambito);
-    res.json(await service.listarMisMascotas(req.usuario!.usuarioId, ambito));
+    res.json(await service.listarMisMascotas(req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
 }
 
-/** HU-6.4. Ficha individual de una mascota propia o del refugio del usuario. */
+/** HU-6.4. Ficha individual de una mascota del perfil con el que se consulta. */
 export async function obtener(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    res.json(await service.obtenerMascota(idDeRuta(req), req.usuario!.usuarioId));
+    res.json(await service.obtenerMascota(idDeRuta(req), req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }

@@ -21,6 +21,7 @@
  */
 import type { TipoMensaje } from '@prisma/client';
 import { AppError } from '../../middlewares/errorHandler';
+import type { Ambito } from '../../shared/ambito';
 import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { clasificarAdjuntos, esMimeDeVideo, tipoDeUrl } from '../../shared/adjuntos';
@@ -143,11 +144,54 @@ function aConversacion(
   };
 }
 
-export async function listarConversaciones(usuarioId: number): Promise<ListaChatsDto> {
-  const [membresias, usuario] = await Promise.all([
+/**
+ * A qué perfil del usuario pertenece una conversación (ver `shared/ambito.ts`): las que
+ * tienen de contraparte institucional a SU refugio son del refugio; todas las demás
+ * (con otro refugio o entre personas) son personales.
+ */
+function ambitoDelChat(refugioDelChat: number | null, refugioDelUsuario: number | null): Ambito {
+  return refugioDelChat !== null && refugioDelChat === refugioDelUsuario ? 'REFUGIO' : 'PERSONAL';
+}
+
+/**
+ * Guard de las rutas de sala: una conversación del otro perfil no se abre, igual que no
+ * aparece en el listado. Si la sala no existe se deja pasar: el guard de participación de
+ * cada caso de uso ya responde por eso.
+ */
+export async function exigirChatDelAmbito(
+  usuarioId: number,
+  chatId: number,
+  ambito: Ambito,
+): Promise<void> {
+  const [chat, usuario] = await Promise.all([
+    repo.buscarRefugioDeChat(chatId),
+    repo.buscarRefugioDeUsuario(usuarioId),
+  ]);
+
+  if (chat && ambitoDelChat(chat.refugioId, usuario?.refugioId ?? null) !== ambito) {
+    throw new AppError(
+      'AMBITO_NO_PERMITIDO',
+      'Esta conversación es de tu otro perfil. Cambiá de vista para abrirla',
+      403,
+    );
+  }
+}
+
+export async function listarConversaciones(
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<ListaChatsDto> {
+  const [todas, usuario] = await Promise.all([
     repo.listarChatsActivosDeUsuario(usuarioId),
     repo.buscarRefugioDeUsuario(usuarioId),
   ]);
+
+  const refugioDelUsuario = usuario?.refugioId ?? null;
+
+  // Cada perfil ve solo sus conversaciones: las del refugio no se mezclan con las personales.
+  const membresias = todas.filter(
+    (membresia) => ambitoDelChat(membresia.chat.refugioId, refugioDelUsuario) === ambito,
+  );
 
   // Sin conversaciones el empty state es un estado normal de la pantalla, no un error — y
   // además evita mandar dos queries con una lista de ids vacía.
@@ -164,7 +208,6 @@ export async function listarConversaciones(usuarioId: number): Promise<ListaChat
 
   const ultimoPorChat = new Map(ultimos.map((fila) => [fila.chatId, fila]));
   const noLeidosPorChat = new Map(conteos.map((fila) => [fila.chatId, fila.noLeidos]));
-  const refugioDelUsuario = usuario?.refugioId ?? null;
 
   const filas = membresias
     .map((membresia) =>

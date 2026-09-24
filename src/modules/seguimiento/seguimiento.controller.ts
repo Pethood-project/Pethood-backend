@@ -34,7 +34,7 @@ function idDeParametro(valor: unknown, etiqueta: string): number {
 /** HU-9.2. Todo lo que el usuario tiene en seguimiento, como adoptante o como publicador. */
 export async function listarMios(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    res.json(await service.listarMisSeguimientos(req.usuario!.usuarioId));
+    res.json(await service.listarMisSeguimientos(req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -49,7 +49,13 @@ export async function listarDeSolicitud(
   try {
     const solicitudId = idDeParametro(req.params.solicitudId, 'de la solicitud');
 
-    res.json(await service.obtenerSeguimientosDeSolicitud(solicitudId, req.usuario!.usuarioId));
+    res.json(
+      await service.obtenerSeguimientosDeSolicitud(
+        solicitudId,
+        req.usuario!.usuarioId,
+        req.ambito!,
+      ),
+    );
   } catch (err) {
     next(err);
   }
@@ -64,7 +70,7 @@ export async function obtenerActualizacion(
   try {
     const id = idDeParametro(req.params.id, 'del seguimiento');
 
-    res.json(await service.obtenerActualizacion(id, req.usuario!.usuarioId));
+    res.json(await service.obtenerActualizacion(id, req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -82,7 +88,7 @@ export async function subirActualizacion(
     const resultado = await service.subirActualizacion(
       id,
       parsearOFallar(subirActualizacionSchema, req.body),
-      { usuarioId: req.usuario!.usuarioId, archivo: req.file },
+      { usuarioId: req.usuario!.usuarioId, ambito: req.ambito!, archivo: req.file },
     );
 
     res.status(201).json(resultado);

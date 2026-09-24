@@ -3,7 +3,6 @@
  * decimales) salen de `shared/validation`; acá solo se compone lo propio de Mascota.
  */
 import { z } from 'zod';
-import { AMBITOS } from '../../shared/ambito';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
@@ -20,21 +19,6 @@ export const GENEROS = ['MACHO', 'HEMBRA'] as const;
 
 /** Un adoptante indica si registra una mascota propia o si la ofrece en adopción. */
 export const DESTINOS = ['PROPIA', 'ADOPCION'] as const;
-
-/**
- * Qué conjunto de mascotas se pide en el listado. Un miembro de refugio tiene los dos:
- * las que cargó a título personal y las del refugio al que pertenece. Mismo enum que
- * `shared/ambito.ts` usa para decidir si una mascota es "propia" en favoritos/solicitudes;
- * se re-exporta con este nombre porque ya lo importan `mascotas.service.ts` y el frontend.
- */
-export const AMBITOS_MASCOTAS = AMBITOS;
-export type AmbitoMascotas = (typeof AMBITOS_MASCOTAS)[number];
-
-/** Llega por query string, así que es opcional: sin dato, el ámbito personal. */
-export const ambitoMascotasSchema = z
-  .enum(AMBITOS_MASCOTAS, { errorMap: () => ({ message: 'El ámbito no es válido' }) })
-  .optional()
-  .default('PERSONAL');
 
 /** Campos que piden por igual el formulario del adoptante y el del refugio. */
 const camposBase = {
@@ -55,7 +39,7 @@ const camposBase = {
 /**
  * Un schema por actor. El adoptante elige destino y el refugio elige estado — nunca
  * ambos, así un adoptante no puede fijarse un estado a mano. El `actor` lo setea el
- * controller desde el token, nunca el cliente.
+ * controller desde el ámbito del pedido (`req.ambito`), nunca el body.
  */
 export const crearMascotaSchema = z.discriminatedUnion('actor', [
   z.object({

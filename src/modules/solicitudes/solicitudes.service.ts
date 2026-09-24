@@ -6,14 +6,18 @@
  * "Quien publicó la mascota" no es siempre un refugio: un adoptante particular también
  * puede ofrecer una mascota propia en adopción (`mascotas.dto.ts`, actor ADOPTANTE +
  * destino ADOPCION). Por eso la autorización se resuelve por actor, no por rol:
- * - mascota de un refugio (`refugioId` no nulo) -> cualquier miembro de ESE refugio,
- *   igual criterio que `mascotas.repository.listarPorAmbito` y el dashboard de refugio.
- * - mascota personal (`refugioId` nulo) -> solo quien la publicó.
+ * - mascota de un refugio (`refugioId` no nulo) -> cualquier miembro de ESE refugio, desde
+ *   la vista de refugio; igual criterio que `mascotas.repository.listarPorAmbito` y el
+ *   dashboard de refugio.
+ * - mascota personal (`refugioId` nulo) -> solo quien la publicó, desde su perfil personal.
+ *
+ * Solicitar (y ver lo solicitado) es siempre del perfil personal: desde la vista de refugio
+ * no se adopta. Ver `shared/ambito.ts`.
  */
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
 import * as chats from '../chats/chats.service';
-import { esMascotaPropia, type Ambito } from '../../shared/ambito';
+import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import type {
@@ -32,24 +36,22 @@ import type {
 } from './solicitudes.dto';
 import * as repo from './solicitudes.repository';
 
-type Actor = { id: number; refugioId: number | null };
+type Actor = { id: number; refugioId: number | null; ambito: Ambito };
 type SolicitudConDetalle = NonNullable<Awaited<ReturnType<typeof repo.buscarConDetalle>>>;
 type MascotaDeSolicitud = SolicitudConDetalle['publicacion']['mascota'];
 
-async function resolverActor(usuarioId: number): Promise<Actor> {
+async function resolverActor(usuarioId: number, ambito: Ambito): Promise<Actor> {
   const usuario = await repo.buscarUsuarioConRefugio(usuarioId);
 
   if (!usuario) {
     throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
   }
 
-  return { id: usuario.id, refugioId: usuario.refugioId };
+  return { id: usuario.id, refugioId: usuario.refugioId, ambito };
 }
 
 function esPropiaDelActor(mascota: MascotaDeSolicitud, actor: Actor): boolean {
-  return mascota.refugioId !== null
-    ? mascota.refugioId === actor.refugioId
-    : mascota.usuarioId === actor.id;
+  return esMascotaDelAmbito(mascota, actor, actor.ambito);
 }
 
 /**
@@ -79,11 +81,13 @@ const gestionablePor =
 /**
  * El detalle lo ven las dos puntas: quien publicó la mascota (HU-7.5) y el propio
  * solicitante, que necesita seguir el estado de lo que mandó (HU-7.3, GUI "Mi Solicitud").
+ * Lo que mandó lo ve desde su perfil personal, que es desde donde se solicita.
  */
 const visiblePor =
   (actor: Actor) =>
   (solicitud: SolicitudConDetalle): boolean =>
-    solicitud.usuarioId === actor.id || esPropiaDelActor(solicitud.publicacion.mascota, actor);
+    (actor.ambito === 'PERSONAL' && solicitud.usuarioId === actor.id) ||
+    esPropiaDelActor(solicitud.publicacion.mascota, actor);
 
 /**
  * El período va como `AAAA-MM-DD` y no como instante ISO: es un día del calendario, y un
@@ -221,11 +225,12 @@ type MotivoBloqueo = keyof typeof BLOQUEOS;
  *
  * `publicacionId` es opcional: sin él solo se evalúa al usuario (sirve para habilitar o
  * no el botón en un listado); con él se agrega la solicitud duplicada.
+ *
+ * Solo se llega desde el perfil personal (la ruta lo exige): el refugio no adopta.
  */
 async function evaluarElegibilidad(
   usuarioId: number,
   publicacionId?: number,
-  ambito: Ambito = 'PERSONAL',
 ): Promise<ElegibilidadDto> {
   const usuario = await repo.buscarUsuarioConRefugio(usuarioId);
 
@@ -241,13 +246,13 @@ async function evaluarElegibilidad(
 
   // Se resuelve acá (y no solo al crear) para que el botón de la ficha ya nazca oculto o
   // deshabilitado sobre la propia mascota, en vez de dejar que el usuario complete el
-  // formulario y recién se entere con el 403 del POST. `ambito` decide si "propia" incluye
-  // lo del refugio o solo lo personal — ver `shared/ambito.ts`.
+  // formulario y recién se entere con el 403 del POST. "Propia" incluye lo de su refugio —
+  // ver `shared/ambito.ts`.
   const publicacion = publicacionId
     ? await repo.buscarPublicacionParaSolicitar(publicacionId)
     : null;
   const esPropia = publicacion
-    ? esMascotaPropia(publicacion.mascota, { id: usuario.id, refugioId: usuario.refugioId }, ambito)
+    ? esMascotaPropia(publicacion.mascota, { id: usuario.id, refugioId: usuario.refugioId })
     : false;
 
   const motivo: MotivoBloqueo | null = esPropia
@@ -276,18 +281,13 @@ async function evaluarElegibilidad(
 export function obtenerElegibilidad(
   usuarioId: number,
   publicacionId?: number,
-  ambito: Ambito = 'PERSONAL',
 ): Promise<ElegibilidadDto> {
-  return evaluarElegibilidad(usuarioId, publicacionId, ambito);
+  return evaluarElegibilidad(usuarioId, publicacionId);
 }
 
 /** Misma evaluación, pero cortando con el error que le corresponde a cada motivo. */
-async function exigirPuedeSolicitar(
-  usuarioId: number,
-  publicacionId: number,
-  ambito: Ambito,
-): Promise<void> {
-  const { motivo } = await evaluarElegibilidad(usuarioId, publicacionId, ambito);
+async function exigirPuedeSolicitar(usuarioId: number, publicacionId: number): Promise<void> {
+  const { motivo } = await evaluarElegibilidad(usuarioId, publicacionId);
 
   if (motivo) {
     const { codigo, mensaje, estado } = BLOQUEOS[motivo];
@@ -325,7 +325,7 @@ export async function crearSolicitud(
   datos: CrearSolicitudDto,
   usuarioId: number,
 ): Promise<SolicitudDetalleDto> {
-  await exigirPuedeSolicitar(usuarioId, datos.publicacionId, datos.ambito);
+  await exigirPuedeSolicitar(usuarioId, datos.publicacionId);
 
   const publicacion = await repo.buscarPublicacionParaSolicitar(datos.publicacionId);
 
@@ -426,8 +426,9 @@ function filtrarPorEstadoYFecha<
 export async function obtenerDetalle(
   solicitudId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<SolicitudDetalleDto> {
-  const actor = await resolverActor(usuarioId);
+  const actor = await resolverActor(usuarioId, ambito);
   const solicitud = await exigirSolicitud(solicitudId, visiblePor(actor));
 
   return aDetalleDto(solicitud);
@@ -438,9 +439,10 @@ export async function obtenerDetalle(
 // `repo.listarDelActor`.
 export async function listarRecibidas(
   usuarioId: number,
+  ambito: Ambito,
   filtros: FiltrosRecibidasDto,
 ): Promise<ListaSolicitudesRecibidasDto> {
-  const actor = await resolverActor(usuarioId);
+  const actor = await resolverActor(usuarioId, ambito);
   const todas = await repo.listarDelActor(actor);
   const filtradas = filtrarPorEstadoYFecha(todas, filtros);
 
@@ -453,8 +455,9 @@ export async function resolverSolicitud(
   solicitudId: number,
   datos: ResolverSolicitudDto,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<SolicitudDetalleDto> {
-  const actor = await resolverActor(usuarioId);
+  const actor = await resolverActor(usuarioId, ambito);
   const solicitud = await exigirSolicitud(solicitudId, gestionablePor(actor));
 
   const vigenteAlLeer = solicitud.historicoEstados[0]!.estadoSolicitud;

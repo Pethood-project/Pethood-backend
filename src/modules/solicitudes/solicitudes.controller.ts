@@ -30,8 +30,8 @@ function idDeRuta(req: Request): number {
 /** HU-7.1: si puede abrir el formulario, y si no, con qué cartel se lo frena. */
 export async function elegibilidad(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { publicacionId, ambito } = parsearOFallar(filtrosElegibilidadSchema, req.query);
-    res.json(await service.obtenerElegibilidad(req.usuario!.usuarioId, publicacionId, ambito));
+    const { publicacionId } = parsearOFallar(filtrosElegibilidadSchema, req.query);
+    res.json(await service.obtenerElegibilidad(req.usuario!.usuarioId, publicacionId));
   } catch (err) {
     next(err);
   }
@@ -65,7 +65,7 @@ export async function listarRecibidas(
 ): Promise<void> {
   try {
     const filtros = parsearOFallar(filtrosRecibidasSchema, req.query);
-    res.json(await service.listarRecibidas(req.usuario!.usuarioId, filtros));
+    res.json(await service.listarRecibidas(req.usuario!.usuarioId, req.ambito!, filtros));
   } catch (err) {
     next(err);
   }
@@ -78,7 +78,7 @@ export async function obtenerDetalle(
   next: NextFunction,
 ): Promise<void> {
   try {
-    res.json(await service.obtenerDetalle(idDeRuta(req), req.usuario!.usuarioId));
+    res.json(await service.obtenerDetalle(idDeRuta(req), req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -88,7 +88,9 @@ export async function obtenerDetalle(
 export async function resolver(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const datos = parsearOFallar(resolverSolicitudSchema, req.body);
-    res.json(await service.resolverSolicitud(idDeRuta(req), datos, req.usuario!.usuarioId));
+    res.json(
+      await service.resolverSolicitud(idDeRuta(req), datos, req.usuario!.usuarioId, req.ambito!),
+    );
   } catch (err) {
     next(err);
   }

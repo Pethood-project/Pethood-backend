@@ -1,5 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
-import { esMascotaPropia, type Ambito } from '../../shared/ambito';
+import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { aFechaISO } from '../../shared/validation/dates';
@@ -20,6 +20,8 @@ const MAXIMO_ACTIVAS_POR_ADOPTANTE = 5;
 
 export interface ContextoCreacion {
   usuarioId: number;
+  /** Perfil con el que se publica: la mascota tiene que ser de ese perfil. */
+  ambito: Ambito;
   /** En el orden en que se subieron: la primera es la portada. */
   archivos: { buffer: Buffer; mimetype: string }[];
 }
@@ -28,7 +30,7 @@ export async function crearPublicacion(
   datos: CrearPublicacionDto,
   contexto: ContextoCreacion,
 ): Promise<PublicacionCreadaDto> {
-  const { usuarioId, archivos } = contexto;
+  const { usuarioId, ambito, archivos } = contexto;
   const usuario = await repo.buscarUsuario(usuarioId);
 
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
@@ -42,7 +44,11 @@ export async function crearPublicacion(
 
   const mascota = await repo.buscarMascota(datos.mascotaId);
 
-  if (!mascota) throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
+  // Desde un perfil no se publica una mascota del otro (ver `shared/ambito.ts`): para esta
+  // vista, esa mascota no existe.
+  if (!mascota || !esMascotaDelAmbito(mascota, usuario, ambito)) {
+    throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
+  }
   if (mascota.usuarioId !== usuarioId) {
     throw new AppError('NO_AUTORIZADO', 'Esa mascota no es tuya', 403);
   }
@@ -60,9 +66,10 @@ export async function crearPublicacion(
     throw new AppError('YA_PUBLICADA', 'Esa mascota ya tiene una publicación activa', 409);
   }
 
-  // La quota aplica al adoptante particular, no al refugio.
-  if (!usuario.refugioId) {
-    const activas = await repo.contarActivasDeUsuario(usuarioId);
+  // La quota aplica a lo que se publica a título personal, no al refugio — también para un
+  // miembro de refugio que publica desde su perfil personal.
+  if (mascota.refugioId === null) {
+    const activas = await repo.contarActivasPersonalesDeUsuario(usuarioId);
 
     if (activas >= MAXIMO_ACTIVAS_POR_ADOPTANTE) {
       throw new AppError(
@@ -195,8 +202,7 @@ export async function listarFeed(
     repo.contarFeed(usuarioId, filtros, usuario.refugioId),
   ]);
 
-  // El feed ya excluye las propias y las guardadas (con el criterio de `filtros.ambito`),
-  // así que acá `enFavoritos` y `esPropia` son siempre false. Se deja explícito para que la
+  // El feed ya excluye las propias y las guardadas, así que acá `enFavoritos` y `esPropia` son siempre false. Se deja explícito para que la
   // tarjeta y la ficha lean el mismo campo.
   return { total, publicaciones: publicaciones.map((pub) => aFeedDto(pub, false, false)) };
 }
@@ -205,7 +211,6 @@ export async function listarFeed(
 export async function obtenerPublicacion(
   publicacionId: number,
   usuarioId: number,
-  ambito: Ambito = 'PERSONAL',
 ): Promise<PublicacionFeedDto> {
   const publicacion = await repo.buscarActivaPorId(publicacionId);
 
@@ -225,11 +230,10 @@ export async function obtenerPublicacion(
   }
 
   const favoritas = await repo.filtrarFavoritas(usuarioId, [publicacion.mascotaId]);
-  const esPropia = esMascotaPropia(
-    publicacion.mascota,
-    { id: usuario.id, refugioId: usuario.refugioId },
-    ambito,
-  );
+  const esPropia = esMascotaPropia(publicacion.mascota, {
+    id: usuario.id,
+    refugioId: usuario.refugioId,
+  });
 
   return aFeedDto(publicacion, favoritas.has(publicacion.mascotaId), esPropia);
 }

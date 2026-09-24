@@ -1,4 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
 import { aFechaISO } from '../../shared/validation/dates';
@@ -13,6 +14,8 @@ const SUBCARPETA_DOCUMENTOS = 'historias-clinicas';
 
 export interface Contexto {
   usuarioId: number;
+  /** Perfil con el que se opera: la historia clínica sigue a la mascota (ver `shared/ambito.ts`). */
+  ambito: Ambito;
   archivo?: { buffer: Buffer; mimetype: string };
 }
 
@@ -37,10 +40,13 @@ function aDto(registro: Registro): HistoriaClinicaDto {
 type Mascota = NonNullable<Awaited<ReturnType<typeof repo.buscarMascota>>>;
 type Usuario = NonNullable<Awaited<ReturnType<typeof repo.buscarUsuario>>>;
 
-/** Asociación mínima para leer o dar de alta (HU-8.1/HU-8.2): dueño directo o refugio dueño. */
-function tieneAcceso(mascota: Mascota, usuario: Usuario): boolean {
-  if (mascota.usuarioId === usuario.id) return true;
-  return usuario.refugioId !== null && usuario.refugioId === mascota.refugioId;
+/**
+ * Asociación mínima para leer o dar de alta (HU-8.1/HU-8.2): que la mascota sea del perfil
+ * con el que se opera — la personal propia desde la vista personal, cualquiera del refugio
+ * desde la vista de refugio.
+ */
+function tieneAcceso(mascota: Mascota, usuario: Usuario, ambito: Ambito): boolean {
+  return esMascotaDelAmbito(mascota, usuario, ambito);
 }
 
 /**
@@ -52,9 +58,10 @@ function puedeGestionar(
   mascota: Mascota,
   usuario: Usuario,
   registro: { usuarioAlta: number },
+  ambito: Ambito,
 ): boolean {
-  if (usuario.refugioId !== null && usuario.refugioId === mascota.refugioId) return true;
-  return mascota.usuarioId === usuario.id && registro.usuarioAlta === usuario.id;
+  if (!tieneAcceso(mascota, usuario, ambito)) return false;
+  return ambito === 'REFUGIO' || registro.usuarioAlta === usuario.id;
 }
 
 async function exigirMascotaYUsuario(mascotaId: number, usuarioId: number) {
@@ -69,10 +76,10 @@ async function exigirMascotaYUsuario(mascotaId: number, usuarioId: number) {
   return { mascota, usuario };
 }
 
-async function exigirAcceso(mascotaId: number, usuarioId: number) {
+async function exigirAcceso(mascotaId: number, usuarioId: number, ambito: Ambito) {
   const { mascota, usuario } = await exigirMascotaYUsuario(mascotaId, usuarioId);
 
-  if (!tieneAcceso(mascota, usuario)) {
+  if (!tieneAcceso(mascota, usuario, ambito)) {
     throw new AppError('NO_AUTORIZADO', 'Esa mascota no está asociada a tu cuenta', 403);
   }
 
@@ -84,7 +91,7 @@ export async function crearHistoriaClinica(
   datos: CrearHistoriaClinicaDto,
   contexto: Contexto,
 ): Promise<HistoriaClinicaDto> {
-  await exigirAcceso(mascotaId, contexto.usuarioId);
+  await exigirAcceso(mascotaId, contexto.usuarioId, contexto.ambito);
 
   const documentoUrl = contexto.archivo
     ? await guardarImagen(contexto.archivo, SUBCARPETA_DOCUMENTOS)
@@ -124,8 +131,9 @@ export async function crearHistoriaClinica(
 export async function listarHistorial(
   mascotaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<HistoriaClinicaDto[]> {
-  await exigirAcceso(mascotaId, usuarioId);
+  await exigirAcceso(mascotaId, usuarioId, ambito);
 
   const registros = await repo.listarPorMascota(mascotaId);
   return registros.map(aDto);
@@ -148,12 +156,13 @@ async function buscarRegistroConMascota(historiaClinicaId: number) {
 export async function obtenerHistoriaClinica(
   historiaClinicaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<HistoriaClinicaDto> {
   const { registro, mascota } = await buscarRegistroConMascota(historiaClinicaId);
   const usuario = await repo.buscarUsuario(usuarioId);
 
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
-  if (!tieneAcceso(mascota, usuario)) {
+  if (!tieneAcceso(mascota, usuario, ambito)) {
     throw new AppError('NO_AUTORIZADO', 'Esa mascota no está asociada a tu cuenta', 403);
   }
 
@@ -174,7 +183,7 @@ export async function editarHistoriaClinica(
   const usuario = await repo.buscarUsuario(contexto.usuarioId);
 
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
-  if (!puedeGestionar(mascota, usuario, registro)) {
+  if (!puedeGestionar(mascota, usuario, registro, contexto.ambito)) {
     throw new AppError('NO_AUTORIZADO', 'No tenés permisos para editar este registro', 403);
   }
 
@@ -223,17 +232,18 @@ export async function editarHistoriaClinica(
 /**
  * HU-8.4: baja lógica simple, sin baja+alta — el registro se elimina, no se "corrige".
  * Mismo permiso que HU-8.3: dueño (adoptante) que lo cargó, o cualquier integrante del
- * refugio dueño de la mascota.
+ * refugio dueño de la mascota desde la vista de refugio.
  */
 export async function eliminarHistoriaClinica(
   historiaClinicaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<{ id: number }> {
   const { registro, mascota } = await buscarRegistroConMascota(historiaClinicaId);
   const usuario = await repo.buscarUsuario(usuarioId);
 
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
-  if (!puedeGestionar(mascota, usuario, registro)) {
+  if (!puedeGestionar(mascota, usuario, registro, ambito)) {
     throw new AppError('NO_AUTORIZADO', 'No tiene permisos para eliminar este registro', 403);
   }
 

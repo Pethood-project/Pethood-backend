@@ -8,7 +8,7 @@ export async function obtenerMe(req: Request, res: Response, next: NextFunction)
     if (!req.usuario) {
       throw new AppError('NO_AUTENTICADO', 'Falta el token de autenticación', 401);
     }
-    const usuario = await service.obtenerPerfil(req.usuario.usuarioId);
+    const usuario = await service.obtenerPerfil(req.usuario.usuarioId, req.ambito!);
     res.json({ usuario });
   } catch (error) {
     next(error);
@@ -22,6 +22,7 @@ export async function actualizarMe(req: Request, res: Response, next: NextFuncti
     }
     const usuario = await service.actualizarPerfil(
       req.usuario.usuarioId,
+      req.ambito!,
       req.body as ActualizarPerfilBody,
       req.file,
     );
