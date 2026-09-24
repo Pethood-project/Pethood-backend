@@ -108,6 +108,7 @@ prisma/schema.prisma     # fuente de verdad física del modelo
 - Rutas bajo `/api/v1`, recursos en plural en español sin tildes (`/mascotas`, `/solicitudes`).
 - Errores SIEMPRE con formato `{ error: { codigo, mensaje } }` vía `errorHandler`; los servicios lanzan `AppError(codigo, mensaje, httpStatus)`.
 - Toda entrada se valida con Zod (`<modulo>.dto.ts`) antes de llegar al servicio.
+- **Switch refugio/adoptante (spec 016):** quien pertenece a un refugio usa su única cuenta con dos perfiles separados. El perfil activo llega en la cabecera `X-Ambito` y `autenticar` lo deja en `req.ambito`; nunca se recibe por query ni body. Todo lo que tenga «lo mío» y «lo del refugio» se filtra con `req.ambito` usando `shared/ambito.ts` (`esMascotaDelAmbito`); las rutas de un solo perfil usan `requiereAmbito(...)`.
 - **Nunca escribir una validación genérica dentro de un `<modulo>.dto.ts`** — trim, longitudes, fechas, decimales, ids e imágenes viven en `src/shared/validation/` y el DTO solo las compone. Si te falta una regla, agregala ahí antes de usarla. Ver "Validación" más abajo.
 - `service.ts` nunca importa Prisma directamente — todo acceso a datos pasa por `repository.ts` del mismo módulo, para poder testear el service mockeando el repository.
 - Reglas de negocio (quotas, transiciones de estado, chat tras interacción) viven en servicios, nunca en el controller ni solo en el frontend.

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { AppError } from '../../middlewares/errorHandler';
+import type { Ambito } from '../../shared/ambito';
 
 const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'] as const;
 
@@ -10,7 +11,8 @@ const includePerfil = {
   roles: { include: { rol: true } },
   _count: {
     select: {
-      mascotas: { where: { fechaBaja: null } },
+      // Las mascotas no se cuentan acá: dependen del perfil con el que se mira (personal o
+      // refugio), ver `contarMascotasDelAmbito`.
       // El filtro por `mascota` no es opcional: tiene que dar el mismo número que
       // `GET /favoritos`, que descarta las mascotas dadas de baja. Sin él, al eliminarse
       // una mascota guardada el perfil muestra "5" y GUI-12 lista 4.
@@ -46,6 +48,22 @@ export async function buscarPerfil(usuarioId: number): Promise<UsuarioPerfil | n
     where: { id: usuarioId, fechaBaja: null },
     include: includePerfil,
   });
+}
+
+/**
+ * Mismo criterio que `GET /mascotas/mias` para el perfil pedido (ver `shared/ambito.ts`),
+ * para que el contador de Mi Perfil no pueda discrepar del listado.
+ */
+export function contarMascotasDelAmbito(
+  usuario: { id: number; refugioId: number | null },
+  ambito: Ambito,
+): Promise<number> {
+  const where: Prisma.MascotaWhereInput =
+    ambito === 'REFUGIO'
+      ? { fechaBaja: null, refugioId: usuario.refugioId ?? -1 }
+      : { fechaBaja: null, usuarioId: usuario.id, refugioId: null };
+
+  return prisma.mascota.count({ where });
 }
 
 export async function buscarPorEmail(email: string): Promise<{ id: number } | null> {

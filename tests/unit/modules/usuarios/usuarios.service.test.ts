@@ -7,6 +7,7 @@ vi.mock('../../../../src/modules/usuarios/usuarios.repository', () => ({
   buscarPerfil: vi.fn(),
   buscarPorEmail: vi.fn(),
   promedioValoracion: vi.fn(),
+  contarMascotasDelAmbito: vi.fn(),
   actualizarPerfil: vi.fn(),
   actualizarContrasena: vi.fn(),
   buscarHashContrasena: vi.fn(),
@@ -91,7 +92,7 @@ function perfilFake(overrides: Partial<UsuarioPerfil> = {}): UsuarioPerfil {
         },
       },
     ],
-    _count: { mascotas: 2, favoritos: 3 },
+    _count: { favoritos: 3 },
     ...overrides,
   };
 }
@@ -100,18 +101,30 @@ describe('usuarios.service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedRepo.promedioValoracion.mockResolvedValue(4.8);
+    mockedRepo.contarMascotasDelAmbito.mockResolvedValue(2);
   });
 
   it('devuelve el perfil propio con métricas', async () => {
     mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
 
-    const perfil = await obtenerPerfil(10);
+    const perfil = await obtenerPerfil(10, 'PERSONAL');
 
     expect(perfil.roles).toEqual([ROL_API.ADOPTANTE]);
     expect(perfil.mascotas).toBe(2);
     expect(perfil.favoritos).toBe(3);
     expect(perfil.valoracion).toBe(4.8);
     expect(perfil.tienePassword).toBe(true);
+  });
+
+  it('cuenta las mascotas del perfil con el que se consulta (switch refugio/adoptante)', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+
+    await obtenerPerfil(10, 'REFUGIO');
+
+    expect(mockedRepo.contarMascotasDelAmbito).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 10 }),
+      'REFUGIO',
+    );
   });
 
   it('actualiza el perfil y persiste la foto', async () => {
@@ -129,6 +142,7 @@ describe('usuarios.service', () => {
     const archivo = { buffer: Buffer.from('fake'), mimetype: 'image/jpeg' };
     const perfil = await actualizarPerfil(
       10,
+      'PERSONAL',
       {
         nombre: 'Anita',
         apellido: 'Perez',
@@ -152,7 +166,7 @@ describe('usuarios.service', () => {
     mockedRepo.buscarPorEmail.mockResolvedValue({ id: 99 });
 
     await expect(
-      actualizarPerfil(10, {
+      actualizarPerfil(10, 'PERSONAL', {
         nombre: 'Ana',
         apellido: 'Perez',
         email: 'otro@mail.com',

@@ -1,4 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
+import type { Ambito } from '../../shared/ambito';
 import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
@@ -40,6 +41,7 @@ const MENSAJE_SIN_CARGAR_VENCIDO = 'No se subió actualización de seguimiento';
 
 export interface Contexto {
   usuarioId: number;
+  ambito: Ambito;
   archivo?: { buffer: Buffer; mimetype: string };
 }
 
@@ -66,12 +68,27 @@ function flujoDe(solicitud: SolicitudEnSeguimiento): TipoFlujo | null {
   return nombre === 'Adopcion' || nombre === 'Transito' ? nombre : null;
 }
 
-function rolDe(solicitud: SolicitudEnSeguimiento, usuario: Usuario): RolSeguimiento | null {
-  if (solicitud.usuarioId === usuario.id) return 'ADOPTANTE';
-  if (solicitud.publicacion.usuarioId === usuario.id) return 'PUBLICADOR';
-
+/**
+ * Qué papel tiene el usuario en la solicitud desde el perfil con el que consulta (ver
+ * `shared/ambito.ts`): desde el personal es el adoptante o quien publicó una mascota
+ * personal; desde el de refugio, el publicador de cualquier mascota del refugio. Lo del otro
+ * perfil no se ve.
+ */
+function rolDe(
+  solicitud: SolicitudEnSeguimiento,
+  usuario: Usuario,
+  ambito: Ambito,
+): RolSeguimiento | null {
   const refugioMascota = solicitud.publicacion.mascota.refugioId;
-  if (usuario.refugioId !== null && usuario.refugioId === refugioMascota) return 'PUBLICADOR';
+
+  if (ambito === 'REFUGIO') {
+    return usuario.refugioId !== null && usuario.refugioId === refugioMascota ? 'PUBLICADOR' : null;
+  }
+
+  if (solicitud.usuarioId === usuario.id) return 'ADOPTANTE';
+  if (refugioMascota === null && solicitud.publicacion.usuarioId === usuario.id) {
+    return 'PUBLICADOR';
+  }
 
   return null;
 }
@@ -324,15 +341,16 @@ async function exigirUsuario(usuarioId: number): Promise<Usuario> {
 /** HU-9.2: todo lo que el usuario tiene en seguimiento, como adoptante o como publicador. */
 export async function listarMisSeguimientos(
   usuarioId: number,
+  ambito: Ambito,
   ahora: Date = new Date(),
 ): Promise<SolicitudEnSeguimientoDto[]> {
   const usuario = await exigirUsuario(usuarioId);
-  const solicitudes = await repo.listarSolicitudesDeUsuario(usuario.id, usuario.refugioId);
+  const solicitudes = await repo.listarSolicitudesDeUsuario(usuario.id, usuario.refugioId, ambito);
 
   const resumenes: SolicitudEnSeguimientoDto[] = [];
 
   for (const solicitud of solicitudes) {
-    const rol = rolDe(solicitud, usuario);
+    const rol = rolDe(solicitud, usuario, ambito);
     // El filtro del repositorio ya acota a lo suyo; esto cubre el caso de una solicitud que
     // entró por el refugio pero cuya mascota cambió de dueño.
     if (rol === null) continue;
@@ -345,7 +363,7 @@ export async function listarMisSeguimientos(
   return resumenes;
 }
 
-async function exigirSolicitudAccesible(solicitudId: number, usuarioId: number) {
+async function exigirSolicitudAccesible(solicitudId: number, usuarioId: number, ambito: Ambito) {
   const [solicitud, usuario] = await Promise.all([
     repo.buscarSolicitud(solicitudId),
     exigirUsuario(usuarioId),
@@ -357,7 +375,7 @@ async function exigirSolicitudAccesible(solicitudId: number, usuarioId: number) 
     throw new AppError('NO_ENCONTRADO', 'La solicitud no tiene seguimiento activo', 404);
   }
 
-  const rol = rolDe(solicitud, usuario);
+  const rol = rolDe(solicitud, usuario, ambito);
   if (rol === null) {
     throw new AppError('NO_AUTORIZADO', 'Esa solicitud no está asociada a tu cuenta', 403);
   }
@@ -369,9 +387,10 @@ async function exigirSolicitudAccesible(solicitudId: number, usuarioId: number) 
 export async function obtenerSeguimientosDeSolicitud(
   solicitudId: number,
   usuarioId: number,
+  ambito: Ambito,
   ahora: Date = new Date(),
 ): Promise<DetalleSeguimientoDto> {
-  const { solicitud, rol } = await exigirSolicitudAccesible(solicitudId, usuarioId);
+  const { solicitud, rol } = await exigirSolicitudAccesible(solicitudId, usuarioId, ambito);
   const seguimientos = await sincronizarSolicitud(solicitud, ahora);
 
   return aDetalle({ solicitud, rol, seguimientos, ahora });
@@ -387,12 +406,17 @@ export async function obtenerSeguimientosDeSolicitud(
 export async function obtenerActualizacion(
   seguimientoId: number,
   usuarioId: number,
+  ambito: Ambito,
   ahora: Date = new Date(),
 ): Promise<ActualizacionSeguimientoDto> {
   const seguimiento = await repo.buscarSeguimiento(seguimientoId);
   if (!seguimiento) throw new AppError('NO_ENCONTRADO', 'El seguimiento no existe', 404);
 
-  const { solicitud, rol } = await exigirSolicitudAccesible(seguimiento.solicitudId, usuarioId);
+  const { solicitud, rol } = await exigirSolicitudAccesible(
+    seguimiento.solicitudId,
+    usuarioId,
+    ambito,
+  );
 
   // Sincronizar antes de leer: un pedido cuyo plazo venció recién tiene que mostrar el
   // mensaje de vencido, no el de "aún no", y este es un punto de entrada válido para eso.
@@ -445,6 +469,7 @@ export async function subirActualizacion(
   const { solicitud, rol } = await exigirSolicitudAccesible(
     seguimiento.solicitudId,
     contexto.usuarioId,
+    contexto.ambito,
   );
 
   if (rol !== 'ADOPTANTE') {

@@ -138,7 +138,7 @@ describe('resolución del actor (compartida por las tres operaciones)', () => {
     vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(null as never);
 
     await expect(
-      service.listarRecibidas(MIEMBRO_REFUGIO, { limite: 20, desplazamiento: 0 }),
+      service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', { limite: 20, desplazamiento: 0 }),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
   });
 
@@ -149,9 +149,13 @@ describe('resolución del actor (compartida por las tres operaciones)', () => {
     vi.mocked(repo.listarDelActor).mockResolvedValue([] as never);
 
     await expect(
-      service.listarRecibidas(ADOPTANTE_PUBLICADOR, { limite: 20, desplazamiento: 0 }),
+      service.listarRecibidas(ADOPTANTE_PUBLICADOR, 'PERSONAL', { limite: 20, desplazamiento: 0 }),
     ).resolves.toEqual({ total: 0, solicitudes: [] });
-    expect(repo.listarDelActor).toHaveBeenCalledWith({ id: ADOPTANTE_PUBLICADOR, refugioId: null });
+    expect(repo.listarDelActor).toHaveBeenCalledWith({
+      id: ADOPTANTE_PUBLICADOR,
+      refugioId: null,
+      ambito: 'PERSONAL',
+    });
   });
 });
 
@@ -161,7 +165,7 @@ describe('listarRecibidas', () => {
       solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }] }),
     ] as never);
 
-    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, {
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
       limite: 20,
       desplazamiento: 0,
     });
@@ -176,6 +180,7 @@ describe('listarRecibidas', () => {
     expect(repo.listarDelActor).toHaveBeenCalledWith({
       id: MIEMBRO_REFUGIO,
       refugioId: REFUGIO_ID,
+      ambito: 'REFUGIO',
     });
   });
 
@@ -187,7 +192,7 @@ describe('listarRecibidas', () => {
       }),
     ] as never);
 
-    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, {
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
       estado: 'Pendiente',
       limite: 20,
       desplazamiento: 0,
@@ -205,7 +210,7 @@ describe('listarRecibidas', () => {
       ).map((s, i) => ({ ...s, id: i + 1 })) as never,
     );
 
-    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, {
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
       limite: 1,
       desplazamiento: 1,
     });
@@ -229,7 +234,7 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     expect(detalle.estado.nombre).toBe('Aprobada');
     expect(detalle.historial).toEqual([
@@ -241,7 +246,9 @@ describe('obtenerDetalle', () => {
   it('rechaza una solicitud que no existe', async () => {
     vi.mocked(repo.buscarConDetalle).mockResolvedValue(null as never);
 
-    await expect(service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO)).rejects.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -255,7 +262,9 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    await expect(service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO)).rejects.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -274,7 +283,7 @@ describe('obtenerDetalle', () => {
     );
 
     await expect(
-      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO),
+      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO, 'REFUGIO'),
     ).resolves.toMatchObject({ id: SOLICITUD });
   });
 
@@ -290,7 +299,9 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    await expect(service.obtenerDetalle(SOLICITUD, ADOPTANTE_PUBLICADOR)).resolves.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, ADOPTANTE_PUBLICADOR, 'PERSONAL'),
+    ).resolves.toMatchObject({
       id: SOLICITUD,
     });
   });
@@ -307,7 +318,9 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    await expect(service.obtenerDetalle(SOLICITUD, OTRO_ADOPTANTE)).rejects.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, OTRO_ADOPTANTE, 'PERSONAL'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -341,6 +354,7 @@ describe('resolverSolicitud', () => {
       SOLICITUD,
       { estado: 'Aprobada', comentario: 'Bienvenido a la familia' },
       MIEMBRO_REFUGIO,
+      'REFUGIO',
     );
 
     expect(resultado.estado.nombre).toBe('Aprobada');
@@ -369,6 +383,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         ADOPTANTE_PUBLICADOR,
+        'PERSONAL',
       ),
     ).resolves.toMatchObject({ estado: { nombre: 'Aprobada' } });
   });
@@ -385,6 +400,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Rechazada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'SOLICITUD_YA_RESUELTA', httpStatus: 409 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
@@ -400,6 +416,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'SOLICITUD_YA_RESUELTA', httpStatus: 409 });
   });
@@ -417,6 +434,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
@@ -439,6 +457,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         OTRO_ADOPTANTE,
+        'PERSONAL',
       ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
@@ -452,6 +471,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'ERROR_INTERNO', httpStatus: 500 });
   });
@@ -461,6 +481,7 @@ describe('resolverSolicitud', () => {
       SOLICITUD,
       { estado: 'Aprobada', comentario: null },
       MIEMBRO_REFUGIO,
+      'REFUGIO',
     );
 
     expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
@@ -480,6 +501,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'SOLICITUD_YA_RESUELTA' });
     expect(logAuditoria.registrarAuditoria).not.toHaveBeenCalled();
@@ -493,6 +515,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toBeInstanceOf(AppError);
   });
@@ -660,7 +683,7 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
     });
   });
 
-  it('en ámbito REFUGIO tampoco se puede solicitar una mascota del propio refugio, aunque la haya cargado otro miembro', async () => {
+  it('tampoco se puede solicitar una mascota del propio refugio, aunque la haya cargado otro miembro: desde el perfil personal lo del refugio no se ve', async () => {
     vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
       ...usuario(SOLICITANTE, 1),
       verificado: true,
@@ -669,25 +692,9 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
       publicacionDisponible('Disponible', MIEMBRO_REFUGIO, 1) as never,
     );
 
-    await expect(
-      service.crearSolicitud({ ...NUEVA, ambito: 'REFUGIO' }, SOLICITANTE),
-    ).rejects.toMatchObject({
+    await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).rejects.toMatchObject({
       codigo: 'PUBLICACION_PROPIA',
     });
-  });
-
-  it('en ámbito PERSONAL sí puede solicitar una mascota de su propio refugio: el switch hace de cuenta que es un adoptante más', async () => {
-    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
-      ...usuario(SOLICITANTE, 1),
-      verificado: true,
-    } as never);
-    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue(
-      publicacionDisponible('Disponible', MIEMBRO_REFUGIO, 1) as never,
-    );
-
-    await expect(
-      service.crearSolicitud({ ...NUEVA, ambito: 'PERSONAL' }, SOLICITANTE),
-    ).resolves.toMatchObject({ estado: { nombre: 'Pendiente' } });
   });
 
   it('no se puede solicitar una mascota que ya no está disponible', async () => {
@@ -755,14 +762,21 @@ describe('visibilidad del solicitante (HU-7.3)', () => {
   });
 
   it('ve el detalle de su propia solicitud aunque no publique la mascota', async () => {
-    await expect(service.obtenerDetalle(SOLICITUD, SOLICITANTE)).resolves.toMatchObject({
-      id: SOLICITUD,
-    });
+    await expect(service.obtenerDetalle(SOLICITUD, SOLICITANTE, 'PERSONAL')).resolves.toMatchObject(
+      {
+        id: SOLICITUD,
+      },
+    );
   });
 
   it('pero no puede resolverla: eso es de quien publicó la mascota', async () => {
     await expect(
-      service.resolverSolicitud(SOLICITUD, { estado: 'Aprobada', comentario: null }, SOLICITANTE),
+      service.resolverSolicitud(
+        SOLICITUD,
+        { estado: 'Aprobada', comentario: null },
+        SOLICITANTE,
+        'PERSONAL',
+      ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
   });
 
@@ -772,7 +786,7 @@ describe('visibilidad del solicitante (HU-7.3)', () => {
     );
 
     await expect(
-      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO),
+      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO, 'REFUGIO'),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
   });
 });
@@ -855,7 +869,7 @@ describe('obtenerElegibilidad (chequeo previo de HU-7.1)', () => {
     });
   });
 
-  it('en ámbito REFUGIO también bloquea sobre una publicación del propio refugio, aunque la haya cargado otro miembro', async () => {
+  it('bloquea sobre una publicación del propio refugio, aunque la haya cargado otro miembro', async () => {
     vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
       ...usuario(SOLICITANTE, 1),
       verificado: true,
@@ -865,24 +879,61 @@ describe('obtenerElegibilidad (chequeo previo de HU-7.1)', () => {
       mascota: { id: 8, usuarioId: MIEMBRO_REFUGIO, refugioId: 1, historicoEstados: [] },
     } as never);
 
-    await expect(service.obtenerElegibilidad(SOLICITANTE, 40, 'REFUGIO')).resolves.toMatchObject({
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40)).resolves.toMatchObject({
       motivo: 'PUBLICACION_PROPIA',
     });
   });
+});
 
-  it('en ámbito PERSONAL no bloquea una publicación del propio refugio: el switch hace de cuenta que es un adoptante más', async () => {
-    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
-      ...usuario(SOLICITANTE, 1),
-      verificado: true,
-    } as never);
-    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue({
-      id: 40,
-      mascota: { id: 8, usuarioId: MIEMBRO_REFUGIO, refugioId: 1, historicoEstados: [] },
-    } as never);
+describe('switch refugio/adoptante — cada perfil ve solo lo suyo', () => {
+  it('desde la vista de refugio no se ve una solicitud que el miembro mandó como adoptante', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(usuario(SOLICITANTE, 1) as never);
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        mascotaRefugioId: 99,
+        mascotaUsuarioId: OTRO_ADOPTANTE,
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
 
-    await expect(service.obtenerElegibilidad(SOLICITANTE, 40, 'PERSONAL')).resolves.toMatchObject({
-      puedeSolicitar: true,
-      motivo: null,
+    await expect(service.obtenerDetalle(SOLICITUD, SOLICITANTE, 'REFUGIO')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('desde el perfil personal no se resuelve una solicitud de una mascota del refugio', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(
+      usuario(MIEMBRO_REFUGIO, REFUGIO_ID) as never,
+    );
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
+
+    await expect(
+      service.resolverSolicitud(
+        SOLICITUD,
+        { estado: 'Aprobada', comentario: null },
+        MIEMBRO_REFUGIO,
+        'PERSONAL',
+      ),
+    ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
+    expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+  });
+
+  it('las recibidas del perfil personal piden solo las de sus mascotas personales', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(
+      usuario(MIEMBRO_REFUGIO, REFUGIO_ID) as never,
+    );
+    vi.mocked(repo.listarDelActor).mockResolvedValue([] as never);
+
+    await service.listarRecibidas(MIEMBRO_REFUGIO, 'PERSONAL', { limite: 20, desplazamiento: 0 });
+
+    expect(repo.listarDelActor).toHaveBeenCalledWith({
+      id: MIEMBRO_REFUGIO,
+      refugioId: REFUGIO_ID,
+      ambito: 'PERSONAL',
     });
   });
 });
@@ -902,7 +953,7 @@ describe('versionado del hogar (mudanza posterior al envío)', () => {
       solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }] }),
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     expect(detalle.cambioDeHogar).toBeNull();
     expect(detalle.hogar?.direccion).toBe('Av. Santa Fe 3450, Palermo');
@@ -920,7 +971,7 @@ describe('versionado del hogar (mudanza posterior al envío)', () => {
       }),
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     // Lo que el refugio evaluó no se reescribe...
     expect(detalle.hogar?.direccion).toBe('Av. Santa Fe 3450, Palermo');
@@ -940,7 +991,7 @@ describe('versionado del hogar (mudanza posterior al envío)', () => {
       }),
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     expect(detalle.hogar).toBeNull();
     expect(detalle.cambioDeHogar).toBeNull();

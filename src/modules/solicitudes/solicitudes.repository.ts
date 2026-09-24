@@ -1,5 +1,6 @@
 import { Prisma, type Hogar } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
+import type { Ambito } from '../../shared/ambito';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 
 /**
@@ -111,17 +112,21 @@ export function buscarConDetalle(solicitudId: number) {
 }
 
 /**
- * Solicitudes que el actor puede gestionar: las de mascotas de SU refugio (cualquier
- * miembro, sin importar quién la cargó — mismo criterio que
- * `mascotas.repository.listarPorAmbito`) más las de sus propias mascotas personales
- * (un adoptante particular también puede publicar una mascota propia en adopción,
- * `mascotas.dto.ts` DESTINOS). El filtro por nombre de estado y la paginación se
- * resuelven en el service.
+ * Solicitudes que el actor puede gestionar desde el perfil en el que está parado (ver
+ * `shared/ambito.ts`):
+ * - REFUGIO: las de mascotas de SU refugio (cualquier miembro, sin importar quién la
+ *   cargó — mismo criterio que `mascotas.repository.listarPorAmbito`).
+ * - PERSONAL: las de sus mascotas personales (un adoptante particular también puede
+ *   publicar una mascota propia en adopción, `mascotas.dto.ts` DESTINOS).
+ * El filtro por nombre de estado y la paginación se resuelven en el service.
  */
-export function listarDelActor(actor: { id: number; refugioId: number | null }) {
-  const filtroMascota = actor.refugioId
-    ? { OR: [{ refugioId: actor.refugioId }, { usuarioId: actor.id }] }
-    : { usuarioId: actor.id };
+export function listarDelActor(actor: { id: number; refugioId: number | null; ambito: Ambito }) {
+  // `autenticar` ya garantiza que REFUGIO llega de un miembro; el `-1` solo cubre un
+  // refugio desasignado después del login, y no matchea ninguna fila.
+  const filtroMascota =
+    actor.ambito === 'REFUGIO'
+      ? { refugioId: actor.refugioId ?? -1 }
+      : { usuarioId: actor.id, refugioId: null };
 
   return prisma.solicitud.findMany({
     where: { fechaBaja: null, publicacion: { mascota: { ...filtroMascota, fechaBaja: null } } },

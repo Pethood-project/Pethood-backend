@@ -20,13 +20,19 @@ chatsRouter.use(autenticar);
 // búsqueda por nombre de contacto, el schema se compone en chats.dto.ts y se engancha acá.
 chatsRouter.get('/', controller.listar);
 
+// Cada perfil (personal / refugio) abre solo sus conversaciones — ver `shared/ambito.ts`.
+// Va en cada ruta de sala antes que todo, incluido el multer del envío: si la sala es del
+// otro perfil no tiene sentido ni parsear los adjuntos. La única que no lo lleva es
+// `/entregados`: el acuse de recibo es del dispositivo, no del perfil que se está mirando.
+const delAmbito = controller.exigirAmbitoDelChat;
+
 // HU-5.2: cabecera de la sala (GUI-14). Existe para que abrir el chat desde una notificación
 // o un deep link no dependa de haber pasado por el listado.
-chatsRouter.get('/:chatId', controller.obtenerCabecera);
+chatsRouter.get('/:chatId', delAmbito, controller.obtenerCabecera);
 
 // HU-5.2: historial paginado por cursor. La query se valida en el controller — `validar` es
 // de body.
-chatsRouter.get('/:chatId/mensajes', controller.listarMensajes);
+chatsRouter.get('/:chatId/mensajes', delAmbito, controller.listarMensajes);
 
 // HU-5.2: envío. Acepta multipart (texto y/o fotos) y JSON (sólo texto), en ese orden:
 // multer tiene que poblar `req.body` antes de que Zod lo valide, y las fotos se comprimen
@@ -37,6 +43,7 @@ chatsRouter.get('/:chatId/mensajes', controller.listarMensajes);
 // lado. Renombrarlo a `adjunto` obligaría a versionar el endpoint por un tema de nombre.
 chatsRouter.post(
   '/:chatId/mensajes',
+  delAmbito,
   uploadAdjuntosChatOpcional('foto', LIMITES.mensaje.fotos.maximo),
   // Antes de comprimir: después, el peso que se mide ya no es el que subió el usuario.
   validarTamanioAdjuntos,
@@ -47,7 +54,7 @@ chatsRouter.post(
 
 // HU-5.2: marcar la conversación como leída. Es POST y no PATCH porque no se edita un
 // recurso identificado: se ejecuta la acción "leí esta sala" sobre un conjunto de mensajes.
-chatsRouter.post('/:chatId/leidos', controller.marcarLeidos);
+chatsRouter.post('/:chatId/leidos', delAmbito, controller.marcarLeidos);
 
 // HU-5.2: acusar que los mensajes LLEGARON, aunque no se haya abierto la conversación. Es
 // el segundo tilde, y va por REST por lo mismo que el envío: el socket no escribe.

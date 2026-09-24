@@ -33,6 +33,7 @@ export interface PerfilPropio {
   imagenUrl: string | null;
   roles: string[];
   tienePassword: boolean;
+  /** Del perfil con el que se consulta: las personales o las del refugio. */
   mascotas: number;
   favoritos: number;
   valoracion: number | null;

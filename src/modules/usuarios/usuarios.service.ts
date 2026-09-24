@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import { AppError } from '../../middlewares/errorHandler';
+import type { Ambito } from '../../shared/ambito';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
@@ -16,7 +17,11 @@ function nombresDeRol(usuario: UsuarioPerfil): string[] {
     .map((vinculo) => vinculo.rol.nombre);
 }
 
-function aPerfil(usuario: UsuarioPerfil, valoracion: number | null): PerfilPropio {
+function aPerfil(
+  usuario: UsuarioPerfil,
+  mascotas: number,
+  valoracion: number | null,
+): PerfilPropio {
   return {
     id: usuario.id,
     nombre: usuario.nombre,
@@ -27,27 +32,32 @@ function aPerfil(usuario: UsuarioPerfil, valoracion: number | null): PerfilPropi
     imagenUrl: usuario.imagenUrl,
     roles: rolesDbAApi(nombresDeRol(usuario)),
     tienePassword: Boolean(usuario.contrasena),
-    mascotas: usuario._count.mascotas,
+    mascotas,
     favoritos: usuario._count.favoritos,
     valoracion: valoracion === null ? null : Math.round(valoracion * 10) / 10,
   };
 }
 
-async function armarPerfil(usuario: UsuarioPerfil): Promise<PerfilPropio> {
-  const valoracion = await repo.promedioValoracion(usuario.id);
-  return aPerfil(usuario, valoracion);
+/** `ambito` decide qué mascotas cuenta el perfil: las personales o las del refugio. */
+async function armarPerfil(usuario: UsuarioPerfil, ambito: Ambito): Promise<PerfilPropio> {
+  const [mascotas, valoracion] = await Promise.all([
+    repo.contarMascotasDelAmbito(usuario, ambito),
+    repo.promedioValoracion(usuario.id),
+  ]);
+  return aPerfil(usuario, mascotas, valoracion);
 }
 
-export async function obtenerPerfil(usuarioId: number): Promise<PerfilPropio> {
+export async function obtenerPerfil(usuarioId: number, ambito: Ambito): Promise<PerfilPropio> {
   const usuario = await repo.buscarPerfil(usuarioId);
   if (!usuario) {
     throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
   }
-  return armarPerfil(usuario);
+  return armarPerfil(usuario, ambito);
 }
 
 export async function actualizarPerfil(
   usuarioId: number,
+  ambito: Ambito,
   body: ActualizarPerfilBody,
   archivo?: ArchivoSubida,
 ): Promise<PerfilPropio> {
@@ -73,7 +83,7 @@ export async function actualizarPerfil(
     entidadId: usuarioId,
   });
 
-  return armarPerfil(actualizado);
+  return armarPerfil(actualizado, ambito);
 }
 
 export async function cambiarPassword(usuarioId: number, body: CambiarPasswordBody): Promise<void> {

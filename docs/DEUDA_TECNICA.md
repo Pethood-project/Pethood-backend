@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-09-22**
+> Última revisión: **2026-09-24**
 
 ## Cómo se usa
 
@@ -37,6 +37,7 @@ técnica: viven en `REQUISITOS.md` sección 10.
 | 10 | El tipo de adjunto se deduce de la extensión de la URL | Baja | backend |
 | 11 | La duración máxima del video la valida sólo el cliente | Baja | ambos |
 | 12 | En el frontend, `fotos` nombra algo que puede ser un video | Baja | frontend |
+| 13 | El socket de chat no conoce el perfil activo (switch refugio/adoptante) | Baja | ambos |
 
 ---
 
@@ -299,6 +300,24 @@ era grande.
 
 En el backend el campo multipart se llama `foto` **a propósito** y eso no es deuda: es el
 nombre del contrato, y renombrarlo obligaría a versionar el endpoint.
+
+---
+
+## 13. El socket de chat no conoce el perfil activo — Baja
+
+**Qué pasa.** El switch refugio/adoptante (spec 016) separa los chats por perfil en REST:
+`GET /chats` y las rutas de sala filtran con la cabecera `X-Ambito`. El socket no: el
+handshake no lleva el ámbito, así que `chat:unirse` deja entrar a una sala del otro perfil y
+`chat:mensaje-nuevo` llega por todas las conversaciones del usuario.
+
+**Qué la mitiga hoy.** En la app no se ve: el listado solo pinta chats que conoce (los del
+perfil activo) y, ante uno desconocido, vuelve a pedir `GET /chats`, que ya viene filtrado. A
+una sala del otro perfil no se llega porque el historial (`GET /chats/:id/mensajes`) responde
+`403 AMBITO_NO_PERMITIDO`.
+
+**Cómo se arregla.** Mandar el ámbito en el `auth` del handshake y reconectar el socket al
+cambiar de vista; `autenticarSocket` lo resuelve con el mismo `resolverAmbito` y
+`chat:unirse` aplica `exigirChatDelAmbito`.
 
 ---
 

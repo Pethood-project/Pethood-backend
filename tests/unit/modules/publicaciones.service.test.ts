@@ -88,31 +88,22 @@ describe('obtenerPublicacion — esPropia', () => {
     });
   });
 
-  it('en ámbito REFUGIO, esPropia en true sobre una mascota del propio refugio, aunque la haya cargado otro miembro', async () => {
+  it('esPropia en true sobre una mascota del propio refugio, aunque la haya cargado otro miembro', async () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99, 1) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 1 } as never);
 
-    await expect(
-      service.obtenerPublicacion(PUBLICACION, USUARIO, 'REFUGIO'),
-    ).resolves.toMatchObject({ esPropia: true });
-  });
-
-  it('en ámbito PERSONAL, esPropia en false sobre una mascota del propio refugio: el switch hace de cuenta que es un adoptante más', async () => {
-    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99, 1) as never);
-    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 1 } as never);
-
-    await expect(
-      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
-    ).resolves.toMatchObject({ esPropia: false });
+    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).resolves.toMatchObject({
+      esPropia: true,
+    });
   });
 
   it('esPropia en false sobre una mascota de otro refugio', async () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99, 1) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 2 } as never);
 
-    await expect(
-      service.obtenerPublicacion(PUBLICACION, USUARIO, 'REFUGIO'),
-    ).resolves.toMatchObject({ esPropia: false });
+    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).resolves.toMatchObject({
+      esPropia: false,
+    });
   });
 });
 
@@ -138,15 +129,15 @@ describe('listarFeed', () => {
     });
   });
 
-  it('pasa el refugio del actor al repository, para que excluya sus publicaciones en ámbito REFUGIO', async () => {
+  it('pasa el refugio del actor al repository, para que excluya sus publicaciones del feed', async () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 3 } as never);
     vi.mocked(repo.listarFeed).mockResolvedValue([] as never);
     vi.mocked(repo.contarFeed).mockResolvedValue(0);
 
-    await service.listarFeed(USUARIO, { ambito: 'REFUGIO' } as never);
+    await service.listarFeed(USUARIO, {} as never);
 
-    expect(repo.listarFeed).toHaveBeenCalledWith(USUARIO, { ambito: 'REFUGIO' }, 3);
-    expect(repo.contarFeed).toHaveBeenCalledWith(USUARIO, { ambito: 'REFUGIO' }, 3);
+    expect(repo.listarFeed).toHaveBeenCalledWith(USUARIO, {}, 3);
+    expect(repo.contarFeed).toHaveBeenCalledWith(USUARIO, {}, 3);
   });
 });
 

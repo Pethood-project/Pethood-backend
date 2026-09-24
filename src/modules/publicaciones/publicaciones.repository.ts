@@ -46,8 +46,11 @@ export function buscarMascota(mascotaId: number) {
   });
 }
 
-export function contarActivasDeUsuario(usuarioId: number) {
-  return prisma.publicacion.count({ where: { usuarioId, fechaBaja: null } });
+/** Solo las personales: la quota anti-spam es del adoptante particular, no del refugio. */
+export function contarActivasPersonalesDeUsuario(usuarioId: number) {
+  return prisma.publicacion.count({
+    where: { usuarioId, fechaBaja: null, mascota: { refugioId: null } },
+  });
 }
 
 export function buscarActivaDeMascota(mascotaId: number) {
@@ -86,10 +89,9 @@ const RELACIONES_FEED = {
  *
  * Se excluyen las mascotas propias y las que ya guardó en favoritos: sobre unas y otras no
  * habría nada que decidir — `agregarFavorito` rechaza las propias con 403 y las guardadas
- * ya son un sí. Lo personal se excluye siempre; lo del refugio del usuario (`actorRefugioId`)
- * solo si `filtros.ambito` es `REFUGIO` — en `PERSONAL` el switch hace de cuenta que es un
- * adoptante más, así que sí puede ver (y guardar/solicitar) lo que publicó su propio
- * refugio. Mismo criterio que `esMascotaPropia` en `shared/ambito.ts`, expresado en SQL:
+ * ya son un sí. Propias son las que cargó el usuario y las de su refugio
+ * (`actorRefugioId`): el feed solo se ve desde el perfil personal, y ahí lo del refugio no
+ * se muestra. Mismo criterio que `esMascotaPropia` en `shared/ambito.ts`, expresado en SQL:
  * excluir "usuarioId = mío" Y excluir "refugioId = el mío" son dos condiciones en AND, que
  * por De Morgan equivalen a excluir la unión de las dos.
  *
@@ -113,8 +115,10 @@ function condicionesFeed(
     },
   };
 
-  if (filtros.ambito === 'REFUGIO' && actorRefugioId !== null) {
-    mascota.refugioId = { not: actorRefugioId };
+  // Con OR explícito y no `{ not: ... }` a secas: en SQL `refugio_id <> X` es NULL para las
+  // mascotas sin refugio, y las dejaría afuera a todas.
+  if (actorRefugioId !== null) {
+    mascota.OR = [{ refugioId: null }, { refugioId: { not: actorRefugioId } }];
   }
 
   if (filtros.especieId !== undefined) {

@@ -52,7 +52,9 @@ describe('crearHistoriaClinica — acceso', () => {
     vi.mocked(repo.buscarMascota).mockResolvedValue(null as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
 
-    await expect(service.crearHistoriaClinica(10, DATOS, { usuarioId: 2 })).rejects.toMatchObject({
+    await expect(
+      service.crearHistoriaClinica(10, DATOS, { usuarioId: 2, ambito: 'PERSONAL' }),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -62,7 +64,9 @@ describe('crearHistoriaClinica — acceso', () => {
     vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_ADOPTANTE as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(OTRO_ADOPTANTE as never);
 
-    await expect(service.crearHistoriaClinica(10, DATOS, { usuarioId: 99 })).rejects.toMatchObject({
+    await expect(
+      service.crearHistoriaClinica(10, DATOS, { usuarioId: 99, ambito: 'PERSONAL' }),
+    ).rejects.toMatchObject({
       codigo: 'NO_AUTORIZADO',
       httpStatus: 403,
     });
@@ -73,7 +77,9 @@ describe('crearHistoriaClinica — acceso', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
     vi.mocked(repo.crear).mockResolvedValue(REGISTRO_GUARDADO as never);
 
-    await expect(service.crearHistoriaClinica(10, DATOS, { usuarioId: 2 })).resolves.toMatchObject({
+    await expect(
+      service.crearHistoriaClinica(10, DATOS, { usuarioId: 2, ambito: 'PERSONAL' }),
+    ).resolves.toMatchObject({
       id: 100,
     });
   });
@@ -83,7 +89,9 @@ describe('crearHistoriaClinica — acceso', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
     vi.mocked(repo.crear).mockResolvedValue({ ...REGISTRO_GUARDADO, mascotaId: 11 } as never);
 
-    await expect(service.crearHistoriaClinica(11, DATOS, { usuarioId: 4 })).resolves.toMatchObject({
+    await expect(
+      service.crearHistoriaClinica(11, DATOS, { usuarioId: 4, ambito: 'REFUGIO' }),
+    ).resolves.toMatchObject({
       mascotaId: 11,
     });
   });
@@ -92,7 +100,9 @@ describe('crearHistoriaClinica — acceso', () => {
     vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_REFUGIO as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_OTRO_REFUGIO as never);
 
-    await expect(service.crearHistoriaClinica(11, DATOS, { usuarioId: 5 })).rejects.toMatchObject({
+    await expect(
+      service.crearHistoriaClinica(11, DATOS, { usuarioId: 5, ambito: 'REFUGIO' }),
+    ).rejects.toMatchObject({
       codigo: 'NO_AUTORIZADO',
     });
   });
@@ -107,7 +117,7 @@ describe('crearHistoriaClinica — documento', () => {
   it('se guarda sin documento', async () => {
     vi.mocked(repo.crear).mockResolvedValue(REGISTRO_GUARDADO as never);
 
-    await service.crearHistoriaClinica(10, DATOS, { usuarioId: 2 });
+    await service.crearHistoriaClinica(10, DATOS, { usuarioId: 2, ambito: 'PERSONAL' });
 
     expect(guardarImagen).not.toHaveBeenCalled();
     expect(vi.mocked(repo.crear).mock.calls[0]![0].documentoUrl).toBeNull();
@@ -119,7 +129,11 @@ describe('crearHistoriaClinica — documento', () => {
       documentoUrl: '/api/v1/archivos/historias-clinicas/x.pdf',
     } as never);
 
-    await service.crearHistoriaClinica(10, DATOS, { usuarioId: 2, archivo: ARCHIVO });
+    await service.crearHistoriaClinica(10, DATOS, {
+      usuarioId: 2,
+      ambito: 'PERSONAL',
+      archivo: ARCHIVO,
+    });
 
     expect(vi.mocked(repo.crear).mock.calls[0]![0].documentoUrl).toBe(
       '/api/v1/archivos/historias-clinicas/x.pdf',
@@ -130,7 +144,11 @@ describe('crearHistoriaClinica — documento', () => {
     vi.mocked(repo.crear).mockRejectedValue(new Error('base caída'));
 
     await expect(
-      service.crearHistoriaClinica(10, DATOS, { usuarioId: 2, archivo: ARCHIVO }),
+      service.crearHistoriaClinica(10, DATOS, {
+        usuarioId: 2,
+        ambito: 'PERSONAL',
+        archivo: ARCHIVO,
+      }),
     ).rejects.toThrow('base caída');
 
     expect(borrarImagen).toHaveBeenCalledWith('/api/v1/archivos/historias-clinicas/x.pdf');
@@ -139,7 +157,7 @@ describe('crearHistoriaClinica — documento', () => {
   it('registra en auditoría el alta', async () => {
     vi.mocked(repo.crear).mockResolvedValue(REGISTRO_GUARDADO as never);
 
-    await service.crearHistoriaClinica(10, DATOS, { usuarioId: 2 });
+    await service.crearHistoriaClinica(10, DATOS, { usuarioId: 2, ambito: 'PERSONAL' });
 
     expect(registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'CREAR', entidad: 'HistoriaClinica', entidadId: 100 }),
@@ -151,7 +169,9 @@ describe('editarHistoriaClinica — permisos (HU-8.3)', () => {
   it('404 si el registro no existe', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(null as never);
 
-    await expect(service.editarHistoriaClinica(100, {}, { usuarioId: 2 })).rejects.toMatchObject({
+    await expect(
+      service.editarHistoriaClinica(100, {}, { usuarioId: 2, ambito: 'PERSONAL' }),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -163,7 +183,9 @@ describe('editarHistoriaClinica — permisos (HU-8.3)', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
     vi.mocked(repo.reemplazar).mockResolvedValue({ ...REGISTRO_GUARDADO, id: 101 } as never);
 
-    await expect(service.editarHistoriaClinica(100, {}, { usuarioId: 2 })).resolves.toMatchObject({
+    await expect(
+      service.editarHistoriaClinica(100, {}, { usuarioId: 2, ambito: 'PERSONAL' }),
+    ).resolves.toMatchObject({
       id: 101,
     });
   });
@@ -173,7 +195,9 @@ describe('editarHistoriaClinica — permisos (HU-8.3)', () => {
     vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_ADOPTANTE as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(OTRO_ADOPTANTE as never);
 
-    await expect(service.editarHistoriaClinica(100, {}, { usuarioId: 99 })).rejects.toMatchObject({
+    await expect(
+      service.editarHistoriaClinica(100, {}, { usuarioId: 99, ambito: 'PERSONAL' }),
+    ).rejects.toMatchObject({
       codigo: 'NO_AUTORIZADO',
       httpStatus: 403,
     });
@@ -186,7 +210,9 @@ describe('editarHistoriaClinica — permisos (HU-8.3)', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
     vi.mocked(repo.reemplazar).mockResolvedValue({ ...registroDeOtroStaff, id: 102 } as never);
 
-    await expect(service.editarHistoriaClinica(100, {}, { usuarioId: 4 })).resolves.toMatchObject({
+    await expect(
+      service.editarHistoriaClinica(100, {}, { usuarioId: 4, ambito: 'REFUGIO' }),
+    ).resolves.toMatchObject({
       id: 102,
     });
   });
@@ -196,7 +222,9 @@ describe('editarHistoriaClinica — permisos (HU-8.3)', () => {
     vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_REFUGIO as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_OTRO_REFUGIO as never);
 
-    await expect(service.editarHistoriaClinica(100, {}, { usuarioId: 5 })).rejects.toMatchObject({
+    await expect(
+      service.editarHistoriaClinica(100, {}, { usuarioId: 5, ambito: 'REFUGIO' }),
+    ).rejects.toMatchObject({
       codigo: 'NO_AUTORIZADO',
     });
   });
@@ -211,7 +239,11 @@ describe('editarHistoriaClinica — fusión de campos (inmutabilidad)', () => {
   });
 
   it('nunca llama a un update: siempre pasa por reemplazar (baja + alta)', async () => {
-    await service.editarHistoriaClinica(100, { titulo: 'Nuevo' }, { usuarioId: 2 });
+    await service.editarHistoriaClinica(
+      100,
+      { titulo: 'Nuevo' },
+      { usuarioId: 2, ambito: 'PERSONAL' },
+    );
 
     expect(repo.reemplazar).toHaveBeenCalledWith(
       100,
@@ -221,7 +253,11 @@ describe('editarHistoriaClinica — fusión de campos (inmutabilidad)', () => {
   });
 
   it('un campo ausente conserva el valor del registro anterior', async () => {
-    await service.editarHistoriaClinica(100, { titulo: 'Nuevo' }, { usuarioId: 2 });
+    await service.editarHistoriaClinica(
+      100,
+      { titulo: 'Nuevo' },
+      { usuarioId: 2, ambito: 'PERSONAL' },
+    );
 
     const datosEnviados = vi.mocked(repo.reemplazar).mock.calls[0]![1];
     expect(datosEnviados.descripcion).toBe(REGISTRO_GUARDADO.descripcion);
@@ -229,7 +265,11 @@ describe('editarHistoriaClinica — fusión de campos (inmutabilidad)', () => {
   });
 
   it('vacunacion siempre se arrastra del registro anterior, no es editable', async () => {
-    await service.editarHistoriaClinica(100, { titulo: 'Nuevo' }, { usuarioId: 2 });
+    await service.editarHistoriaClinica(
+      100,
+      { titulo: 'Nuevo' },
+      { usuarioId: 2, ambito: 'PERSONAL' },
+    );
 
     expect(vi.mocked(repo.reemplazar).mock.calls[0]![1].vacunacion).toBe(
       REGISTRO_GUARDADO.vacunacion,
@@ -241,13 +281,21 @@ describe('editarHistoriaClinica — fusión de campos (inmutabilidad)', () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(conDocumento as never);
     vi.mocked(repo.reemplazar).mockResolvedValue({ ...conDocumento, id: 101 } as never);
 
-    await service.editarHistoriaClinica(100, {}, { usuarioId: 2, archivo: ARCHIVO });
+    await service.editarHistoriaClinica(
+      100,
+      {},
+      { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO },
+    );
 
     expect(borrarImagen).toHaveBeenCalledWith('/api/v1/archivos/x/viejo.pdf');
   });
 
   it('registra en auditoría la modificación con el id del nuevo registro', async () => {
-    await service.editarHistoriaClinica(100, { titulo: 'Nuevo' }, { usuarioId: 2 });
+    await service.editarHistoriaClinica(
+      100,
+      { titulo: 'Nuevo' },
+      { usuarioId: 2, ambito: 'PERSONAL' },
+    );
 
     expect(registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'MODIFICAR', entidad: 'HistoriaClinica', entidadId: 101 }),
@@ -259,7 +307,7 @@ describe('eliminarHistoriaClinica — permisos (HU-8.4)', () => {
   it('404 si el registro no existe', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(null as never);
 
-    await expect(service.eliminarHistoriaClinica(100, 2)).rejects.toMatchObject({
+    await expect(service.eliminarHistoriaClinica(100, 2, 'PERSONAL')).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -271,7 +319,7 @@ describe('eliminarHistoriaClinica — permisos (HU-8.4)', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
     vi.mocked(repo.darDeBaja).mockResolvedValue(REGISTRO_GUARDADO as never);
 
-    await expect(service.eliminarHistoriaClinica(100, 2)).resolves.toEqual({ id: 100 });
+    await expect(service.eliminarHistoriaClinica(100, 2, 'PERSONAL')).resolves.toEqual({ id: 100 });
     expect(repo.darDeBaja).toHaveBeenCalledWith(100, 2);
   });
 
@@ -280,7 +328,7 @@ describe('eliminarHistoriaClinica — permisos (HU-8.4)', () => {
     vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_ADOPTANTE as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(OTRO_ADOPTANTE as never);
 
-    await expect(service.eliminarHistoriaClinica(100, 99)).rejects.toMatchObject({
+    await expect(service.eliminarHistoriaClinica(100, 99, 'PERSONAL')).rejects.toMatchObject({
       codigo: 'NO_AUTORIZADO',
       httpStatus: 403,
       mensaje: 'No tiene permisos para eliminar este registro',
@@ -295,7 +343,7 @@ describe('eliminarHistoriaClinica — permisos (HU-8.4)', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
     vi.mocked(repo.darDeBaja).mockResolvedValue(registroDeOtroStaff as never);
 
-    await expect(service.eliminarHistoriaClinica(100, 4)).resolves.toEqual({ id: 100 });
+    await expect(service.eliminarHistoriaClinica(100, 4, 'REFUGIO')).resolves.toEqual({ id: 100 });
   });
 
   it('rechaza a un integrante de otro refugio', async () => {
@@ -303,7 +351,7 @@ describe('eliminarHistoriaClinica — permisos (HU-8.4)', () => {
     vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_REFUGIO as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_OTRO_REFUGIO as never);
 
-    await expect(service.eliminarHistoriaClinica(100, 5)).rejects.toMatchObject({
+    await expect(service.eliminarHistoriaClinica(100, 5, 'REFUGIO')).rejects.toMatchObject({
       codigo: 'NO_AUTORIZADO',
     });
   });
@@ -314,10 +362,30 @@ describe('eliminarHistoriaClinica — permisos (HU-8.4)', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
     vi.mocked(repo.darDeBaja).mockResolvedValue(REGISTRO_GUARDADO as never);
 
-    await service.eliminarHistoriaClinica(100, 2);
+    await service.eliminarHistoriaClinica(100, 2, 'PERSONAL');
 
     expect(registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'ELIMINAR', entidad: 'HistoriaClinica', entidadId: 100 }),
     );
+  });
+});
+
+describe('switch refugio/adoptante — la historia clínica sigue a la mascota', () => {
+  it('desde el perfil personal un miembro no accede a la historia de una mascota del refugio', async () => {
+    vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_REFUGIO as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
+
+    await expect(service.listarHistorial(11, 4, 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'NO_AUTORIZADO',
+    });
+  });
+
+  it('desde la vista de refugio no accede a la historia de una mascota personal', async () => {
+    vi.mocked(repo.buscarMascota).mockResolvedValue(MASCOTA_ADOPTANTE as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+
+    await expect(service.listarHistorial(10, 2, 'REFUGIO')).rejects.toMatchObject({
+      codigo: 'NO_AUTORIZADO',
+    });
   });
 });

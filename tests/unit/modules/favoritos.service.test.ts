@@ -89,7 +89,7 @@ beforeEach(() => {
 
 describe('agregarFavorito', () => {
   it('guarda la mascota y avisa que es nueva', async () => {
-    const resultado = await service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL');
+    const resultado = await service.agregarFavorito(MASCOTA, USUARIO);
 
     expect(resultado.yaEstaba).toBe(false);
     expect(resultado.favorito).toEqual({
@@ -103,7 +103,7 @@ describe('agregarFavorito', () => {
   it('rechaza una mascota que no existe', async () => {
     vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(null as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toMatchObject({
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -112,38 +112,29 @@ describe('agregarFavorito', () => {
   it('rechaza guardar una mascota propia', async () => {
     vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(mascotaActiva(USUARIO) as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toMatchObject({
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toMatchObject({
       codigo: 'MASCOTA_PROPIA',
       httpStatus: 403,
     });
     expect(repo.crear).not.toHaveBeenCalled();
   });
 
-  it('en ámbito REFUGIO rechaza guardar una mascota del propio refugio, aunque la haya cargado otro miembro', async () => {
+  it('rechaza guardar una mascota del propio refugio, aunque la haya cargado otro miembro: desde el perfil personal lo del refugio no se ve', async () => {
     vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(mascotaActiva(DUENIO, 1) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 1 } as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'REFUGIO')).rejects.toMatchObject({
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toMatchObject({
       codigo: 'MASCOTA_PROPIA',
       httpStatus: 403,
     });
     expect(repo.crear).not.toHaveBeenCalled();
-  });
-
-  it('en ámbito PERSONAL sí puede guardar una mascota de su propio refugio: el switch hace de cuenta que es un adoptante más', async () => {
-    vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(mascotaActiva(DUENIO, 1) as never);
-    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 1 } as never);
-
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).resolves.toMatchObject({
-      yaEstaba: false,
-    });
   });
 
   it('permite guardar una mascota de refugio si el usuario pertenece a otro refugio', async () => {
     vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(mascotaActiva(DUENIO, 1) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 2 } as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'REFUGIO')).resolves.toMatchObject({
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).resolves.toMatchObject({
       yaEstaba: false,
     });
   });
@@ -151,7 +142,7 @@ describe('agregarFavorito', () => {
   it('rechaza si el usuario no existe', async () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue(null as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toMatchObject({
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -160,7 +151,7 @@ describe('agregarFavorito', () => {
   it('rechaza una mascota sin publicación activa', async () => {
     vi.mocked(repo.buscarPublicacionActiva).mockResolvedValue(null as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toMatchObject({
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toMatchObject({
       codigo: 'SIN_PUBLICACION',
       httpStatus: 409,
     });
@@ -170,7 +161,7 @@ describe('agregarFavorito', () => {
   it('es idempotente: si ya estaba guardada no inserta de nuevo', async () => {
     vi.mocked(repo.buscarActivo).mockResolvedValue(favorito(3) as never);
 
-    const resultado = await service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL');
+    const resultado = await service.agregarFavorito(MASCOTA, USUARIO);
 
     expect(resultado.yaEstaba).toBe(true);
     expect(resultado.favorito.id).toBe(3);
@@ -184,7 +175,7 @@ describe('agregarFavorito', () => {
       .mockResolvedValueOnce(favorito(8) as never);
     vi.mocked(repo.crear).mockRejectedValue(errorDuplicado());
 
-    const resultado = await service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL');
+    const resultado = await service.agregarFavorito(MASCOTA, USUARIO);
 
     expect(resultado.yaEstaba).toBe(true);
     expect(resultado.favorito.id).toBe(8);
@@ -193,9 +184,7 @@ describe('agregarFavorito', () => {
   it('propaga un error de base que no sea el de duplicado', async () => {
     vi.mocked(repo.crear).mockRejectedValue(new Error('se cayó la base'));
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toThrow(
-      'se cayó la base',
-    );
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toThrow('se cayó la base');
   });
 });
 
@@ -344,8 +333,6 @@ describe('formato de error', () => {
   it('los errores son AppError, así el errorHandler los traduce al formato de la API', async () => {
     vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(null as never);
 
-    await expect(service.agregarFavorito(MASCOTA, USUARIO, 'PERSONAL')).rejects.toBeInstanceOf(
-      AppError,
-    );
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toBeInstanceOf(AppError);
   });
 });

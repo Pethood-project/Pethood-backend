@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { Ambito } from '../../shared/ambito';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 
@@ -43,17 +44,27 @@ export type SolicitudEnSeguimiento = NonNullable<Awaited<ReturnType<typeof busca
 export type SeguimientoConPregunta = SolicitudEnSeguimiento['seguimientos'][number];
 
 /**
- * Solicitudes aprobadas que el usuario puede ver: las que pidió él (es el adoptante), las de
- * publicaciones suyas, y —si es personal de refugio— las de mascotas de ese refugio.
+ * Solicitudes aprobadas que el usuario puede ver desde el perfil con el que consulta (ver
+ * `shared/ambito.ts`):
+ * - PERSONAL: las que pidió él (es el adoptante) y las de sus mascotas personales publicadas.
+ * - REFUGIO: las de mascotas de su refugio.
  */
-export function listarSolicitudesDeUsuario(usuarioId: number, refugioId: number | null) {
-  const comoRefugio = refugioId === null ? [] : [{ publicacion: { mascota: { refugioId } } }];
+export function listarSolicitudesDeUsuario(
+  usuarioId: number,
+  refugioId: number | null,
+  ambito: Ambito,
+) {
+  const OR: Prisma.SolicitudWhereInput[] =
+    ambito === 'REFUGIO'
+      ? // `-1` no matchea nada: cubre un refugio desasignado después del login.
+        [{ publicacion: { mascota: { refugioId: refugioId ?? -1 } } }]
+      : [{ usuarioId }, { publicacion: { usuarioId, mascota: { refugioId: null } } }];
 
   return prisma.solicitud.findMany({
     where: {
       fechaBaja: null,
       ...APROBADA_VIGENTE,
-      OR: [{ usuarioId }, { publicacion: { usuarioId } }, ...comoRefugio],
+      OR,
     },
     include: INCLUDE_SOLICITUD,
     orderBy: { fechaAlta: 'desc' },

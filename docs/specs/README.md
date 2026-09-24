@@ -27,3 +27,4 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 010 | Dashboard de Refugio | 12 | APROBADA |
 | 011 | Seguimiento Post-Adopción (HU-9.1, HU-9.2) | 7 | APROBADA |
 | 015 | Soporte (HU-15.1, HU-15.2, HU-15.3) | 13 | BORRADOR |
+| 016 | Switch de perfil refugio / adoptante (transversal) | 13 | EN REVISIÓN |

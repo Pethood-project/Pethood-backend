@@ -201,6 +201,17 @@ export function buscarMembresiaActiva(usuarioId: number, chatId: number) {
 }
 
 /**
+ * Refugio que es la contraparte institucional de la sala, o `null` si es una conversación
+ * entre personas. Con eso se decide a qué perfil (personal o refugio) pertenece.
+ */
+export function buscarRefugioDeChat(chatId: number) {
+  return prisma.chat.findFirst({
+    where: { id: chatId, fechaBaja: null },
+    select: { refugioId: true },
+  });
+}
+
+/**
  * La sala con todo lo necesario para resolver el contacto de la cabecera (GUI-14).
  *
  * Mismo `include` que `listarChatsActivosDeUsuario` para que `resolverContacto` del service
