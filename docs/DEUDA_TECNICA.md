@@ -23,11 +23,14 @@ técnica: viven en `REQUISITOS.md` sección 10.
 
 ## Resumen
 
+Los números no se reciclan: un ítem cerrado deja su hueco, para que un link o un comentario
+viejo que diga «ítem 7» siga apuntando a lo mismo.
+
 | # | Deuda | Gravedad | Repo |
 |---|---|---|---|
 | 1 | Los archivos subidos se sirven sin autenticación | **Alta** | backend |
-| 2 | `r2.ts` no conoce los formatos de video | **Alta** | backend |
-| 3 | Disco efímero en Render: cada deploy borra los archivos | **Alta** | backend |
+| ~~2~~ | ~~`r2.ts` no conoce los formatos de video~~ | ✅ cerrada | — |
+| 3 | Disco efímero en Render: **falta aprovisionar el bucket de R2** | Media | infra |
 | 4 | `REQUISITOS.md` §4 contradice el límite real del video de chat | Media | docs |
 | 5 | `apps/mobile` no tiene linter, formateador ni runner de tests | Media | frontend |
 | 6 | El CI del frontend no corre los tests que sí existen | Media | frontend |
@@ -71,66 +74,52 @@ seguridad por oscuridad: el link no vence nunca y quien lo consigue entra para s
 
 ---
 
-## 2. `r2.ts` no conoce los formatos de video — **Alta**
+## 2. `r2.ts` no conoce los formatos de video — ✅ **CERRADA**
 
-**Qué pasa.** [`src/shared/r2.ts`](../src/shared/r2.ts) tiene su propio mapa de extensiones y
-**sólo contempla imágenes**:
+Había dos mapas de mime → extensión, uno en `storage.ts` y otro en `r2.ts`, y habían
+divergido: el de R2 nunca supo de video, así que un `.mp4` se habría subido al bucket como
+`.jpg` apenas se activara R2 para el chat.
 
-```ts
-const MIME_A_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
-};
-// …
-const extension = MIME_A_EXTENSION[archivo.mimetype] ?? 'jpg';
-```
-
-Un `video/mp4` cae en el `?? 'jpg'` y se sube al bucket **con extensión `.jpg`**.
-
-**Por qué es grave.** Es un bug latente que no se ve hoy porque R2 sólo lo usa la foto de
-perfil, pero **explota el día que se active R2 para el chat** (ítem 3). Y no rompe fuerte:
-rompe callado. El archivo se sube, la URL se guarda, y recién falla al reproducir — además de
-que `tipoDeUrl` en [`src/shared/adjuntos.ts`](../src/shared/adjuntos.ts) clasificaría ese
-video como imagen, porque clasifica justamente por la extensión.
-
-**Es el mismo bug** que tenía `storage.ts` y que se corrigió al implementar el video en el
-chat. En `r2.ts` sigue vivo porque ese archivo no se tocó.
-
-**Cómo se arregla.** Agregar `video/mp4`, `video/quicktime` y `video/webm` al mapa. Mejor
-todavía: que `r2.ts` y `storage.ts` compartan un único mapa de mime → extensión, para que no
-puedan volver a divergir.
+Se cerró unificando los dos en [`src/shared/extensiones.ts`](../src/shared/extensiones.ts),
+que ahora es el único mapa del proyecto. Tiene un test que recorre **todos** los formatos
+declarados en `LIMITES` y falla si alguien suma uno sin decidirle extensión, para que no
+puedan volver a separarse.
 
 ---
 
-## 3. Disco efímero en Render — **Alta**
+## 3. Disco efímero en Render — Media · **el código ya está, falta el bucket**
 
-**Qué pasa.** Todos los archivos subidos (mascotas, publicaciones, historia clínica,
-seguimiento y chat) van a `uploads/` en disco local. **En Render el disco es efímero: cada
-deploy borra todo.** El mensaje queda en la base apuntando a un archivo que ya no existe.
+**Qué pasa.** En Render el disco del contenedor se recrea en cada deploy y en cada reinicio.
+Todo lo que hay en `uploads/` desaparece y las filas de la base quedan apuntando a archivos
+que ya no existen: una conversación con las fotos rotas y sin forma de recuperarlas. Además
+impide correr más de una instancia — dos instancias son dos discos, y el que sube no es el
+que sirve.
 
-**Ya está documentado** en [`api-chat-sala.md`](./api-chat-sala.md), en «Deuda conocida de
-almacenamiento» y en «Almacenamiento de imágenes en R2». Se repite acá porque es transversal y
-porque el video lo agravó: una foto comprimida pesa ~200 KB, un video hasta 30 MB.
+**Qué ya se hizo.** [`shared/storage.ts`](../src/shared/storage.ts) pasó a ser la única
+puerta de persistencia de archivos y ramifica por `R2_ENABLED`: con R2 habilitado sube a
+Cloudflare, si no escribe en disco. Los **cinco** módulos que la usan —mascotas,
+publicaciones, historia clínica, seguimiento y chat— quedaron migrados **sin cambiar una
+línea**, porque la decisión vive adentro de las cuatro funciones que ya llamaban.
 
-**Cómo se arregla.** El 80% ya está construido y **no hace falta un PR grande**:
+`borrarImagen` decide por la **forma de la URL** y no por el flag, así que lo guardado antes
+de la migración se sigue borrando del disco y lo nuevo del bucket. Las dos épocas conviven sin
+migrar datos, y el frontend no cambió nada: `urlAbsoluta` ya dejaba pasar las URLs absolutas.
 
-1. `shared/r2.ts` ya tiene cliente S3, configuración por env y el flag `R2_ENABLED`.
-2. [`shared/imagenPerfil.ts`](../src/shared/imagenPerfil.ts) ya resuelve el patrón de
-   adopción en 12 líneas: si R2 está habilitado sube al bucket, si no cae a disco local.
-3. Falta generalizar `subirImagenPerfil` a `subirArchivo(archivo, carpeta)` —hoy tiene
-   `perfiles/` fijo—, **arreglar de paso el ítem 2**, y agregar un `borrarArchivo`
-   (`DeleteObjectCommand`): sin él, cada alta de mensaje que falla después de subir deja un
-   objeto huérfano en el bucket, porque la compensación de `chats.service.ts` sólo borra del
-   disco local.
-4. Un `adjuntoChat.ts` espejo de `imagenPerfil.ts`, y cambiar dos líneas en `chats.service.ts`.
+**Qué falta, y es lo único que falta.** Aprovisionar R2:
 
-**El frontend no cambia nada:** `urlAbsoluta` ya deja pasar sin tocar las URLs que vienen
-absolutas, así que las filas viejas con ruta relativa y las nuevas con URL de R2 conviven sin
-migrar datos.
+1. Crear un bucket y un API token S3 en `https://dash.cloudflare.com` → R2.
+2. Completar `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` y
+   `R2_PUBLIC_BASE_URL` en el entorno de Render.
+3. Poner `R2_ENABLED=true`.
 
-> **Corrección a lo que dice el contrato.** `api-chat-sala.md` afirma que la migración «tiene
-> que ser un PR propio que toque todos los módulos a la vez». Es más conservador de lo
-> necesario: `imagenPerfil.ts` demuestra que el punto de decisión ya está abstraído **por
-> módulo**, así que el chat puede migrar solo.
+**Hasta que eso pase, la deuda sigue abierta**: con el flag en `false` todo va a disco y los
+archivos se siguen perdiendo en cada deploy. El código está listo y es seguro de mergear
+porque con R2 apagado el comportamiento es idéntico al de antes — pero mergearlo **no** cierra
+el problema, sólo lo deja a un cambio de configuración de distancia.
+
+> Ojo al activarlo: un bucket público expone los archivos a quien tenga el link. No es peor
+> que hoy (`express.static` hace lo mismo), pero tampoco lo arregla — eso es el ítem 1, y
+> conviene resolverlo antes o junto con la activación.
 
 ---
 

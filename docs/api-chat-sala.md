@@ -679,7 +679,7 @@ La fuente de verdad es **la base**, no el socket: el tiempo real es una optimiza
 | **Marcar leído al ABRIR la sala, con endpoint propio** | `mensaje_leido` es un booleano único por mensaje **sin dueño**: el estado más fino que el modelo puede representar es "la sala está leída". Marcar por mensaje renderizado serían decenas de requests para escribir un bit que se escribe con uno solo. |
 | **`noLeidos: 0` viaja aunque sea constante** | Para que el cliente actualice el ítem del listado de HU-5.1 en memoria, sin refetch y sin hacer cuentas propias. `marcados` es el dato real de cuántos cambiaron. |
 | **Se emite sólo si `marcados > 0`** | Reabrir una sala ya leída no tiene por qué despertar a los otros dispositivos. |
-| **Imágenes a disco local, NO a R2** | Todo lo implementado (mascotas HU-6.1, publicaciones, historia clínica, seguimiento) usa `shared/storage.ts` con rutas relativas. R2 existe en el repo pero **sólo sabe subir fotos de perfil**, detrás del flag `R2_ENABLED`. Migrar bien implica tocar todos esos módulos a la vez: que el chat fuera el único módulo en R2 sería peor que cualquiera de las dos opciones puras. Ver "Pendientes". |
+| **Los archivos van por `shared/storage.ts`** | ✅ **Resuelto.** Cuando se escribió esto, `storage.ts` sólo sabía escribir en disco y R2 sólo subía fotos de perfil, así que migrar el chat solo habría dejado dos backends conviviendo — peor que cualquiera de las dos opciones puras. Se resolvió poniendo la decisión **adentro** de `storage.ts`: sus cuatro funciones ramifican por `R2_ENABLED`, así que los cinco módulos migran a la vez y ninguno cambió una línea. Falta aprovisionar el bucket para activarlo. |
 | **Texto y foto pueden ir juntos** | `mensaje_contenido` es NOT NULL y el contrato de HU-5.1 ya define `contenido: "" + tieneImagen: true` como "solo foto". El modelo ya soporta el pie de foto; prohibirlo sería una restricción inventada. Lo único que se rechaza es el mensaje sin nada. |
 | **Validar antes de tocar el storage** | Si la imagen se guardara primero, cada envío rechazado dejaría un archivo huérfano. Y si falla la escritura en base **después** de guardarla, se borra por compensación — mismo patrón que el alta de mascota. |
 | **Se puede leer un chat con alguien dado de baja, pero no escribirle** | Ocultar o bloquear la lectura destruiría el registro de un acuerdo sobre un animal, que es exactamente lo que la baja lógica del proyecto existe para preservar. Escribirle, en cambio, no tiene destinatario. |
@@ -729,9 +729,13 @@ y pasó a ser **una escritura por sala**, lo que además habilitó el acuse de e
 `mensaje_leido` sigue en la base y se sigue poblando para no romper lecturas viejas, pero
 ninguna query lo consulta. **No usarlo en código nuevo.**
 
-### Almacenamiento de imágenes en R2 — deuda transversal, no de esta HU
+### Almacenamiento de imágenes en R2 — código listo, falta el bucket
 
-`ARQUITECTURA.md` especifica Cloudflare R2, pero **todo lo implementado usa disco local**: mascotas, publicaciones, historia clínica, seguimiento y ahora chat. R2 está en el repo (`shared/r2.ts`) pero sólo para fotos de perfil.
+`shared/storage.ts` es la única puerta de persistencia de archivos del proyecto y **ya sabe escribir en Cloudflare R2**: sus cuatro funciones (`guardarImagen`, `guardarImagenes`, `borrarImagen`, `borrarImagenes`) eligen destino según `R2_ENABLED`, y los cinco módulos que las usan —mascotas, publicaciones, historia clínica, seguimiento y chat— quedaron migrados sin cambiar una línea.
+
+**Con `R2_ENABLED=false`, que es como está hoy, todo sigue yendo a disco local y el comportamiento es idéntico al de antes.** Para activarlo hay que crear el bucket y el API token en Cloudflare y completar las `R2_*` del entorno. Hasta entonces la deuda sigue abierta: en Render el disco es efímero y cada deploy borra los adjuntos.
+
+`borrarImagen` decide por la **forma de la URL** y no por el flag, así que las filas guardadas antes de activar R2 se siguen borrando del disco correctamente. Ver `docs/DEUDA_TECNICA.md` ítem 3.
 
 **En Render el disco es efímero**: cada deploy borra los archivos subidos. Es un problema de todo el proyecto, no del chat, y la migración tiene que ser un PR propio que toque todos los módulos a la vez. `shared/storage.ts` está pensado para que ese cambio quede contenido ahí.
 
