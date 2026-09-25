@@ -3,6 +3,7 @@ import type { Ambito } from '../../shared/ambito';
 import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
+import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import type {
   ActualizacionCargadaDto,
   ActualizacionSeguimientoDto,
@@ -245,7 +246,8 @@ function aItem(
     pregunta: seguimiento.preguntaSeguimiento.texto,
     estado,
     descripcion: seguimiento.descripcion,
-    fotoUrl: seguimiento.fotoUrl,
+    // Prueba de vida: privada, la URL sale firmada y vence.
+    fotoUrl: firmarUrlArchivo(seguimiento.fotoUrl),
     fechaPedido: seguimiento.fechaAlta.toISOString(),
     plazo: seguimiento.plazo?.toISOString() ?? null,
     // Solo un pedido completado tiene fecha de respuesta: en uno vencido, la fecha de

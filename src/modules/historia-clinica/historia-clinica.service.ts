@@ -2,6 +2,7 @@ import { AppError } from '../../middlewares/errorHandler';
 import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
+import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import { aFechaISO } from '../../shared/validation/dates';
 import type {
   CrearHistoriaClinicaDto,
@@ -30,7 +31,8 @@ function aDto(registro: Registro): HistoriaClinicaDto {
     vacunacion: registro.vacunacion,
     titulo: registro.titulo,
     descripcion: registro.descripcion,
-    documentoUrl: registro.documentoUrl,
+    // Comprobante médico: privado, la URL sale firmada y vence.
+    documentoUrl: firmarUrlArchivo(registro.documentoUrl),
     mascotaId: registro.mascotaId,
     usuarioAlta: registro.usuarioAlta,
     fechaAlta: registro.fechaAlta.toISOString(),

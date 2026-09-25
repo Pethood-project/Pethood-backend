@@ -25,6 +25,7 @@ import type { Ambito } from '../../shared/ambito';
 import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { clasificarAdjuntos, esMimeDeVideo, tipoDeUrl } from '../../shared/adjuntos';
+import { firmarUrlArchivo, firmarUrlsArchivo } from '../../shared/urlFirmada';
 import { estaEnLinea } from '../../websockets/presencia';
 import * as emisor from '../../websockets/emisor';
 import { LIMITES } from '../../shared/validation/limits';
@@ -328,11 +329,15 @@ function aMensajeDto(
     id: mensaje.id,
     chatId: mensaje.chatId,
     contenido: mensaje.contenido,
-    imagenUrl: mensaje.imagenUrl,
-    imagenes: mensaje.imagenes,
-    // Las mismas URLs que `imagenes`, cada una con su tipo. `imagenes` se conserva tal cual
-    // para no romper a los clientes que ya la consumen.
-    adjuntos: clasificarAdjuntos(mensaje.imagenes),
+    // Los adjuntos de una conversación son privados: la URL sale firmada y vence. El tipo se
+    // clasifica ANTES de firmar, porque la firma le agrega query params y `tipoDeUrl` mira la
+    // extensión del final.
+    imagenUrl: firmarUrlArchivo(mensaje.imagenUrl),
+    imagenes: firmarUrlsArchivo(mensaje.imagenes),
+    adjuntos: clasificarAdjuntos(mensaje.imagenes).map((adjunto) => ({
+      ...adjunto,
+      url: firmarUrlArchivo(adjunto.url) ?? adjunto.url,
+    })),
     usuarioId: mensaje.usuarioId,
     tipo: mensaje.tipo,
     ...acuseDe(mensaje, marcas),

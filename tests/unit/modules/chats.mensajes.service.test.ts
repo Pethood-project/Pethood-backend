@@ -342,9 +342,17 @@ describe('enviarMensaje', () => {
       { usuarioId: USUARIO, chatId: CHAT, archivos: [VIDEO] },
     );
 
-    expect(dto.adjuntos).toEqual([{ url: URL_VIDEO, tipo: 'VIDEO' }]);
-    // `imagenes` sigue intacta: los clientes viejos no se enteran del cambio.
-    expect(dto.imagenes).toEqual([URL_VIDEO]);
+    expect(dto.adjuntos).toHaveLength(1);
+    expect(dto.adjuntos[0]!.tipo).toBe('VIDEO');
+
+    // Los adjuntos de chat son privados: la URL sale FIRMADA y con vencimiento, si no
+    // cualquiera con el link abriría la conversación de otro. El tipo se resuelve igual,
+    // porque se clasifica antes de firmar.
+    expect(dto.adjuntos[0]!.url.startsWith(`${URL_VIDEO}?exp=`)).toBe(true);
+    expect(dto.adjuntos[0]!.url).toMatch(/&sig=[0-9a-f]{32}$/);
+
+    expect(dto.imagenes[0]!.startsWith(`${URL_VIDEO}?exp=`)).toBe(true);
+    expect(dto.imagenUrl!.startsWith(`${URL_VIDEO}?exp=`)).toBe(true);
   });
 
   it('no se le puede escribir a un contacto dado de baja', async () => {

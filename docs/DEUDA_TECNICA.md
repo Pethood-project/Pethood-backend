@@ -28,7 +28,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 
 | # | Deuda | Gravedad | Repo |
 |---|---|---|---|
-| 1 | Los archivos subidos se sirven sin autenticación | **Alta** | backend |
+| ~~1~~ | ~~Los archivos subidos se sirven sin autenticación~~ | ✅ cerrada | — |
 | ~~2~~ | ~~`r2.ts` no conoce los formatos de video~~ | ✅ cerrada | — |
 | 3 | Disco efímero en Render: **falta aprovisionar el bucket de R2** | Media | infra |
 | 4 | `REQUISITOS.md` §4 contradice el límite real del video de chat | Media | docs |
@@ -41,36 +41,33 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 11 | La duración máxima del video la valida sólo el cliente | Baja | ambos |
 | 12 | En el frontend, `fotos` nombra algo que puede ser un video | Baja | frontend |
 | 13 | El socket de chat no conoce el perfil activo (switch refugio/adoptante) | Baja | ambos |
+| 14 | Al activar R2, los archivos privados vuelven a quedar públicos | **Alta** | backend |
 
 ---
 
-## 1. Los archivos subidos se sirven sin autenticación — **Alta**
+## 1. Los archivos subidos se sirven sin autenticación — ✅ **CERRADA**
 
-**Qué pasa.** En [`src/app.ts`](../src/app.ts) los uploads se publican con
-`express.static` y sin ningún middleware de autenticación:
+`/api/v1/archivos` se servía con `express.static` y sin ningún control: cualquiera con el link
+abría un adjunto de chat, un comprobante de historia clínica o una prueba de vida, sin sesión.
 
-```ts
-app.use(RUTA_PUBLICA_ARCHIVOS, express.static(DIRECTORIO_UPLOADS));
-```
+Se cerró con **URLs firmadas** ([`shared/urlFirmada.ts`](../src/shared/urlFirmada.ts)): las
+tres subcarpetas privadas (`chats`, `historias-clinicas`, `seguimientos`) exigen un `exp` y un
+`sig` HMAC que emiten los DTOs; las públicas (`mascotas`, `publicaciones`, `perfiles`) siguen
+abiertas porque se muestran en el feed de adopción.
 
-Cualquiera con la URL abre el archivo, sin sesión y sin ser participante de nada. Vale para
-todo el proyecto, pero **pesa distinto en el chat**: una conversación es privada, y desde que
-se pueden mandar videos ahí puede haber material bastante más sensible que la foto de una
-mascota.
+**Por qué firmada y no un header.** En React Native, `<Image source={{ uri }} />` descarga por
+su cuenta y no manda `Authorization`. Poner `autenticar` delante habría dejado la app sin una
+sola foto, salvo pasarle `headers` a las 25 imágenes remotas y perder el cacheo. Es el mismo
+motivo por el que S3 y R2 tienen URLs prefirmadas.
 
-**Por qué quedó así.** La ruta nació para las fotos de mascotas, que son públicas por
-naturaleza — se muestran en el feed de adopción. El chat reusó el mismo `storage.ts` sin que
-nadie revisara la decisión de acceso.
+**Lo que NO resuelve, y hay que saberlo:** sigue siendo un *bearer*. Quien tenga el link
+vigente entra, aunque no participe del chat. Lo que se gana es que **vence** (6 h) y que no se
+puede fabricar uno para un archivo ajeno. La versión fuerte —verificar la pertenencia al chat
+en cada request— es justamente lo que el `<Image>` de RN no deja hacer.
 
-**Qué la mitiga hoy.** El nombre de archivo es un UUID v4, así que la URL no se adivina. Es
-seguridad por oscuridad: el link no vence nunca y quien lo consigue entra para siempre.
-
-**Cómo se arregla.** Dos caminos, y conviene decidirlo junto con el ítem 3:
-
-- **URLs firmadas con vencimiento** (R2 soporta presigned GET). Es el arreglo serio. Cuesta
-  perder el cacheo `immutable` y que el cliente tenga que pedir la URL cada vez.
-- **Un endpoint autenticado** que valide la pertenencia al chat y devuelva el archivo. Más
-  simple de razonar, pero pone al servidor en el camino de cada byte.
+**El vencimiento se redondea a ventanas de 6 h** para que la URL no cambie en cada respuesta:
+si cambiara, el cliente volvería a descargar la misma foto —o el mismo video de 30 MB— cada
+vez, porque su caché indexa por URL.
 
 ---
 
@@ -321,3 +318,22 @@ No se repite acá; el link va al detalle.
 | Falta la sala de HU-13.2 (mascota perdida/encontrada), que no nace de una solicitud | [`api-chats.md`](./api-chats.md) § «Creación de salas» |
 | Desnormalizar el último mensaje en `Chat`: evaluado y descartado, revisitable con cientos de chats por usuario | [`api-chats.md`](./api-chats.md) |
 | `chat_tipo` sigue sin definirse y no se escribe | [`api-chats.md`](./api-chats.md) |
+
+---
+
+## 14. Al activar R2, los archivos privados vuelven a quedar públicos — **Alta**
+
+**Qué pasa.** La firma del ítem 1 protege lo que sirve **este** servidor. Los archivos de R2
+los sirve Cloudflare directo desde un bucket público, sin pasar por acá, así que
+`firmarUrlArchivo` los deja pasar sin tocar — y un adjunto de chat en R2 vuelve a ser un link
+permanente que abre cualquiera.
+
+**Hoy no afecta a nadie:** `R2_ENABLED=false` y no hay bucket (ítem 3). Pero es una trampa con
+gatillo — el día que alguien active R2 para resolver el ítem 3, reabre el ítem 1 sin enterarse.
+
+**Cómo se arregla.** Firmar también del lado de R2, con `getSignedUrl` de
+`@aws-sdk/s3-request-presigner` (dependencia nueva, el proyecto sólo tiene `client-s3`), y que
+`firmarUrlArchivo` ramifique por destino igual que hace `storage.ts`. Conviene mantener la
+misma ventana de 6 h para no perder el cacheo.
+
+**Orden sugerido: este ítem ANTES que activar R2**, no después.
