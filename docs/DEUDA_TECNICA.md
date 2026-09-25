@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-09-24**
+> Última revisión: **2026-09-25**
 
 ## Cómo se usa
 
@@ -42,6 +42,11 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 12 | En el frontend, `fotos` nombra algo que puede ser un video | Baja | frontend |
 | 13 | El socket de chat no conoce el perfil activo (switch refugio/adoptante) | Baja | ambos |
 | 14 | Al activar R2, los archivos privados vuelven a quedar públicos | **Alta** | backend |
+
+> **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
+> `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
+> hasta que entre el PR, el resto del equipo sigue con los archivos sin firmar. Borrar este
+> párrafo cuando se mergee.
 
 ---
 
@@ -304,6 +309,18 @@ una sala del otro perfil no se llega porque el historial (`GET /chats/:id/mensaj
 **Cómo se arregla.** Mandar el ámbito en el `auth` del handshake y reconectar el socket al
 cambiar de vista; `autenticarSocket` lo resuelve con el mismo `resolverAmbito` y
 `chat:unirse` aplica `exigirChatDelAmbito`.
+
+**Cuidado: el arreglo no entra solo.** `adquirirSocket(token)`
+(`apps/mobile/lib/socketChat.ts`) abre con `if (!socket)`, así que **reusa la conexión
+abierta e ignora los parámetros nuevos**. Mandar el ámbito en el `auth` no alcanza: el
+segundo llamado, el de después del switch, devuelve el socket viejo con el handshake viejo y
+no vuelve a conectarse.
+
+Hoy eso no rompe nada —el único cambio de credencial es `cerrarSesion`, que llama a
+`cerrarSocket()` a propósito, y la app no tiene refresh de token— pero el ámbito **sí**
+cambia sin pasar por ahí. Por eso no se anota como ítem aparte: es la primera línea del
+arreglo de éste. El handshake tiene que rehacerse cuando cambia el ámbito, comparándolo
+contra el del socket ya conectado.
 
 ---
 
