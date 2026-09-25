@@ -69,3 +69,33 @@ export function validarTexto(valor: unknown, opciones: OpcionesTexto): Resultado
 
   return { valido: true, valor: recortado };
 }
+
+export type ResultadoListaValores<T extends string> =
+  { valido: true; valor: T[] } | { valido: false; error: string };
+
+/**
+ * Lista separada por comas de valores de un conjunto cerrado, como llega un filtro por query
+ * string (`?estados=Pendiente,En_Revision`). Ausente o vacía es "sin filtro" (lista vacía).
+ * Descarta repetidos y rechaza la lista entera si algún valor no está permitido: un filtro
+ * que se aplica a medias muestra un resultado que el usuario no pidió.
+ */
+export function parsearListaDeValores<T extends string>(
+  valor: unknown,
+  permitidos: readonly T[],
+  etiqueta: string,
+): ResultadoListaValores<T> {
+  if (valor === undefined || valor === null || valor === '') return { valido: true, valor: [] };
+  if (typeof valor !== 'string') return { valido: false, error: `${etiqueta} no es válido` };
+
+  const valores: T[] = [];
+
+  for (const parte of valor.split(',')) {
+    const limpio = parte.trim();
+    if (!(permitidos as readonly string[]).includes(limpio)) {
+      return { valido: false, error: `${etiqueta} no es válido` };
+    }
+    if (!valores.includes(limpio as T)) valores.push(limpio as T);
+  }
+
+  return { valido: true, valor: valores };
+}

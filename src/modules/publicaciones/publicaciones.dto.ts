@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
-import { idSchema, textoOpcionalSchema, textoSchema } from '../../shared/validation/schemas';
+import {
+  idSchema,
+  listaDeIdsSchema,
+  textoOpcionalSchema,
+  textoSchema,
+} from '../../shared/validation/schemas';
 import { validarTexto } from '../../shared/validation/text';
 
 /** Hasta 5 fotos por publicación; el orden recibido es el orden de la galería. */
@@ -135,6 +140,8 @@ export interface PublicacionFeedDto {
   /** En orden; la primera es la portada. Rutas relativas al origen de la API. */
   imagenes: string[];
   fechaPublicacion: string;
+  /** Estado del aviso (no el de la mascota). Ver `ESTADO_PUBLICACION`. */
+  estado: EstadoPublicacionDto;
   mascota: MascotaPublicadaDto;
   /** Null cuando publica un adoptante particular y no un refugio. */
   refugio: { id: number; nombre: string; direccion: string } | null;
@@ -153,6 +160,55 @@ export interface FeedPublicacionesDto {
   /** Total que matchea los filtros, no el largo de esta página. */
   total: number;
   publicaciones: PublicacionFeedDto[];
+}
+
+/**
+ * Nombres del catálogo `Estado_Publicacion` — el estado del AVISO, no el de la mascota.
+ * - Activa: se ve en el feed y se puede solicitar.
+ * - Pausada: sigue viva pero no aparece en el feed (hoy: la mascota está en tratamiento o en
+ *   tránsito).
+ * - Finalizada: el aviso quedó cerrado (hoy: la mascota fue adoptada o falleció).
+ *
+ * Hoy las transiciones son automáticas y siguen al estado de la mascota
+ * (`estadoPublicacionSegunMascota` en el servicio).
+ */
+export const ESTADO_PUBLICACION = {
+  ACTIVA: 'Activa',
+  PAUSADA: 'Pausada',
+  FINALIZADA: 'Finalizada',
+} as const;
+export type NombreEstadoPublicacion = (typeof ESTADO_PUBLICACION)[keyof typeof ESTADO_PUBLICACION];
+
+/** Estado vigente de una publicación, con la misma forma que el de la mascota. */
+export interface EstadoPublicacionDto {
+  id: number;
+  nombre: string;
+}
+
+/**
+ * Filtro de "Mis publicaciones": `?estados=1,3` (ids de `Estado_Publicacion`). Sin el
+ * parámetro, o vacío, trae todas.
+ */
+export const filtrosMisPublicacionesSchema = z.object({
+  estados: listaDeIdsSchema('El estado de publicación'),
+});
+
+export type FiltrosMisPublicacionesDto = z.infer<typeof filtrosMisPublicacionesSchema>;
+
+/** Tarjeta de "Mis publicaciones": lo mínimo para la grilla, la ficha se pide aparte. */
+export interface PublicacionPropiaDto {
+  id: number;
+  /** Portada: la primera foto de la publicación, o la de la mascota si no subió propias. */
+  imagenUrl: string | null;
+  fechaPublicacion: string;
+  estado: EstadoPublicacionDto;
+  mascota: {
+    id: number;
+    nombre: string | null;
+    /** `AAAA-MM-DD` o null. La edad se calcula en el cliente. */
+    fechaNacimiento: string | null;
+    especie: { id: number; nombre: string };
+  };
 }
 
 export interface PublicacionCreadaDto {

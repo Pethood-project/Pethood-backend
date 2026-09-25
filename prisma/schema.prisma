@@ -108,6 +108,27 @@ model EstadoMascota {
   @@map("estado_mascota")
 }
 
+// Estado del AVISO, independiente del de la mascota: Activa, Pausada, Finalizada. Hoy las
+// transiciones son automáticas y siguen al estado de la mascota (ver
+// `estadoPublicacionSegunMascota` en publicaciones.service.ts); cuando exista la edición de
+// publicaciones se suman las manuales (pausar, finalizar, reactivar).
+model EstadoPublicacion {
+  id          Int     @id @default(autoincrement()) @map("estado_publicacion_id")
+  nombre      String  @unique @map("estado_publicacion_nombre")
+  descripcion String? @map("estado_publicacion_descripcion")
+
+  usuarioAlta         Int       @map("estado_publicacion_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("estado_publicacion_fecha_alta")
+  usuarioModificacion Int?      @map("estado_publicacion_usuario_modificacion")
+  fechaModificacion   DateTime? @map("estado_publicacion_fecha_modificacion")
+  usuarioBaja         Int?      @map("estado_publicacion_usuario_baja")
+  fechaBaja           DateTime? @map("estado_publicacion_fecha_baja")
+
+  historicos PublicacionEstado[]
+
+  @@map("estado_publicacion")
+}
+
 model EstadoUsuario {
   id          Int     @id @default(autoincrement()) @map("estado_usuario_id")
   nombre      String  @unique @map("estado_usuario_nombre")
@@ -419,9 +440,34 @@ model Publicacion {
   mascota Mascota @relation(fields: [mascotaId], references: [id])
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
-  solicitudes Solicitud[]
+  historicoEstados PublicacionEstado[]
+  solicitudes      Solicitud[]
 
   @@map("publicacion")
+}
+
+// Histórico N:1 de estados de una publicación. Mismo patrón que MascotaEstado: una sola fila
+// activa (fecha_baja nula) por publicación; cambiar de estado es baja de la vigente + alta de
+// una nueva, así queda el historial completo. Sin par de modificación propio.
+//
+// La unicidad de la fila vigente la garantiza un índice PARCIAL que Prisma no sabe expresar y
+// vive en `migrations/20260925125459_estado_publicacion`: `publicacion_estado_activo_uq`,
+// único (publicacion_id) WHERE fecha_baja IS NULL.
+model PublicacionEstado {
+  id                  Int @id @default(autoincrement()) @map("publicacion_estado_id")
+  publicacionId       Int @map("publicacion_id")
+  estadoPublicacionId Int @map("estado_publicacion_id")
+
+  usuarioAlta Int       @map("publicacion_estado_usuario_alta")
+  fechaAlta   DateTime  @default(now()) @map("publicacion_estado_fecha_alta")
+  usuarioBaja Int?      @map("publicacion_estado_usuario_baja")
+  fechaBaja   DateTime? @map("publicacion_estado_fecha_baja")
+
+  publicacion       Publicacion       @relation(fields: [publicacionId], references: [id])
+  estadoPublicacion EstadoPublicacion @relation(fields: [estadoPublicacionId], references: [id])
+
+  @@index([publicacionId])
+  @@map("publicacion_estado")
 }
 
 // Además del índice de abajo, la tabla tiene dos índices PARCIALES que Prisma no sabe

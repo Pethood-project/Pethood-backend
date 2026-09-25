@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   mensajeLongitud,
+  parsearListaDeValores,
   mensajeObligatorio,
   validarTexto,
 } from '../../../../src/shared/validation/text';
@@ -125,5 +126,37 @@ describe('validarTexto — campos sin mínimo', () => {
       valido: false,
       error: 'La ubicación no puede superar los 50 caracteres',
     });
+  });
+});
+
+describe('parsearListaDeValores', () => {
+  const ESTADOS = ['Pendiente', 'En_Revision', 'Aprobada'] as const;
+
+  it('ausente o vacía es "sin filtro"', () => {
+    expect(parsearListaDeValores(undefined, ESTADOS, 'El estado')).toEqual({
+      valido: true,
+      valor: [],
+    });
+    expect(parsearListaDeValores('', ESTADOS, 'El estado')).toEqual({ valido: true, valor: [] });
+  });
+
+  it('separa por comas, tolera espacios y descarta repetidos', () => {
+    expect(parsearListaDeValores('Pendiente, Aprobada,Pendiente', ESTADOS, 'El estado')).toEqual({
+      valido: true,
+      valor: ['Pendiente', 'Aprobada'],
+    });
+  });
+
+  it('rechaza la lista entera si un valor no está permitido o viene vacío', () => {
+    for (const valor of ['Pendiente,Otro', 'Pendiente,,Aprobada', 'pendiente']) {
+      expect(parsearListaDeValores(valor, ESTADOS, 'El estado')).toEqual({
+        valido: false,
+        error: 'El estado no es válido',
+      });
+    }
+  });
+
+  it('rechaza un parámetro repetido (llega como array)', () => {
+    expect(parsearListaDeValores(['Pendiente'], ESTADOS, 'El estado').valido).toBe(false);
   });
 });

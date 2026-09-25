@@ -23,6 +23,11 @@ export async function listarRazasDeEspecie(especieId: number) {
   return repo.listarRazasDeEspecie(especieId);
 }
 
+/** Estados del aviso (Activa, Pausada, Finalizada), para el filtro de "Mis publicaciones". */
+export function listarEstadosPublicacion() {
+  return repo.listarEstadosPublicacion();
+}
+
 export async function listarEstadosMascota() {
   const estados = await repo.listarEstadosMascota();
 

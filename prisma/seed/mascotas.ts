@@ -710,6 +710,55 @@ async function crearHistorialEstados(
   }
 }
 
+/** Misma regla que `estadoPublicacionSegunMascota` en publicaciones.service.ts. */
+function estadoPublicacionSegun(estadoMascota: string): string {
+  if (estadoMascota === 'Disponible') return 'Activa';
+  if (estadoMascota === 'Adoptado' || estadoMascota === 'Fallecido') return 'Finalizada';
+  return 'Pausada';
+}
+
+/**
+ * Histórico de estados de la publicación, derivado del de la mascota desde que se publicó:
+ * arranca con el estado que tenía la mascota ese día y sigue cada cambio posterior,
+ * salteando los que no cambian el estado del aviso (En_Tratamiento → En_Transito sigue
+ * siendo "Pausada").
+ */
+async function crearHistorialEstadosPublicacion(
+  catalogos: Catalogos,
+  publicacionId: number,
+  historialMascota: [string, number][],
+  publicadaHaceDias: number,
+) {
+  // [estado del aviso, días atrás] — el primero es el vigente al publicar.
+  const vigenteAlPublicar = historialMascota.filter(([, dias]) => dias >= publicadaHaceDias).at(-1);
+  const tramos: [string, number][] = [
+    [estadoPublicacionSegun(vigenteAlPublicar?.[0] ?? 'Disponible'), publicadaHaceDias],
+  ];
+
+  for (const [estadoMascota, dias] of historialMascota) {
+    if (dias >= publicadaHaceDias) continue;
+    const estado = estadoPublicacionSegun(estadoMascota);
+    if (estado !== tramos.at(-1)![0]) tramos.push([estado, dias]);
+  }
+
+  for (const [indice, [estado, diasAtras]] of tramos.entries()) {
+    const siguiente = tramos[indice + 1];
+
+    // Invariante del backend: una sola fila de estado activa por publicación.
+    await prisma.publicacionEstado.create({
+      data: {
+        publicacionId,
+        estadoPublicacionId: id(catalogos.estadosPublicacion, estado),
+        usuarioAlta: catalogos.sistemaId,
+        fechaAlta: haceDias(diasAtras),
+        ...(siguiente
+          ? { usuarioBaja: catalogos.sistemaId, fechaBaja: haceDias(siguiente[1]) }
+          : {}),
+      },
+    });
+  }
+}
+
 async function crearHistoriaClinica(
   usuarioAlta: number,
   mascotaId: number,
@@ -805,6 +854,12 @@ export async function seedMascotas(catalogos: Catalogos, actores: Actores): Prom
               : { usuarioBaja: duenio.id, fechaBaja: haceDias(def.publicacion.cerradaHaceDias) }),
           },
         });
+        await crearHistorialEstadosPublicacion(
+          catalogos,
+          publicacion.id,
+          def.historial,
+          def.publicacion.diasAtras,
+        );
         publicacionesNuevas += 1;
       }
     }
