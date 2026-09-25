@@ -46,3 +46,27 @@ export function parsearId(valor: unknown): number | null {
   const numero = Number(valor);
   return Number.isInteger(numero) && numero > 0 ? numero : null;
 }
+
+export type ResultadoListaIds =
+  { valido: true; valor: number[] } | { valido: false; error: string };
+
+/**
+ * Lista de ids separada por comas, como llega un filtro por query string (`?estados=1,3`).
+ * Ausente o vacía es "sin filtro" (lista vacía). Descarta repetidos y rechaza la lista
+ * entera si algún elemento no es un id válido, en vez de ignorarlo: un filtro que se aplica
+ * a medias muestra un resultado que el usuario no pidió.
+ */
+export function parsearListaDeIds(valor: unknown, etiqueta: string): ResultadoListaIds {
+  if (valor === undefined || valor === null || valor === '') return { valido: true, valor: [] };
+  if (typeof valor !== 'string') return { valido: false, error: `${etiqueta} no es válido` };
+
+  const ids: number[] = [];
+
+  for (const parte of valor.split(',')) {
+    const id = parsearId(parte.trim());
+    if (id === null) return { valido: false, error: `${etiqueta} no es válido` };
+    if (!ids.includes(id)) ids.push(id);
+  }
+
+  return { valido: true, valor: ids };
+}

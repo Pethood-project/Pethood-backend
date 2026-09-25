@@ -22,6 +22,14 @@ export function listarRazasDeEspecie(especieId: number) {
   });
 }
 
+export function listarEstadosPublicacion() {
+  return prisma.estadoPublicacion.findMany({
+    where: { fechaBaja: null },
+    select: { id: true, nombre: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
 export function listarEstadosMascota() {
   return prisma.estadoMascota.findMany({
     where: { fechaBaja: null },

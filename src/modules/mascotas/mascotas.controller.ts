@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
 import { parsearId } from '../../shared/validation/numbers';
-import { crearMascotaSchema, editarMascotaSchema } from './mascotas.dto';
+import { crearMascotaSchema, editarMascotaSchema, filtrosMisMascotasSchema } from './mascotas.dto';
 import * as service from './mascotas.service';
 
 /** Traduce el primer issue de Zod al formato de error de la API. */
@@ -76,7 +76,27 @@ export async function eliminar(req: Request, res: Response, next: NextFunction):
 
 export async function listarMias(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    res.json(await service.listarMisMascotas(req.usuario!.usuarioId, req.ambito!));
+    const resultado = filtrosMisMascotasSchema.safeParse(req.query);
+
+    if (!resultado.success) {
+      const primero = resultado.error.issues[0];
+      throw new AppError('VALIDACION', primero?.message ?? 'Filtros inválidos', 400);
+    }
+
+    res.json(await service.listarMisMascotas(req.usuario!.usuarioId, req.ambito!, resultado.data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Mascotas del perfil activo que todavía se pueden publicar en adopción. */
+export async function listarPublicables(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    res.json(await service.listarPublicables(req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }

@@ -24,6 +24,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 - **Especie** (`especie_id PK`) — ej. Perro, Gato.
 - **Raza** (`raza_id PK`, FK a `especie_id`) — depende de la especie seleccionada (el frontend debe filtrar razas dinámicamente al elegir especie).
 - **Estado_Mascota** (`estado_mascota_id PK`) — valores: Disponible, En_Tratamiento, Adoptado, Fallecido, En_Transito (ver nota de negocio).
+- **Estado_Publicacion** (`estado_publicacion_id PK`) — valores: Activa, Pausada, Finalizada. Es el estado del aviso, no el de la mascota (ver `Publicacion_Estado`). **Agregado fuera del diagrama de clases (2026-09-25)**: pendiente reflejarlo en el diagrama del grupo.
 - **Estado_Usuario** (`estado_usuario_id PK`).
 - **Estado_Refugio** (`estado_refugio_id PK`).
 - **Estado_Solicitud** (`estado_solicitud_id PK`).
@@ -94,6 +95,24 @@ Ver catálogos arriba.
 Relaciones: 1 Publicacion → N Solicitud, N Favorito (vía Mascota), 1 Publicacion → N Reseña (visibles en contexto de publicación/solicitud).
 
 Regla de negocio: máximo 5 publicaciones activas simultáneas por adoptante particular (quota anti-spam).
+
+Relaciones de estado: 1 Publicacion → N Publicacion_Estado (histórico; una sola fila vigente).
+
+### Publicacion_Estado
+
+Histórico N:1 de estados de una publicación, mismo patrón que `Mascota_Estado`. `publicacion_estado_id PK`, FK `publicacion_id FK NOT NULL`, FK `estado_publicacion_id FK NOT NULL` + auditoría (alta/baja, sin campo de modificación propio). Cambiar de estado es baja de la fila vigente + alta de una nueva, así queda el historial completo. Un índice único **parcial** (`publicacion_estado_activo_uq`, sólo en la migración) garantiza una sola fila vigente por publicación. **Agregado fuera del diagrama de clases (2026-09-25).**
+
+**Toda publicación nace con estado**, según el de su mascota en ese momento. Las transiciones hoy son **automáticas** y siguen al estado de la mascota:
+
+| Mascota | Publicación | Efecto |
+| --- | --- | --- |
+| `Disponible` | `Activa` | se ve en el feed y se puede solicitar |
+| `En_Transito`, `En_Tratamiento` | `Pausada` | sigue viva, pero fuera del feed |
+| `Adoptado`, `Fallecido` | `Finalizada` | aviso cerrado |
+
+El feed muestra sólo las publicaciones `Activa`, y la quota de 5 publicaciones activas cuenta sólo esas. Las publicaciones que existían antes de este cambio recibieron su estado con la misma regla en la migración `20260925125459_estado_publicacion`.
+
+**Previsto (con la HU de modificar publicación):** transiciones manuales — pausar, finalizar, reactivar — y eliminar (baja lógica de la publicación). Ver `DEUDA_TECNICA.md` ítem 16.
 
 ### Favorito
 
@@ -267,6 +286,10 @@ Ver catálogos.
 - Publicacion
   -> Mascota
   -> Usuario (creador)
+
+- Publicacion_Estado
+  -> Publicacion
+  -> Estado_Publicacion
 
 - Favorito
   -> Usuario

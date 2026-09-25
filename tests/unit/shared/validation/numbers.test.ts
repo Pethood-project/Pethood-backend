@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parsearDecimal, parsearId } from '../../../../src/shared/validation/numbers';
+import {
+  parsearDecimal,
+  parsearId,
+  parsearListaDeIds,
+} from '../../../../src/shared/validation/numbers';
 import { LIMITES } from '../../../../src/shared/validation/limits';
 
 const peso = { ...LIMITES.mascota.peso, etiqueta: 'El peso' };
@@ -60,5 +64,29 @@ describe('parsearId', () => {
     expect(parsearId('-1')).toBeNull();
     expect(parsearId('1.5')).toBeNull();
     expect(parsearId('abc')).toBeNull();
+  });
+});
+
+describe('parsearListaDeIds', () => {
+  it('ausente o vacía es "sin filtro"', () => {
+    expect(parsearListaDeIds(undefined, 'El estado')).toEqual({ valido: true, valor: [] });
+    expect(parsearListaDeIds('', 'El estado')).toEqual({ valido: true, valor: [] });
+  });
+
+  it('separa por comas, tolera espacios y descarta repetidos', () => {
+    expect(parsearListaDeIds('1, 3,1', 'El estado')).toEqual({ valido: true, valor: [1, 3] });
+  });
+
+  it('rechaza la lista entera si un elemento no es un id', () => {
+    for (const valor of ['1,x', '1,,3', '0', '-2', '1.5']) {
+      expect(parsearListaDeIds(valor, 'El estado')).toEqual({
+        valido: false,
+        error: 'El estado no es válido',
+      });
+    }
+  });
+
+  it('rechaza un parámetro repetido (llega como array)', () => {
+    expect(parsearListaDeIds(['1', '2'], 'El estado').valido).toBe(false);
   });
 });

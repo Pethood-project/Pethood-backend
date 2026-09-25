@@ -87,6 +87,7 @@ export interface Catalogos {
   estadosUsuario: Map<string, number>;
   estadosRefugio: Map<string, number>;
   estadosMascota: Map<string, number>;
+  estadosPublicacion: Map<string, number>;
   estadosSolicitud: Map<string, number>;
   estadosCampania: Map<string, number>;
   estadosAnimalPerdido: Map<string, number>;

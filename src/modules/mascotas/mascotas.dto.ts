@@ -10,6 +10,7 @@ import {
   decimalSchema,
   fechaPasadaSchema,
   idSchema,
+  listaDeIdsSchema,
   textoOpcionalSchema,
   textoSchema,
 } from '../../shared/validation/schemas';
@@ -86,6 +87,16 @@ export const editarMascotaSchema = z
   });
 
 export type EditarMascotaDto = z.infer<typeof editarMascotaSchema>;
+
+/**
+ * Filtro de "Mis mascotas": `?estados=1,3` (ids de `Estado_Mascota`). Sin el parámetro, o
+ * vacío, trae todas.
+ */
+export const filtrosMisMascotasSchema = z.object({
+  estados: listaDeIdsSchema('El estado de la mascota'),
+});
+
+export type FiltrosMisMascotasDto = z.infer<typeof filtrosMisMascotasSchema>;
 
 export interface MascotaCreadaDto {
   id: number;

@@ -1,8 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta } from '../../shared/auditoria';
+import { datosAlta, datosBaja } from '../../shared/auditoria';
 import { restarAnios } from '../../shared/validation/dates';
 import {
+  ESTADO_PUBLICACION,
   RASGO_COMPATIBLE_NINIOS,
   RASGO_COMPATIBLE_OTRAS_MASCOTAS,
   type FiltrosFeedDto,
@@ -20,14 +21,55 @@ export interface DatosNuevaPublicacion {
   imagenes: string[];
   mascotaId: number;
   usuarioId: number;
+  /** Estado con el que nace, en el mismo alta (una publicación nunca queda sin estado). */
+  estadoPublicacionId: number;
 }
 
 export function crear(datos: DatosNuevaPublicacion, usuarioAlta: number) {
-  const { imagenes, ...resto } = datos;
+  const { imagenes, estadoPublicacionId, ...resto } = datos;
 
   return prisma.publicacion.create({
-    // imagenUrl se mantiene con la portada, para lo que ya lee ese campo.
-    data: { ...resto, imagenes, imagenUrl: imagenes[0] ?? null, ...datosAlta(usuarioAlta) },
+    data: {
+      ...resto,
+      imagenes,
+      // imagenUrl se mantiene con la portada, para lo que ya lee ese campo.
+      imagenUrl: imagenes[0] ?? null,
+      ...datosAlta(usuarioAlta),
+      historicoEstados: { create: { estadoPublicacionId, ...datosAlta(usuarioAlta) } },
+    },
+  });
+}
+
+export function buscarEstadoPublicacionPorNombre(nombre: string) {
+  return prisma.estadoPublicacion.findFirst({ where: { nombre, fechaBaja: null } });
+}
+
+/** Filtro de "estado vigente" sobre el histórico. Ver la nota de `some` en `condicionesFeed`. */
+function conEstadoVigente(
+  estado: Prisma.EstadoPublicacionWhereInput,
+): Prisma.PublicacionEstadoListRelationFilter {
+  return { some: { fechaBaja: null, estadoPublicacion: estado } };
+}
+
+/**
+ * Cambia el estado vigente de una publicación: baja de la fila actual y alta de la nueva, en
+ * una transacción, para no romper la invariante de una sola fila vigente (que además
+ * garantiza el índice parcial `publicacion_estado_activo_uq`).
+ */
+export function cambiarEstado(
+  publicacionId: number,
+  estadoPublicacionId: number,
+  usuarioId: number,
+) {
+  return prisma.$transaction(async (tx) => {
+    await tx.publicacionEstado.updateMany({
+      where: { publicacionId, fechaBaja: null },
+      data: datosBaja(usuarioId),
+    });
+
+    await tx.publicacionEstado.create({
+      data: { publicacionId, estadoPublicacionId, ...datosAlta(usuarioId) },
+    });
   });
 }
 
@@ -46,15 +88,38 @@ export function buscarMascota(mascotaId: number) {
   });
 }
 
-/** Solo las personales: la quota anti-spam es del adoptante particular, no del refugio. */
+/**
+ * Solo las personales: la quota anti-spam es del adoptante particular, no del refugio. Y solo
+ * las que están en estado "Activa": una pausada no se ve en el feed y una finalizada ya
+ * cumplió su ciclo, así que ninguna de las dos es spam ni debería trabar una nueva.
+ */
 export function contarActivasPersonalesDeUsuario(usuarioId: number) {
   return prisma.publicacion.count({
-    where: { usuarioId, fechaBaja: null, mascota: { refugioId: null } },
+    where: {
+      usuarioId,
+      fechaBaja: null,
+      mascota: { refugioId: null },
+      historicoEstados: conEstadoVigente({ nombre: ESTADO_PUBLICACION.ACTIVA }),
+    },
   });
 }
 
+/**
+ * Publicación viva (sin baja) de una mascota, en el estado que esté: una mascota tiene a lo
+ * sumo una. Trae el estado vigente para la sincronización automática.
+ */
 export function buscarActivaDeMascota(mascotaId: number) {
-  return prisma.publicacion.findFirst({ where: { mascotaId, fechaBaja: null } });
+  return prisma.publicacion.findFirst({
+    where: { mascotaId, fechaBaja: null },
+    include: {
+      historicoEstados: {
+        where: { fechaBaja: null },
+        include: { estadoPublicacion: true },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+    },
+  });
 }
 
 export function buscarUsuario(usuarioId: number) {
@@ -70,6 +135,12 @@ const ESTADO_VISIBLE_EN_FEED = 'Disponible';
 
 /** Todo lo que hace falta para pintar la tarjeta y la ficha completa. */
 const RELACIONES_FEED = {
+  historicoEstados: {
+    where: { fechaBaja: null },
+    include: { estadoPublicacion: true },
+    orderBy: { fechaAlta: 'desc' },
+    take: 1,
+  },
   mascota: {
     include: {
       raza: { include: { especie: true } },
@@ -141,7 +212,14 @@ function condicionesFeed(
     mascota.fechaNacimiento = nacimiento;
   }
 
-  const where: Prisma.PublicacionWhereInput = { fechaBaja: null, mascota };
+  // Solo los avisos en estado "Activa". El filtro de la mascota "Disponible" se mantiene
+  // igual: hoy van juntos (la publicación sigue al estado de la mascota), pero el día que se
+  // pueda pausar a mano una publicación de una mascota disponible, lo que manda es el aviso.
+  const where: Prisma.PublicacionWhereInput = {
+    fechaBaja: null,
+    mascota,
+    historicoEstados: conEstadoVigente({ nombre: ESTADO_PUBLICACION.ACTIVA }),
+  };
   const rasgos: string[] = [];
 
   if (filtros.compatibleNinios) rasgos.push(RASGO_COMPATIBLE_NINIOS);
@@ -187,6 +265,35 @@ export function buscarActivaPorId(publicacionId: number) {
   return prisma.publicacion.findFirst({
     where: { id: publicacionId, fechaBaja: null, mascota: { fechaBaja: null } },
     include: RELACIONES_FEED,
+  });
+}
+
+/**
+ * Publicaciones vivas de un perfil ("Mis publicaciones"), la más nueva primero, en el estado
+ * que estén (o solo en los de `estadoIds`, si se eligió alguno). Mismo
+ * criterio de pertenencia que `mascotas.listarPorAmbito`:
+ * - personales: las de mascotas que el usuario cargó a título propio (`refugioId` nulo).
+ * - del refugio: las de cualquier mascota del refugio, la haya publicado quien la haya
+ *   publicado. Por eso no lleva `usuarioId`.
+ */
+export function listarDeAmbito(
+  ambito: { usuarioId: number } | { refugioId: number },
+  estadoIds: number[] = [],
+) {
+  const mascota: Prisma.MascotaWhereInput =
+    'refugioId' in ambito
+      ? { refugioId: ambito.refugioId, fechaBaja: null }
+      : { usuarioId: ambito.usuarioId, refugioId: null, fechaBaja: null };
+
+  const where: Prisma.PublicacionWhereInput = { fechaBaja: null, mascota };
+
+  // Sin estados elegidos no se filtra: es "ver todas".
+  if (estadoIds.length > 0) where.historicoEstados = conEstadoVigente({ id: { in: estadoIds } });
+
+  return prisma.publicacion.findMany({
+    where,
+    include: RELACIONES_FEED,
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
   });
 }
 

@@ -9,6 +9,7 @@ import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoSchema,
   idSchema,
+  listaDeValoresSchema,
   textoOpcionalSchema,
   textoSchema,
 } from '../../shared/validation/schemas';
@@ -173,7 +174,13 @@ function fechaFiltroSchema(campo: 'fechaDesde' | 'fechaHasta') {
 
 export const filtrosRecibidasSchema = z
   .object({
+    /** Un solo estado. Se mantiene por compatibilidad; la app manda `estados`. */
     estado: z.enum(NOMBRES_ESTADO_SOLICITUD).optional(),
+    /**
+     * Uno o más estados separados por coma (`?estados=Pendiente,En_Revision`): trae las
+     * solicitudes que están en cualquiera de ellos. Se suma a `estado` si llegan los dos.
+     */
+    estados: listaDeValoresSchema(NOMBRES_ESTADO_SOLICITUD, 'El estado'),
     /** Filtran por `fechaAlta`, inclusive en las dos puntas. */
     fechaDesde: fechaFiltroSchema('fechaDesde'),
     fechaHasta: fechaFiltroSchema('fechaHasta'),

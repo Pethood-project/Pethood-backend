@@ -42,6 +42,8 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 12 | En el frontend, `fotos` nombra algo que puede ser un video | Baja | frontend |
 | 13 | El socket de chat no conoce el perfil activo (switch refugio/adoptante) | Baja | ambos |
 | 14 | Al activar R2, los archivos privados vuelven a quedar públicos | **Alta** | backend |
+| 15 | Nada llama a la sincronización del estado de la publicación: la mascota no cambia de estado | Baja | backend |
+| 16 | «Mis publicaciones» no permite editar ni dar de baja una publicación | Baja | ambos |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -354,3 +356,47 @@ gatillo — el día que alguien active R2 para resolver el ítem 3, reabre el í
 misma ventana de 6 h para no perder el cacheo.
 
 **Orden sugerido: este ítem ANTES que activar R2**, no después.
+
+---
+
+## 15. Nada llama a la sincronización del estado de la publicación — Baja
+
+**Qué pasa.** La publicación tiene estado propio (`Estado_Publicacion` + `Publicacion_Estado`,
+ver `MODELO_DATOS.md`), y sus transiciones son automáticas: siguen al estado de la mascota
+(`Disponible` → Activa, `En_Transito`/`En_Tratamiento` → Pausada, `Adoptado`/`Fallecido` →
+Finalizada). Esa regla corre al **crear** la publicación, pero después nada la vuelve a
+aplicar: hoy ninguna pantalla ni endpoint cambia el estado de una mascota después del alta
+(HU-6.2 lo deja afuera a propósito, y aprobar una solicitud tampoco lo toca).
+
+`sincronizarConEstadoMascota` (en `publicaciones.service.ts`) ya está escrita y testeada, pero
+no tiene quién la llame.
+
+**Cómo se arregla.** Quien implemente el cambio de estado de una mascota (una HU nueva, o
+marcarla `Adoptado` al cerrar una adopción) llama a `sincronizarConEstadoMascota` después de
+persistir el estado nuevo. Cuando existan las transiciones manuales (ítem 16), definir qué
+gana: por ejemplo, una publicación pausada a mano no debería reactivarse sola porque la
+mascota volvió a `Disponible`.
+
+**Relacionado:** `POST /solicitudes` sigue validando el estado de la **mascota**
+(`Disponible`), no el de la publicación. Hoy es equivalente; con la pausa manual deja de serlo
+y hay que exigir también publicación `Activa`.
+
+---
+
+## 16. «Mis publicaciones» no permite editar ni dar de baja — Baja
+
+**Qué pasa.** La pantalla lista y abre las publicaciones del perfil activo, pero no las edita:
+no hay HU de edición de publicación (Módulo 6 sólo tiene HU-6.2 *Editar mascota*). La única
+forma de sacar un aviso es eliminar la mascota (HU-6.3), que da de baja sus publicaciones en
+la misma transacción.
+
+**Decidido para esa HU:** además de editar los datos, acciones manuales de **pausar**,
+**finalizar**, **reactivar** y **eliminar** (baja lógica). Las tres primeras son cambios de
+estado con `cambiarEstado` del repository, que ya existe; reactivar tiene que volver a
+chequear la quota de 5 activas.
+
+**Cómo se arregla.** Definir la HU con el equipo (qué campos se editan, si se edita una
+publicación con solicitudes abiertas) y agregar `PATCH /publicaciones/:id` con el mismo
+criterio de ámbito que `PATCH /mascotas/:id`. En la app, el botón va en la ficha propia
+(`app/publicaciones/[id].tsx`, donde hoy se oculta el pie de «Solicitar adopción»).
+

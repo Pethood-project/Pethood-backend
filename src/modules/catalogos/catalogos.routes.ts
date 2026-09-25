@@ -11,3 +11,4 @@ export const catalogosRouter = Router();
 catalogosRouter.get('/especies', autenticar, controller.listarEspecies);
 catalogosRouter.get('/especies/:especieId/razas', autenticar, controller.listarRazasDeEspecie);
 catalogosRouter.get('/estados-mascota', autenticar, controller.listarEstadosMascota);
+catalogosRouter.get('/estados-publicacion', autenticar, controller.listarEstadosPublicacion);

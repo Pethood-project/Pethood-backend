@@ -164,12 +164,22 @@ export function existePublicacionQueUsaImagen(imagenUrl: string) {
  * - del refugio: todas las del refugio, sin importar qué miembro las cargó. Por eso no
  *   lleva `usuarioId` — si lo llevara, cada miembro vería solo las suyas.
  */
-export function listarPorAmbito(ambito: { usuarioId: number } | { refugioId: number }) {
+export function listarPorAmbito(
+  ambito: { usuarioId: number } | { refugioId: number },
+  estadoIds: number[] = [],
+) {
   const where =
     'refugioId' in ambito ? { refugioId: ambito.refugioId } : { ...ambito, refugioId: null };
 
+  // Sin estados elegidos no se filtra ("ver todas"). Se mira la fila vigente con `some`,
+  // que equivale a mirar la última mientras haya una sola vigente por mascota.
+  const porEstado =
+    estadoIds.length > 0
+      ? { historicoEstados: { some: { fechaBaja: null, estadoMascotaId: { in: estadoIds } } } }
+      : {};
+
   return prisma.mascota.findMany({
-    where: { ...where, fechaBaja: null },
+    where: { ...where, ...porEstado, fechaBaja: null },
     include: {
       raza: { include: { especie: true } },
       historicoEstados: {
@@ -178,6 +188,8 @@ export function listarPorAmbito(ambito: { usuarioId: number } | { refugioId: num
         orderBy: { fechaAlta: 'desc' },
         take: 1,
       },
+      // Solo para saber si ya está publicada (`listarPublicables`): con una alcanza.
+      publicaciones: { where: { fechaBaja: null }, select: { id: true }, take: 1 },
     },
     orderBy: { fechaAlta: 'desc' },
   });

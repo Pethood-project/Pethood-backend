@@ -413,8 +413,12 @@ export async function listarMias(
 function filtrarPorEstadoYFecha<
   T extends { fechaAlta: Date; historicoEstados: { estadoSolicitud: { nombre: string } }[] },
 >(solicitudes: T[], filtros: FiltrosRecibidasDto | FiltrosMiasDto): T[] {
+  // `estado` (uno) y `estados` (varios) se suman; sin ninguno, no se filtra por estado.
+  const estados: string[] = filtros.estado ? [...filtros.estados, filtros.estado] : filtros.estados;
+
   return solicitudes.filter((s) => {
-    if (filtros.estado && s.historicoEstados[0]?.estadoSolicitud.nombre !== filtros.estado) {
+    const vigente = s.historicoEstados[0]?.estadoSolicitud.nombre;
+    if (estados.length > 0 && (vigente === undefined || !estados.includes(vigente))) {
       return false;
     }
     if (filtros.fechaDesde && s.fechaAlta < filtros.fechaDesde) return false;
