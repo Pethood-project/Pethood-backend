@@ -57,8 +57,9 @@ Rutas que solo existen en un perfil (`403 AMBITO_NO_PERMITIDO`):
 | `/chats/:chatId`, `/chats/:chatId/mensajes`, `/chats/:chatId/leidos` | el perfil al que pertenece el chat |
 
 Rutas que existen en los dos perfiles pero devuelven solo lo del perfil activo:
-`GET /mascotas/mias`, `GET/PATCH/DELETE /mascotas/:id`, `POST /mascotas` (el `actor` sale del
-ámbito, no del rol), historia clínica, `POST /publicaciones`, `GET /publicaciones/:id`,
+`GET /mascotas/mias`, `GET /mascotas/publicables`, `GET/PATCH/DELETE /mascotas/:id`, `POST /mascotas` (el `actor` sale del
+ámbito, no del rol), historia clínica, `POST /publicaciones`, `GET /publicaciones/mias`,
+`GET /publicaciones/:id`,
 `GET /solicitudes/recibidas`, `GET /solicitudes/:id`, `PATCH /solicitudes/:id/estado`,
 `/seguimientos*`, `GET /chats`, `GET/PATCH /usuarios/me` (campo `mascotas`).
 

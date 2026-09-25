@@ -611,7 +611,66 @@ describe('switch refugio/adoptante — cada perfil gestiona solo lo suyo', () =>
     await service.listarMisMascotas(2, 'PERSONAL');
     await service.listarMisMascotas(2, 'REFUGIO');
 
-    expect(repo.listarPorAmbito).toHaveBeenNthCalledWith(1, { usuarioId: 2 });
-    expect(repo.listarPorAmbito).toHaveBeenNthCalledWith(2, { refugioId: 1 });
+    expect(repo.listarPorAmbito).toHaveBeenNthCalledWith(1, { usuarioId: 2 }, []);
+    expect(repo.listarPorAmbito).toHaveBeenNthCalledWith(2, { refugioId: 1 }, []);
+  });
+
+  it('el filtro por estado llega al repository con todos los estados elegidos', async () => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([] as never);
+
+    await service.listarMisMascotas(2, 'REFUGIO', { estados: [1, 5] });
+
+    expect(repo.listarPorAmbito).toHaveBeenCalledWith({ refugioId: 1 }, [1, 5]);
+  });
+});
+
+describe('listarPublicables — selector de "Nueva publicación"', () => {
+  /** Fila de `listarPorAmbito`: mascota con estado vigente y sus publicaciones vivas. */
+  function fila(
+    id: number,
+    estado: { id: number; nombre: string },
+    { usuarioId = 2, publicada = false, refugioId = null as number | null } = {},
+  ) {
+    return {
+      ...mascotaCreada(estado, refugioId),
+      id,
+      usuarioId,
+      publicaciones: publicada ? [{ id: 99 }] : [],
+    };
+  }
+
+  it('solo ofrece las que habilitan publicar y todavía no tienen publicación viva', async () => {
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([
+      fila(1, ESTADOS.Disponible),
+      fila(2, ESTADOS.En_Transito),
+      fila(3, ESTADOS.Disponible, { publicada: true }),
+      fila(4, ESTADOS.En_Tratamiento),
+      fila(5, ESTADOS.Adoptado),
+    ] as never);
+
+    const publicables = await service.listarPublicables(2, 'PERSONAL');
+
+    expect(publicables.map((mascota) => mascota.id)).toEqual([1, 2]);
+    expect(repo.listarPorAmbito).toHaveBeenCalledWith({ usuarioId: 2 }, []);
+  });
+
+  it('en la vista de refugio no ofrece las que cargó otro miembro: el alta las rechazaría', async () => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([
+      fila(1, ESTADOS.Disponible, { refugioId: 1 }),
+      fila(2, ESTADOS.Disponible, { refugioId: 1, usuarioId: 8 }),
+    ] as never);
+
+    const publicables = await service.listarPublicables(2, 'REFUGIO');
+
+    expect(publicables.map((mascota) => mascota.id)).toEqual([1]);
+    expect(repo.listarPorAmbito).toHaveBeenCalledWith({ refugioId: 1 }, []);
+  });
+
+  it('sin mascotas publicables devuelve una lista vacía, no un error', async () => {
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([] as never);
+
+    await expect(service.listarPublicables(2, 'PERSONAL')).resolves.toEqual([]);
   });
 });

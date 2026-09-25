@@ -6,8 +6,8 @@
  */
 import { z } from 'zod';
 import { validarFechaFutura, validarFechaPasada } from './dates';
-import { parsearDecimal } from './numbers';
-import { validarTexto, type OpcionesTexto } from './text';
+import { parsearDecimal, parsearListaDeIds } from './numbers';
+import { parsearListaDeValores, validarTexto, type OpcionesTexto } from './text';
 
 export function textoSchema(opciones: Omit<OpcionesTexto, 'obligatorio'>) {
   return z.unknown().transform((valor, ctx) => {
@@ -146,6 +146,40 @@ export function idSchema(etiqueta: string) {
     .number({ required_error: `${etiqueta} es obligatorio` })
     .int(`${etiqueta} no es válido`)
     .positive(`${etiqueta} no es válido`);
+}
+
+/**
+ * Lista de ids separada por comas en la query string (`?estados=1,3`). Ausente → `[]`, que
+ * el servicio interpreta como "sin filtro".
+ */
+export function listaDeIdsSchema(etiqueta: string) {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = parsearListaDeIds(valor, etiqueta);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
+  });
+}
+
+/**
+ * Lista separada por comas de valores de un catálogo cerrado (`?estados=Pendiente,Aprobada`).
+ * Ausente → `[]`, que el servicio interpreta como "sin filtro".
+ */
+export function listaDeValoresSchema<T extends string>(permitidos: readonly T[], etiqueta: string) {
+  return z.unknown().transform((valor, ctx): T[] => {
+    const resultado = parsearListaDeValores(valor, permitidos, etiqueta);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
+  });
 }
 
 /** Entero dentro de un rango (ej. el orden de una FAQ). Coerciona: llega como string en query/form. */

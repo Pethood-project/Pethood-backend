@@ -166,6 +166,7 @@ describe('listarRecibidas', () => {
     ] as never);
 
     const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
+      estados: [],
       limite: 20,
       desplazamiento: 0,
     });
@@ -194,6 +195,7 @@ describe('listarRecibidas', () => {
 
     const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
       estado: 'Pendiente',
+      estados: [],
       limite: 20,
       desplazamiento: 0,
     });
@@ -201,6 +203,27 @@ describe('listarRecibidas', () => {
     expect(total).toBe(1);
     expect(solicitudes).toHaveLength(1);
     expect(solicitudes[0]!.estado.nombre).toBe('Pendiente');
+  });
+
+  it('filtra por varios estados a la vez (cualquiera de ellos)', async () => {
+    vi.mocked(repo.listarDelActor).mockResolvedValue([
+      solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }] }),
+      solicitudConDetalle({
+        historial: [{ estado: estado(2, 'En_Revision'), fecha: FECHA_RESPUESTA }],
+      }),
+      solicitudConDetalle({
+        historial: [{ estado: estado(3, 'Aprobada'), fecha: FECHA_RESPUESTA }],
+      }),
+    ] as never);
+
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
+      estados: ['Pendiente', 'En_Revision'],
+      limite: 20,
+      desplazamiento: 0,
+    });
+
+    expect(total).toBe(2);
+    expect(solicitudes.map((s) => s.estado.nombre)).toEqual(['Pendiente', 'En_Revision']);
   });
 
   it('pagina con limite/desplazamiento sobre el total filtrado', async () => {
@@ -211,6 +234,7 @@ describe('listarRecibidas', () => {
     );
 
     const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
+      estados: [],
       limite: 1,
       desplazamiento: 1,
     });

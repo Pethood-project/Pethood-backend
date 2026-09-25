@@ -12,6 +12,7 @@ import type {
   CrearMascotaDto,
   EditarMascotaDto,
   FichaMascotaDto,
+  FiltrosMisMascotasDto,
   MascotaCreadaDto,
 } from './mascotas.dto';
 import * as repo from './mascotas.repository';
@@ -371,7 +372,37 @@ export async function obtenerMascota(
 export async function listarMisMascotas(
   usuarioId: number,
   ambito: Ambito,
+  filtros: FiltrosMisMascotasDto = { estados: [] },
 ): Promise<MascotaCreadaDto[]> {
+  const mascotas = await listarDelAmbito(usuarioId, ambito, filtros.estados);
+  return mascotas.map((mascota) => aDto(mascota as MascotaConRelaciones));
+}
+
+/**
+ * Mascotas que se pueden elegir en "Nueva publicación": del perfil activo, con un estado que
+ * habilita publicar y sin una publicación viva. Además tienen que haber sido cargadas por
+ * quien consulta, porque `crearPublicacion` lo exige — así el selector no ofrece nada que el
+ * alta después rechace.
+ *
+ * Vacía es un caso de negocio, no un error: la app manda a cargar la mascota primero.
+ */
+export async function listarPublicables(
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<MascotaCreadaDto[]> {
+  const mascotas = await listarDelAmbito(usuarioId, ambito);
+
+  return mascotas
+    .filter((mascota) => mascota.usuarioId === usuarioId && mascota.publicaciones.length === 0)
+    .map((mascota) => aDto(mascota as MascotaConRelaciones))
+    .filter((mascota) => mascota.habilitaPublicacion);
+}
+
+/**
+ * Mascotas activas del perfil con el que se consulta, con estado vigente. Un miembro de
+ * refugio tiene dos conjuntos separados y el switch decide cuál ve (ver `shared/ambito.ts`).
+ */
+async function listarDelAmbito(usuarioId: number, ambito: Ambito, estadoIds: number[] = []) {
   let filtro: { usuarioId: number } | { refugioId: number } = { usuarioId };
 
   if (ambito === 'REFUGIO') {
@@ -387,9 +418,6 @@ export async function listarMisMascotas(
     filtro = { refugioId: usuario.refugioId };
   }
 
-  const mascotas = await repo.listarPorAmbito(filtro);
-
-  return mascotas
-    .filter((mascota) => mascota.historicoEstados.length > 0)
-    .map((mascota) => aDto(mascota as MascotaConRelaciones));
+  const mascotas = await repo.listarPorAmbito(filtro, estadoIds);
+  return mascotas.filter((mascota) => mascota.historicoEstados.length > 0);
 }
