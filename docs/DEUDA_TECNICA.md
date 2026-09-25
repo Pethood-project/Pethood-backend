@@ -45,6 +45,11 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 15 | Nada llama a la sincronización del estado de la publicación: la mascota no cambia de estado | Baja | backend |
 | 16 | «Mis publicaciones» no permite editar ni dar de baja una publicación | Baja | ambos |
 
+> **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
+> `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
+> hasta que entre el PR, el resto del equipo sigue con los archivos sin firmar. Borrar este
+> párrafo cuando se mergee.
+
 ---
 
 ## 1. Los archivos subidos se sirven sin autenticación — ✅ **CERRADA**
@@ -306,6 +311,18 @@ una sala del otro perfil no se llega porque el historial (`GET /chats/:id/mensaj
 **Cómo se arregla.** Mandar el ámbito en el `auth` del handshake y reconectar el socket al
 cambiar de vista; `autenticarSocket` lo resuelve con el mismo `resolverAmbito` y
 `chat:unirse` aplica `exigirChatDelAmbito`.
+
+**Cuidado: el arreglo no entra solo.** `adquirirSocket(token)`
+(`apps/mobile/lib/socketChat.ts`) abre con `if (!socket)`, así que **reusa la conexión
+abierta e ignora los parámetros nuevos**. Mandar el ámbito en el `auth` no alcanza: el
+segundo llamado, el de después del switch, devuelve el socket viejo con el handshake viejo y
+no vuelve a conectarse.
+
+Hoy eso no rompe nada —el único cambio de credencial es `cerrarSesion`, que llama a
+`cerrarSocket()` a propósito, y la app no tiene refresh de token— pero el ámbito **sí**
+cambia sin pasar por ahí. Por eso no se anota como ítem aparte: es la primera línea del
+arreglo de éste. El handshake tiene que rehacerse cuando cambia el ámbito, comparándolo
+contra el del socket ya conectado.
 
 ---
 
