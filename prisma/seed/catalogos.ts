@@ -80,54 +80,85 @@ async function seedTiposSolicitud(usuarioAlta: number) {
   }
 }
 
+/** Primer pedido automático de todo seguimiento, siempre el mismo (spec 011 §6.3). */
+export const PREGUNTA_INICIAL_SEGUIMIENTO = '¿Qué tal estuvo la primera noche en casa?';
+
+/**
+ * Catálogo del que se sortea el resto de los pedidos (spec 011, HU-9.2). Aplica igual a
+ * adopción y a tránsito: ninguna pregunta es exclusiva de un flujo.
+ */
+const PREGUNTAS_SEGUIMIENTO = [
+  '¿Está comiendo bien y con qué frecuencia?',
+  '¿Ha tenido cambios de peso notorios o problemas estomacales?',
+  '¿Toma suficiente agua a lo largo del día?',
+  '¿Tiene el plato de comida en un lugar tranquilo y fácil de acceder?',
+  '¿Cómo se ha comportado durante sus visitas al veterinario?',
+  '¿Cómo se lleva con otros animales en el hogar o durante los paseos?',
+  '¿Cómo reacciona ante la presencia de desconocidos o visitas?',
+  '¿Ha mostrado convivencia o interés por niños en la casa?',
+  '¿Han notado algún comportamiento tímido, temeroso o reactivo?',
+  '¿Está rompiendo muebles, ropa, zapatos u otros objetos en casa?',
+  '¿Hace sus necesidades en el lugar correcto o han tenido accidentes?',
+  '¿Cómo reacciona cuando se le imponen límites o reglas básicas?',
+  '¿Qué tal responde al entrenamiento o a los comandos que le enseñan?',
+  '¿Ladra, maúlla o se vocaliza mucho cuando se queda solo?',
+  '¿Sufre o muestra señales de ansiedad por separación al salir ustedes?',
+  '¿Tiene juguetes adecuados para entretenerse y morder o rascar?',
+  '¿Sale a pasear con regularidad y a qué horas del día?',
+  '¿Cómo camina con la correa durante los paseos?',
+  '¿Cuenta con una placa de identificación puesta en su collar todo el tiempo?',
+  '¿Tiene acceso a un espacio seguro, limpio y resguardado para dormir?',
+  '¿Es un espacio 100% seguro a prueba de escapes (patio cerrado, mallas)?',
+  '¿Qué actividades de juego o estimulación mental hacen a diario?',
+  '¿Disfruta del contacto físico y los mimos de la familia?',
+  '¿Tiene acceso permitido a la mayoría de las áreas comunes de la casa?',
+  '¿Se ajustó bien la rutina diaria del hogar a las necesidades del animal?',
+];
+
 /**
  * Preguntas del seguimiento post-adopción (spec 011, HU-9.2). `esAdopcion` separa los dos
- * flujos; `posicion` es solo el orden del catálogo, el sistema sortea una por pedido.
+ * flujos; `posicion` es solo el orden del catálogo (la inicial va en 0), el sistema sortea
+ * una por pedido. Solo toca el catálogo (`solicitudId` null): las preguntas que escribe un
+ * refugio para una solicitud puntual no son del seed.
+ *
+ * Es idempotente y además da de baja lógica las preguntas de catálogos anteriores que ya no
+ * están en la lista, para que dejen de sortearse. Los pedidos viejos que las usaron las
+ * siguen mostrando: la baja no rompe la FK.
  */
 async function seedPreguntasSeguimiento(usuarioAlta: number) {
-  const adopcion = [
-    '¿Está comiendo bien? ¿Cambió algo en su alimentación?',
-    '¿Cuánto está pesando?',
-    '¿Cuántos días a la semana sale a pasear?',
-    '¿Se está portando bien en casa?',
-    '¿Se está acostumbrando al entorno y a la familia?',
-    '¿Dónde y cómo está durmiendo?',
-    '¿Cómo se lleva con otras mascotas?',
-    '¿Cómo reacciona con las visitas y con los chicos?',
-    '¿Tuvo alguna consulta veterinaria en este tiempo?',
-    '¿Está al día con las vacunas y la desparasitación?',
-    '¿Está activo y con ganas de jugar?',
-    '¿Notaste algún cambio de conducta que te preocupe?',
+  const catalogo = [
+    { texto: PREGUNTA_INICIAL_SEGUIMIENTO, esInicial: true },
+    ...PREGUNTAS_SEGUIMIENTO.map((texto) => ({ texto, esInicial: false })),
   ];
 
-  const transito = [
-    '¿Está comiendo bien durante el tránsito?',
-    '¿Cuánto está pesando?',
-    '¿Cómo se está adaptando al hogar de tránsito?',
-    '¿Cuántos días a la semana sale a pasear?',
-    '¿Cómo se lleva con las otras mascotas de la casa?',
-    '¿Está durmiendo tranquilo durante la noche?',
-    '¿Tuvo alguna urgencia o consulta veterinaria?',
-    '¿Sigue con la medicación o el tratamiento indicado?',
-    '¿Se muestra sociable con las personas que lo visitan?',
-    '¿Notaste algún cambio de conducta desde la última actualización?',
-  ];
-
-  const sembrar = async (textos: string[], esAdopcion: boolean) => {
-    for (const [indice, texto] of textos.entries()) {
+  for (const esAdopcion of [true, false]) {
+    for (const [posicion, { texto, esInicial }] of catalogo.entries()) {
       const existente = await prisma.preguntaSeguimiento.findFirst({
-        where: { texto, esAdopcion },
+        where: { texto, esAdopcion, solicitudId: null },
       });
-      if (existente) continue;
+
+      if (existente) {
+        await prisma.preguntaSeguimiento.update({
+          where: { id: existente.id },
+          data: { posicion, esInicial, usuarioBaja: null, fechaBaja: null },
+        });
+        continue;
+      }
 
       await prisma.preguntaSeguimiento.create({
-        data: { texto, posicion: indice + 1, esAdopcion, usuarioAlta },
+        data: { texto, posicion, esAdopcion, esInicial, usuarioAlta },
       });
     }
-  };
+  }
 
-  await sembrar(adopcion, true);
-  await sembrar(transito, false);
+  await prisma.preguntaSeguimiento.updateMany({
+    where: {
+      solicitudId: null,
+      fechaBaja: null,
+      texto: { notIn: catalogo.map((pregunta) => pregunta.texto) },
+    },
+    data: { usuarioBaja: usuarioAlta, fechaBaja: new Date() },
+  });
 }
 
 async function seedEspeciesYRazas(usuarioAlta: number) {

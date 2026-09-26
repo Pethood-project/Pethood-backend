@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
 import { parsearId } from '../../shared/validation/numbers';
-import { subirActualizacionSchema } from './seguimiento.dto';
+import { enviarPreguntaSchema, subirActualizacionSchema } from './seguimiento.dto';
 import * as service from './seguimiento.service';
 
 /** Traduce el primer issue de Zod al formato de error de la API. */
@@ -92,6 +92,47 @@ export async function subirActualizacion(
     );
 
     res.status(201).json(resultado);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Spec 011 §6.11. El refugio le manda una pregunta propia al adoptante. */
+export async function enviarPregunta(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const solicitudId = idDeParametro(req.params.solicitudId, 'de la solicitud');
+
+    const resultado = await service.enviarPregunta(
+      solicitudId,
+      parsearOFallar(enviarPreguntaSchema, req.body),
+      { usuarioId: req.usuario!.usuarioId, ambito: req.ambito! },
+    );
+
+    res.status(201).json(resultado);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Spec 011 §6.11. Descarta la pregunta que el refugio dejó para el próximo pedido. */
+export async function cancelarPreguntaProgramada(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const solicitudId = idDeParametro(req.params.solicitudId, 'de la solicitud');
+
+    res.json(
+      await service.cancelarPreguntaProgramada(solicitudId, {
+        usuarioId: req.usuario!.usuarioId,
+        ambito: req.ambito!,
+      }),
+    );
   } catch (err) {
     next(err);
   }

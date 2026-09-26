@@ -8,7 +8,9 @@ import type {
   ActualizacionCargadaDto,
   ActualizacionSeguimientoDto,
   DetalleSeguimientoDto,
+  EnviarPreguntaDto,
   EstadoSeguimiento,
+  PreguntaEnviadaDto,
   RolSeguimiento,
   SeguimientoItemDto,
   SolicitudEnSeguimientoDto,
@@ -21,6 +23,7 @@ import {
   elegirPregunta,
   pedidosExigiblesA,
   plazoDeRespuesta,
+  preguntasNoRepetibles,
   proximoAviso,
   type TipoFlujo,
 } from './seguimiento.secuencia';
@@ -39,6 +42,13 @@ const MENSAJE_NO_ENVIADO = 'Actualización de seguimiento no enviado';
  */
 const MENSAJE_SIN_CARGAR_A_TIEMPO = 'Aún no se sube actualización de este seguimiento';
 const MENSAJE_SIN_CARGAR_VENCIDO = 'No se subió actualización de seguimiento';
+
+/** Preguntas propias del refugio (spec 011 §6.11). */
+const TIPO_NOTIFICACION_PREGUNTA_REFUGIO = 'SEGUIMIENTO_PREGUNTA_REFUGIO';
+const MENSAJE_PREGUNTA_REFUGIO = 'El refugio te hizo una nueva pregunta de seguimiento';
+const MENSAJE_PREGUNTA_ENVIADA = 'Pregunta enviada. Tiene 48 horas para responderla.';
+const MENSAJE_PREGUNTA_PROGRAMADA =
+  'Hay una pregunta esperando respuesta: la tuya va a llegar en el próximo pedido.';
 
 export interface Contexto {
   usuarioId: number;
@@ -133,7 +143,10 @@ async function sincronizarSolicitud(
 
   const existentes = solicitud.seguimientos;
   const creados = await crearPedidosFaltantes(solicitud, flujo, aprobacion, ahora, existentes);
-  const seguimientos = [...existentes, ...creados];
+  // Los manuales se intercalan con los automáticos: el orden real es el cronológico.
+  const seguimientos = [...existentes, ...creados].sort(
+    (a, b) => a.fechaAlta.getTime() - b.fechaAlta.getTime() || a.id - b.id,
+  );
 
   await avisarVencidos(solicitud, seguimientos, ahora);
 
@@ -141,9 +154,15 @@ async function sincronizarSolicitud(
 }
 
 /**
- * Crea las filas de los pedidos que ya tendrían que existir y todavía no están. Se comparan
- * por CANTIDAD y no por fecha: los pedidos se generan siempre en orden, así que los que
- * faltan son los del final de la secuencia.
+ * Crea las filas de los pedidos automáticos que ya tendrían que existir y todavía no están.
+ * Se comparan por CANTIDAD y no por fecha: los pedidos se generan siempre en orden, así que
+ * los que faltan son los del final de la secuencia. Los pedidos manuales del refugio no
+ * cuentan: no ocupan un lugar en la secuencia de días.
+ *
+ * Qué pregunta lleva cada pedido (spec 011 §6.3):
+ * 1. El primero de la secuencia, siempre la pregunta inicial del catálogo.
+ * 2. Si el refugio dejó una pregunta programada, esa reemplaza a la aleatoria del siguiente.
+ * 3. Si no, una al azar del catálogo, sin repetir las respondidas ni las que están activas.
  */
 async function crearPedidosFaltantes(
   solicitud: SolicitudEnSeguimiento,
@@ -152,38 +171,64 @@ async function crearPedidosFaltantes(
   ahora: Date,
   existentes: SeguimientoConPregunta[],
 ): Promise<SeguimientoConPregunta[]> {
-  const exigibles = pedidosExigiblesA(aprobacion, flujo, ahora);
-  const faltantes = exigibles.slice(existentes.length);
+  const cantidadAutomaticos = existentes.filter((seguimiento) => !seguimiento.esManual).length;
+  const faltantes = pedidosExigiblesA(aprobacion, flujo, ahora).slice(cantidadAutomaticos);
 
   if (faltantes.length === 0) return [];
 
-  const preguntas = await repo.listarPreguntas(flujo === 'Adopcion');
+  const catalogo = await repo.listarPreguntas(flujo === 'Adopcion');
+  const inicial = catalogo.find((pregunta) => pregunta.esInicial) ?? null;
+  const sorteables = catalogo.filter((pregunta) => !pregunta.esInicial);
+  let programada: { id: number } | null = solicitud.preguntasSeguimiento[0] ?? null;
+  const noRepetibles = preguntasNoRepetibles(existentes, ahora);
 
-  if (preguntas.length === 0) {
-    // Sin catálogo no se puede armar el pedido. Se deja constancia y se sigue: es preferible
-    // que la pantalla muestre lo que ya hay a que reviente el listado entero (spec 011 §8).
-    console.warn(
-      `[seguimiento] no hay preguntas cargadas para el flujo ${flujo}: ` +
-        `la solicitud ${solicitud.id} queda sin pedidos nuevos`,
-    );
-    return [];
-  }
+  const nuevos: repo.DatosNuevoPedido[] = [];
 
-  const idsUsados = existentes.map((seguimiento) => seguimiento.preguntaSeguimientoId);
-  const nuevos = faltantes.map((pedido) => {
-    const pregunta = elegirPregunta(preguntas, idsUsados)!;
-    idsUsados.push(pregunta.id);
+  for (const pedido of faltantes) {
+    const esPrimero = cantidadAutomaticos + nuevos.length === 0;
+    let pregunta: { id: number } | null;
 
-    return {
+    if (esPrimero && inicial) {
+      pregunta = inicial;
+    } else if (programada) {
+      pregunta = programada;
+      programada = null;
+    } else {
+      pregunta = elegirPregunta(sorteables, noRepetibles);
+    }
+
+    if (pregunta === null) {
+      // Sin catálogo no se puede armar el pedido. Se deja constancia y se sigue: es preferible
+      // que la pantalla muestre lo que ya hay a que reviente el listado entero (spec 011 §8).
+      // Se corta y no se saltea: los que faltan se crean cuando vuelva a haber preguntas.
+      console.warn(
+        `[seguimiento] no hay preguntas cargadas para el flujo ${flujo}: ` +
+          `la solicitud ${solicitud.id} queda sin pedidos nuevos`,
+      );
+      break;
+    }
+
+    const plazo = plazoDeRespuesta(pedido.fecha);
+    // Uno que nace ya vencido no bloquea la pregunta: puede volver a salir.
+    if (plazo.getTime() > ahora.getTime()) noRepetibles.push(pregunta.id);
+
+    nuevos.push({
       solicitudId: solicitud.id,
       preguntaSeguimientoId: pregunta.id,
       fechaPedido: pedido.fecha,
-      plazo: plazoDeRespuesta(pedido.fecha),
-    };
-  });
+      plazo,
+    });
+  }
+
+  if (nuevos.length === 0) return [];
 
   // El autor del alta es SISTEMA: el pedido lo genera el sistema, no una persona.
-  return repo.crearPedidos(nuevos, USUARIO_SISTEMA_ID);
+  const creados = await repo.crearPedidos(nuevos, USUARIO_SISTEMA_ID);
+
+  // Se refleja en memoria: la programada ya la usó un pedido, deja de estar esperando.
+  if (programada === null) solicitud.preguntasSeguimiento = [];
+
+  return creados;
 }
 
 /**
@@ -244,6 +289,7 @@ function aItem(
     id: seguimiento.id,
     numero: indice + 1,
     pregunta: seguimiento.preguntaSeguimiento.texto,
+    esManual: seguimiento.esManual,
     estado,
     descripcion: seguimiento.descripcion,
     // Prueba de vida: privada, la URL sale firmada y vence.
@@ -312,9 +358,55 @@ function aResumen(contexto: Contexto1Solicitud): SolicitudEnSeguimientoDto {
   };
 }
 
+/** Quien entregó la mascota como refugio (no un adoptante que publicó la suya). */
+function esRefugioDeLaSolicitud(solicitud: SolicitudEnSeguimiento, rol: RolSeguimiento): boolean {
+  return rol === 'PUBLICADOR' && solicitud.publicacion.mascota.refugioId !== null;
+}
+
+/**
+ * Por qué el usuario no puede mandarle una pregunta propia al adoptante, o null si puede.
+ * Lo usan tanto el flag del detalle como el endpoint, para que digan siempre lo mismo.
+ */
+function motivoParaNoEnviarPregunta(
+  { solicitud, rol, seguimientos }: Contexto1Solicitud,
+  finalizado: boolean,
+): AppError | null {
+  if (!esRefugioDeLaSolicitud(solicitud, rol)) {
+    return new AppError(
+      'NO_AUTORIZADO',
+      'Solo el refugio que entregó la mascota puede enviar preguntas de seguimiento',
+      403,
+    );
+  }
+
+  if (finalizado) {
+    return new AppError(
+      'SEGUIMIENTO_FINALIZADO',
+      'El seguimiento terminó: ya no se pueden enviar preguntas',
+      409,
+    );
+  }
+
+  // La primera pregunta es siempre la de la primera noche (spec 011 §6.3): hasta que no
+  // llegue ese pedido, el refugio no puede adelantarse con una propia.
+  if (!seguimientos.some((seguimiento) => !seguimiento.esManual)) {
+    return new AppError(
+      'SEGUIMIENTO_SIN_INICIAR',
+      'Vas a poder enviar preguntas después de que llegue la primera actualización',
+      409,
+    );
+  }
+
+  return null;
+}
+
 function aDetalle(contexto: Contexto1Solicitud): DetalleSeguimientoDto {
   const { items, proximoAviso: siguiente, finalizado, mascota, adoptante } = datosComunes(contexto);
   const hayPendiente = items.some((item) => item.estado === 'PENDIENTE');
+  // Solo la ve quien la escribió: al adoptante le llega recién con su pedido.
+  const programada = esRefugioDeLaSolicitud(contexto.solicitud, contexto.rol)
+    ? (contexto.solicitud.preguntasSeguimiento[0] ?? null)
+    : null;
 
   return {
     solicitudId: contexto.solicitud.id,
@@ -322,6 +414,14 @@ function aDetalle(contexto: Contexto1Solicitud): DetalleSeguimientoDto {
     rol: contexto.rol,
     // Solo el adoptante sube actualizaciones, y solo si hay un pedido esperando respuesta.
     puedeSubirActualizacion: contexto.rol === 'ADOPTANTE' && hayPendiente,
+    puedeEnviarPregunta: motivoParaNoEnviarPregunta(contexto, finalizado) === null,
+    preguntaProgramada: programada
+      ? {
+          id: programada.id,
+          texto: programada.texto,
+          fechaAlta: programada.fechaAlta.toISOString(),
+        }
+      : null,
     mascota,
     adoptante,
     proximoAviso: siguiente,
@@ -396,6 +496,126 @@ export async function obtenerSeguimientosDeSolicitud(
   const seguimientos = await sincronizarSolicitud(solicitud, ahora);
 
   return aDetalle({ solicitud, rol, seguimientos, ahora });
+}
+
+/**
+ * El refugio le escribe una pregunta propia al adoptante (spec 011 §6.11).
+ *
+ * - Si no hay ninguna pregunta esperando respuesta, se manda YA como un pedido manual, con
+ *   sus 48 h de plazo. No depende de la secuencia de días ni la corre: el próximo pedido
+ *   automático llega igual en su fecha.
+ * - Si hay una activa, esa no se toca: la nueva queda programada y reemplaza a la pregunta
+ *   aleatoria del próximo pedido automático. Si ya había otra programada, la pisa.
+ */
+export async function enviarPregunta(
+  solicitudId: number,
+  datos: EnviarPreguntaDto,
+  contexto: Contexto,
+  ahora: Date = new Date(),
+): Promise<PreguntaEnviadaDto> {
+  const { solicitud, rol } = await exigirSolicitudAccesible(
+    solicitudId,
+    contexto.usuarioId,
+    contexto.ambito,
+  );
+
+  // Al día primero: la pregunta activa pudo vencer, o pudo llegar un pedido nuevo.
+  const seguimientos = await sincronizarSolicitud(solicitud, ahora);
+  const { finalizado } = datosComunes({ solicitud, rol, seguimientos, ahora });
+
+  const motivo = motivoParaNoEnviarPregunta({ solicitud, rol, seguimientos, ahora }, finalizado);
+  if (motivo) throw motivo;
+
+  const hayActiva = seguimientos.some(
+    (seguimiento) => estadoDe(seguimiento, ahora) === 'PENDIENTE',
+  );
+  const pregunta = {
+    solicitudId: solicitud.id,
+    texto: datos.texto,
+    esAdopcion: flujoDe(solicitud) === 'Adopcion',
+  };
+
+  let entidadId: number;
+
+  if (hayActiva) {
+    const programada = await repo.programarPregunta(pregunta, contexto.usuarioId);
+    entidadId = programada.id;
+  } else {
+    const creado = await repo.crearPedidoManual(
+      { ...pregunta, fechaPedido: ahora, plazo: plazoDeRespuesta(ahora) },
+      contexto.usuarioId,
+    );
+    entidadId = creado.id;
+
+    // Llega fuera de la secuencia: sin aviso, el adoptante no tiene cómo enterarse.
+    const mascota = solicitud.publicacion.mascota.nombre ?? 'tu mascota';
+    await repo.crearNotificacion({
+      tipo: TIPO_NOTIFICACION_PREGUNTA_REFUGIO,
+      mensaje: `${MENSAJE_PREGUNTA_REFUGIO} — ${mascota}`,
+      usuarioId: solicitud.usuarioId,
+      usuarioAlta: contexto.usuarioId,
+    });
+  }
+
+  await registrarAuditoria({
+    usuarioId: contexto.usuarioId,
+    accion: hayActiva ? 'PROGRAMAR_PREGUNTA' : 'ENVIAR_PREGUNTA',
+    entidad: hayActiva ? 'PreguntaSeguimiento' : 'Seguimiento',
+    entidadId,
+    detalle: `solicitud=${solicitud.id}`,
+  });
+
+  return {
+    mensaje: hayActiva ? MENSAJE_PREGUNTA_PROGRAMADA : MENSAJE_PREGUNTA_ENVIADA,
+    programada: hayActiva,
+    detalle: await obtenerSeguimientosDeSolicitud(
+      solicitud.id,
+      contexto.usuarioId,
+      contexto.ambito,
+      ahora,
+    ),
+  };
+}
+
+/** El refugio se arrepiente de la pregunta que dejó programada para el próximo pedido. */
+export async function cancelarPreguntaProgramada(
+  solicitudId: number,
+  contexto: Contexto,
+  ahora: Date = new Date(),
+): Promise<DetalleSeguimientoDto> {
+  const { solicitud, rol } = await exigirSolicitudAccesible(
+    solicitudId,
+    contexto.usuarioId,
+    contexto.ambito,
+  );
+
+  if (!esRefugioDeLaSolicitud(solicitud, rol)) {
+    throw new AppError(
+      'NO_AUTORIZADO',
+      'Solo el refugio que entregó la mascota puede gestionar sus preguntas',
+      403,
+    );
+  }
+
+  // Al día primero: si su pedido ya llegó, la pregunta ya no está programada, está activa.
+  await sincronizarSolicitud(solicitud, ahora);
+  const programada = solicitud.preguntasSeguimiento[0];
+
+  if (!programada) {
+    throw new AppError('NO_ENCONTRADO', 'No hay ninguna pregunta programada', 404);
+  }
+
+  await repo.cancelarPreguntaProgramada(solicitud.id, contexto.usuarioId);
+
+  await registrarAuditoria({
+    usuarioId: contexto.usuarioId,
+    accion: 'CANCELAR_PREGUNTA',
+    entidad: 'PreguntaSeguimiento',
+    entidadId: programada.id,
+    detalle: `solicitud=${solicitud.id}`,
+  });
+
+  return obtenerSeguimientosDeSolicitud(solicitud.id, contexto.usuarioId, contexto.ambito, ahora);
 }
 
 /**

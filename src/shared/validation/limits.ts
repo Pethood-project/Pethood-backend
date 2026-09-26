@@ -135,6 +135,8 @@ export const LIMITES = {
    */
   seguimiento: {
     descripcion: { min: 1, max: 1000 },
+    /** Pregunta que escribe el refugio a mano (spec 011 §6.11). */
+    pregunta: { min: 5, max: 200 },
   },
 
   /**

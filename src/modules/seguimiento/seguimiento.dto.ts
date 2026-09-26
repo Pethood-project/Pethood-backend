@@ -26,6 +26,13 @@ export const subirActualizacionSchema = z.object({
 
 export type SubirActualizacionDto = z.infer<typeof subirActualizacionSchema>;
 
+/** Pregunta que el refugio le escribe a mano al adoptante (spec 011 §6.11). */
+export const enviarPreguntaSchema = z.object({
+  texto: textoSchema({ ...LIMITES.seguimiento.pregunta, etiqueta: 'La pregunta' }),
+});
+
+export type EnviarPreguntaDto = z.infer<typeof enviarPreguntaSchema>;
+
 /** Estado derivado de un pedido de seguimiento — no se guarda en base (spec 011 §3). */
 export type EstadoSeguimiento = 'PENDIENTE' | 'VENCIDO' | 'COMPLETADO';
 
@@ -49,6 +56,8 @@ export interface SeguimientoItemDto {
   /** 1-based, el número de pedido dentro de la secuencia (GUI-21). */
   numero: number;
   pregunta: string;
+  /** La escribió el refugio y la mandó en el momento, fuera de la secuencia de días. */
+  esManual: boolean;
   estado: EstadoSeguimiento;
   descripcion: string | null;
   fotoUrl: string | null;
@@ -79,12 +88,33 @@ export interface DetalleSeguimientoDto {
   tipo: string;
   rol: RolSeguimiento;
   puedeSubirActualizacion: boolean;
+  /** Solo el refugio que entregó la mascota, mientras el seguimiento no haya terminado. */
+  puedeEnviarPregunta: boolean;
+  /** Pregunta del refugio que reemplaza a la aleatoria del próximo pedido automático. */
+  preguntaProgramada: PreguntaProgramadaDto | null;
   mascota: MascotaSeguimientoDto;
   adoptante: AdoptanteSeguimientoDto;
   proximoAviso: string | null;
   finalizado: boolean;
   /** Del más reciente al más viejo. */
   seguimientos: SeguimientoItemDto[];
+}
+
+export interface PreguntaProgramadaDto {
+  id: number;
+  texto: string;
+  /** Cuándo la escribió el refugio. */
+  fechaAlta: string;
+}
+
+export interface PreguntaEnviadaDto {
+  mensaje: string;
+  /**
+   * `false`: se creó un pedido nuevo que el adoptante tiene que responder ya.
+   * `true`: había una pregunta activa, así que quedó programada para el próximo pedido.
+   */
+  programada: boolean;
+  detalle: DetalleSeguimientoDto;
 }
 
 export interface ActualizacionCargadaDto {

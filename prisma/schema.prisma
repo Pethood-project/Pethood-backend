@@ -252,23 +252,23 @@ model Rol {
 // ─────────────── USUARIOS ───────────────
 
 model Usuario {
-  id               Int       @id @default(autoincrement()) @map("usuario_id")
-  nombre           String    @map("usuario_nombre")
-  apellido         String    @map("usuario_apellido")
-  email            String    @unique @map("usuario_email")
+  id              Int       @id @default(autoincrement()) @map("usuario_id")
+  nombre          String    @map("usuario_nombre")
+  apellido        String    @map("usuario_apellido")
+  email           String    @unique @map("usuario_email")
   // Nullable: las cuentas creadas solo con Google no tienen contraseña local.
-  contrasena       String?   @map("usuario_contrasena")
-  telefono         String?   @map("usuario_telefono")
+  contrasena      String?   @map("usuario_contrasena")
+  telefono        String?   @map("usuario_telefono")
   // Nullable: el registro mobile actual no pide DNI; Google OAuth tampoco.
-  dni              String?   @unique @map("usuario_dni")
-  fechaNacimiento  DateTime? @map("usuario_fecha_nacimiento")
-  googleId         String?   @unique @map("usuario_google_id")
-  verificado       Boolean   @default(false) @map("usuario_verificado")
-  imagenUrl        String?   @map("usuario_imagen_url")
+  dni             String?   @unique @map("usuario_dni")
+  fechaNacimiento DateTime? @map("usuario_fecha_nacimiento")
+  googleId        String?   @unique @map("usuario_google_id")
+  verificado      Boolean   @default(false) @map("usuario_verificado")
+  imagenUrl       String?   @map("usuario_imagen_url")
   // Barrio / ciudad del perfil (GUI-15). Nullable para cuentas nuevas o de Google.
-  ubicacion        String?   @map("usuario_ubicacion")
-  refugioId        Int?      @map("refugio_id")
-  estadoId         Int       @map("estado_id")
+  ubicacion       String?   @map("usuario_ubicacion")
+  refugioId       Int?      @map("refugio_id")
+  estadoId        Int       @map("estado_id")
 
   usuarioAlta         Int       @map("usuario_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("usuario_fecha_alta")
@@ -535,10 +535,11 @@ model Solicitud {
   tipoSolicitud TipoSolicitud @relation(fields: [tipoSolicitudId], references: [id])
   hogar         Hogar?        @relation(fields: [hogarId], references: [id])
 
-  historicoEstados SolicitudEstado[]
-  seguimientos     Seguimiento[]
-  chats            Chat[]
-  mensajes         Mensaje[]
+  historicoEstados     SolicitudEstado[]
+  seguimientos         Seguimiento[]
+  preguntasSeguimiento PreguntaSeguimiento[]
+  chats                Chat[]
+  mensajes             Mensaje[]
 
   @@map("solicitud")
 }
@@ -592,10 +593,14 @@ model HistoriaClinica {
 // ─────────────── SEGUIMIENTO POST-ADOPCIÓN ───────────────
 
 model PreguntaSeguimiento {
-  id         Int     @id @default(autoincrement()) @map("pregunta_seguimiento_id")
-  texto      String  @map("pregunta_seguimiento_texto")
-  posicion   Int     @map("pregunta_seguimiento_posicion")
-  esAdopcion Boolean @map("pregunta_seguimiento_es_adopcion")
+  id          Int     @id @default(autoincrement()) @map("pregunta_seguimiento_id")
+  texto       String  @map("pregunta_seguimiento_texto")
+  posicion    Int     @map("pregunta_seguimiento_posicion")
+  esAdopcion  Boolean @map("pregunta_seguimiento_es_adopcion")
+  /// La pregunta fija del primer pedido automático ("¿Qué tal estuvo la primera noche en casa?").
+  esInicial   Boolean @default(false) @map("pregunta_seguimiento_es_inicial")
+  /// Null = pregunta del catálogo. Con valor = pregunta escrita por el refugio para esa solicitud.
+  solicitudId Int?    @map("solicitud_id")
 
   usuarioAlta         Int       @map("pregunta_seguimiento_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("pregunta_seguimiento_fecha_alta")
@@ -604,6 +609,7 @@ model PreguntaSeguimiento {
   usuarioBaja         Int?      @map("pregunta_seguimiento_usuario_baja")
   fechaBaja           DateTime? @map("pregunta_seguimiento_fecha_baja")
 
+  solicitud    Solicitud?    @relation(fields: [solicitudId], references: [id])
   seguimientos Seguimiento[]
 
   @@map("pregunta_seguimiento")
@@ -616,6 +622,8 @@ model Seguimiento {
   plazo                 DateTime? @map("seguimiento_plazo")
   solicitudId           Int       @map("solicitud_id")
   preguntaSeguimientoId Int       @map("pregunta_seguimiento_id")
+  /// Pedido enviado a mano por el refugio: no ocupa un lugar en la secuencia de días.
+  esManual              Boolean   @default(false) @map("seguimiento_es_manual")
 
   usuarioAlta         Int       @map("seguimiento_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("seguimiento_fecha_alta")
@@ -813,7 +821,7 @@ model Hogar {
   /// "Balcon" | "Patio" | "Jardin" | "Ninguno" (GUI-7.1.1 paso 2).
   espacioExterior String? @map("hogar_espacio_exterior")
 
-  tieneMascotas Boolean @default(false) @map("hogar_tiene_mascotas")
+  tieneMascotas   Boolean @default(false) @map("hogar_tiene_mascotas")
   /// Texto libre que solo se pide cuando `tieneMascotas` es verdadero.
   detalleMascotas String? @map("hogar_detalle_mascotas")
 

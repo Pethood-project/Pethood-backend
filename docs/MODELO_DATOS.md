@@ -144,13 +144,15 @@ Ver catálogos. Incluye `tipo_solicitud_secuencia_dias` para parametrizar ventan
 
 ### Seguimiento
 
-`seguimiento_id PK`, `seguimiento_descripcion`, `seguimiento_foto_url`, `seguimiento_plazo`, FK `solicitud_id FK NOT NULL`, FK `pregunta_seguimiento_id FK NOT NULL`.
+`seguimiento_id PK`, `seguimiento_descripcion`, `seguimiento_foto_url`, `seguimiento_plazo`, `seguimiento_es_manual: boolean` (pedido enviado a mano por el refugio, fuera de la secuencia de días), FK `solicitud_id FK NOT NULL`, FK `pregunta_seguimiento_id FK NOT NULL`.
 
 **Regla de negocio crítica: anti-fraude.** La foto de evidencia (`seguimiento_foto_url`) debe originarse exclusivamente desde la API de cámara nativa del dispositivo — el frontend mobile debe bloquear el acceso a la galería para este campo específico.
 
 ### Pregunta_Seguimiento
 
-`pregunta_seguimiento_id PK`, `pregunta_seguimiento_texto`, `pregunta_seguimiento_posicion`, `pregunta_seguimiento_es_adopcion: boolean` (distingue si la pregunta aplica a flujo de adopción o de tránsito).
+`pregunta_seguimiento_id PK`, `pregunta_seguimiento_texto`, `pregunta_seguimiento_posicion`, `pregunta_seguimiento_es_adopcion: boolean` (distingue si la pregunta aplica a flujo de adopción o de tránsito), `pregunta_seguimiento_es_inicial: boolean` (la pregunta fija del primer pedido), FK `solicitud_id` (nullable).
+
+Con `solicitud_id` null la fila es del **catálogo** que se sortea. Con valor, es una pregunta que el refugio escribió para esa solicitud (spec 011 §6.11) y nunca se sortea.
 
 ### Reseña
 
@@ -310,6 +312,9 @@ Ver catálogos.
 - Seguimiento
   -> Solicitud
   -> Pregunta_Seguimiento
+
+- Pregunta_Seguimiento
+  -> Solicitud (opcional: solo las preguntas escritas por el refugio)
 
 - Reseña
   -> Usuario (autor, vía `reseña_usuario_autor`)

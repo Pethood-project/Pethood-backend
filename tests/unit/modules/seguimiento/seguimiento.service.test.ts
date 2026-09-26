@@ -27,6 +27,7 @@ interface OverridesPedido {
   fechaModificacion?: Date | null;
   fechaAlta?: Date;
   preguntaSeguimientoId?: number;
+  esManual?: boolean;
 }
 
 /** Un pedido ya respondido: descripción, foto y fecha de respuesta van siempre juntas. */
@@ -47,6 +48,7 @@ function pedido(id: number, overrides: OverridesPedido = {}) {
     plazo: new Date('2026-06-30T12:00:00.000Z'),
     solicitudId: 1,
     preguntaSeguimientoId: 10,
+    esManual: false,
     usuarioAlta: 1,
     fechaAlta: new Date('2026-06-03T12:00:00.000Z'),
     usuarioModificacion: null,
@@ -83,6 +85,7 @@ function solicitud(overrides: Record<string, unknown> = {}) {
     // Los dos pedidos que ya correspondían a los 9 días: así no se generan nuevos salvo que
     // el test lo busque a propósito.
     seguimientos: [pedido(30), pedido(31)],
+    preguntasSeguimiento: [] as { id: number; texto: string; fechaAlta: Date }[],
     ...overrides,
   };
 }
@@ -90,7 +93,10 @@ function solicitud(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(guardarImagen).mockResolvedValue(FOTO_URL);
-  vi.mocked(repo.listarPreguntas).mockResolvedValue([{ id: 10, texto: '¿Está comiendo bien?' }]);
+  vi.mocked(repo.listarPreguntas).mockResolvedValue([
+    { id: 1, texto: '¿Qué tal estuvo la primera noche en casa?', esInicial: true },
+    { id: 10, texto: '¿Está comiendo bien?', esInicial: false },
+  ]);
   vi.mocked(repo.crearPedidos).mockResolvedValue([] as never);
   vi.mocked(registrarAuditoria).mockResolvedValue(undefined);
 });
@@ -631,5 +637,256 @@ describe('switch refugio/adoptante — el rol depende del perfil activo', () => 
     await service.listarMisSeguimientos(STAFF_REFUGIO.id, 'REFUGIO', AHORA);
 
     expect(repo.listarSolicitudesDeUsuario).toHaveBeenCalledWith(STAFF_REFUGIO.id, 1, 'REFUGIO');
+  });
+});
+
+describe('elección de la pregunta de cada pedido (spec 011 §6.3)', () => {
+  beforeEach(() => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
+  });
+
+  it('el primer pedido es siempre la pregunta inicial; el resto sale del sorteo', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(solicitud({ seguimientos: [] }) as never);
+
+    await service.obtenerSeguimientosDeSolicitud(1, ADOPTANTE.id, 'PERSONAL', AHORA);
+
+    const [creados] = vi.mocked(repo.crearPedidos).mock.calls[0]!;
+    expect(creados.map((creado) => creado.preguntaSeguimientoId)).toEqual([1, 10]);
+  });
+
+  it('los pedidos manuales no ocupan lugar en la secuencia de días', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitud({
+        seguimientos: [
+          pedido(30, { preguntaSeguimientoId: 1 }),
+          pedido(50, { esManual: true, fechaAlta: new Date('2026-06-05T12:00:00.000Z') }),
+        ],
+      }) as never,
+    );
+
+    await service.obtenerSeguimientosDeSolicitud(1, ADOPTANTE.id, 'PERSONAL', AHORA);
+
+    // A los 9 días corresponden 2 automáticos y hay 1: falta el del día 7, en su fecha.
+    const [creados] = vi.mocked(repo.crearPedidos).mock.calls[0]!;
+    expect(creados).toHaveLength(1);
+    expect(creados[0]!.fechaPedido).toEqual(new Date('2026-06-08T12:00:00.000Z'));
+  });
+
+  it('la pregunta programada por el refugio reemplaza a la aleatoria del próximo pedido', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitudDeRefugio({
+        seguimientos: [pedido(30, { preguntaSeguimientoId: 1 })],
+        preguntasSeguimiento: [{ id: 77, texto: '¿Ya le pusieron nombre?', fechaAlta: AHORA }],
+      }) as never,
+    );
+    vi.mocked(repo.crearPedidos).mockResolvedValue([
+      pedido(31, { preguntaSeguimientoId: 77 }),
+    ] as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
+
+    const detalle = await service.obtenerSeguimientosDeSolicitud(
+      1,
+      STAFF_REFUGIO.id,
+      'REFUGIO',
+      AHORA,
+    );
+
+    const [creados] = vi.mocked(repo.crearPedidos).mock.calls[0]!;
+    expect(creados[0]!.preguntaSeguimientoId).toBe(77);
+    // Ya la usó un pedido: deja de figurar como programada.
+    expect(detalle.preguntaProgramada).toBeNull();
+  });
+
+  it('la pregunta inicial le gana a la programada en el primer pedido', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitud({
+        seguimientos: [],
+        preguntasSeguimiento: [{ id: 77, texto: '¿Ya le pusieron nombre?', fechaAlta: AHORA }],
+      }) as never,
+    );
+
+    await service.obtenerSeguimientosDeSolicitud(1, ADOPTANTE.id, 'PERSONAL', AHORA);
+
+    const [creados] = vi.mocked(repo.crearPedidos).mock.calls[0]!;
+    expect(creados.map((creado) => creado.preguntaSeguimientoId)).toEqual([1, 77]);
+  });
+});
+
+describe('enviarPregunta — preguntas propias del refugio (spec 011 §6.11)', () => {
+  const TEXTO = { texto: '¿Ya le pusieron nombre?' };
+  const REFUGIO = { usuarioId: STAFF_REFUGIO.id, ambito: 'REFUGIO' as const };
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
+    vi.mocked(repo.crearPedidoManual).mockResolvedValue(pedido(60, { esManual: true }) as never);
+    vi.mocked(repo.programarPregunta).mockResolvedValue({
+      id: 77,
+      texto: TEXTO.texto,
+      fechaAlta: AHORA,
+    });
+  });
+
+  it('sin pregunta activa la manda ya, con 48 h de plazo, y avisa al adoptante', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitudDeRefugio({ seguimientos: [pedidoRespondido(30), pedidoRespondido(31)] }) as never,
+    );
+
+    const resultado = await service.enviarPregunta(1, TEXTO, REFUGIO, AHORA);
+
+    expect(resultado.programada).toBe(false);
+    expect(repo.crearPedidoManual).toHaveBeenCalledWith(
+      {
+        solicitudId: 1,
+        texto: TEXTO.texto,
+        esAdopcion: true,
+        fechaPedido: AHORA,
+        plazo: new Date('2026-06-12T12:00:00.000Z'),
+      },
+      STAFF_REFUGIO.id,
+    );
+    expect(repo.crearNotificacion).toHaveBeenCalledWith(
+      expect.objectContaining({ usuarioId: ADOPTANTE.id }),
+    );
+    expect(repo.programarPregunta).not.toHaveBeenCalled();
+  });
+
+  it('con una pregunta activa no la toca: la nueva queda para el próximo pedido', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(solicitudDeRefugio() as never);
+
+    const resultado = await service.enviarPregunta(1, TEXTO, REFUGIO, AHORA);
+
+    expect(resultado.programada).toBe(true);
+    expect(repo.programarPregunta).toHaveBeenCalledWith(
+      { solicitudId: 1, texto: TEXTO.texto, esAdopcion: true },
+      STAFF_REFUGIO.id,
+    );
+    expect(repo.crearPedidoManual).not.toHaveBeenCalled();
+    expect(repo.crearNotificacion).not.toHaveBeenCalled();
+  });
+
+  it('409 antes de que llegue la primera pregunta (la de la primera noche)', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitudDeRefugio({
+        seguimientos: [],
+        historicoEstados: [
+          {
+            id: 1,
+            fechaAlta: new Date('2026-06-09T12:00:00.000Z'),
+            estadoSolicitud: { nombre: 'Aprobada' },
+          },
+        ],
+      }) as never,
+    );
+
+    await expect(service.enviarPregunta(1, TEXTO, REFUGIO, AHORA)).rejects.toMatchObject({
+      codigo: 'SEGUIMIENTO_SIN_INICIAR',
+      httpStatus: 409,
+    });
+  });
+
+  it('409 si el seguimiento ya terminó', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitudDeRefugio({
+        historicoEstados: [
+          {
+            id: 1,
+            fechaAlta: new Date('2020-01-01T12:00:00.000Z'),
+            estadoSolicitud: { nombre: 'Aprobada' },
+          },
+        ],
+      }) as never,
+    );
+
+    await expect(service.enviarPregunta(1, TEXTO, REFUGIO, AHORA)).rejects.toMatchObject({
+      codigo: 'SEGUIMIENTO_FINALIZADO',
+      httpStatus: 409,
+    });
+  });
+
+  it('403 si quien publicó es un particular y no un refugio', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(solicitud() as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(PUBLICADOR as never);
+
+    await expect(
+      service.enviarPregunta(1, TEXTO, { usuarioId: PUBLICADOR.id, ambito: 'PERSONAL' }, AHORA),
+    ).rejects.toMatchObject({ codigo: 'NO_AUTORIZADO', httpStatus: 403 });
+  });
+
+  it('el detalle habilita el envío solo al refugio', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(solicitudDeRefugio() as never);
+
+    const delRefugio = await service.obtenerSeguimientosDeSolicitud(
+      1,
+      STAFF_REFUGIO.id,
+      'REFUGIO',
+      AHORA,
+    );
+    expect(delRefugio.puedeEnviarPregunta).toBe(true);
+
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
+    const delAdoptante = await service.obtenerSeguimientosDeSolicitud(
+      1,
+      ADOPTANTE.id,
+      'PERSONAL',
+      AHORA,
+    );
+    expect(delAdoptante.puedeEnviarPregunta).toBe(false);
+  });
+});
+
+describe('preguntaProgramada en el detalle', () => {
+  it('la ve el refugio pero no el adoptante: a él le llega recién con su pedido', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitudDeRefugio({
+        preguntasSeguimiento: [{ id: 77, texto: '¿Ya le pusieron nombre?', fechaAlta: AHORA }],
+      }) as never,
+    );
+
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
+    const delRefugio = await service.obtenerSeguimientosDeSolicitud(
+      1,
+      STAFF_REFUGIO.id,
+      'REFUGIO',
+      AHORA,
+    );
+    expect(delRefugio.preguntaProgramada).toMatchObject({ id: 77 });
+
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
+    const delAdoptante = await service.obtenerSeguimientosDeSolicitud(
+      1,
+      ADOPTANTE.id,
+      'PERSONAL',
+      AHORA,
+    );
+    expect(delAdoptante.preguntaProgramada).toBeNull();
+  });
+});
+
+describe('cancelarPreguntaProgramada (spec 011 §6.11)', () => {
+  const REFUGIO = { usuarioId: STAFF_REFUGIO.id, ambito: 'REFUGIO' as const };
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(STAFF_REFUGIO as never);
+  });
+
+  it('da de baja la pregunta programada', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(
+      solicitudDeRefugio({
+        preguntasSeguimiento: [{ id: 77, texto: '¿Ya le pusieron nombre?', fechaAlta: AHORA }],
+      }) as never,
+    );
+
+    await service.cancelarPreguntaProgramada(1, REFUGIO, AHORA);
+
+    expect(repo.cancelarPreguntaProgramada).toHaveBeenCalledWith(1, STAFF_REFUGIO.id);
+  });
+
+  it('404 si no hay ninguna programada', async () => {
+    vi.mocked(repo.buscarSolicitud).mockResolvedValue(solicitudDeRefugio() as never);
+
+    await expect(service.cancelarPreguntaProgramada(1, REFUGIO, AHORA)).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+      httpStatus: 404,
+    });
   });
 });
