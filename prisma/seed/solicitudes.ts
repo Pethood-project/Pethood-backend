@@ -441,15 +441,18 @@ async function seedSeguimientos(
   if (existente) return;
 
   const ahora = new Date();
-  const preguntas = await prisma.preguntaSeguimiento.findMany({
-    where: { esAdopcion: tipo === 'Adopcion', fechaBaja: null },
+  const catalogo = await prisma.preguntaSeguimiento.findMany({
+    where: { esAdopcion: tipo === 'Adopcion', solicitudId: null, fechaBaja: null },
     orderBy: { posicion: 'asc' },
   });
+  // Igual que el service: el primer pedido es siempre la pregunta inicial y el resto rota.
+  const inicial = catalogo.find((pregunta) => pregunta.esInicial) ?? catalogo[0]!;
+  const preguntas = catalogo.filter((pregunta) => !pregunta.esInicial);
   const pedidos = pedidosExigiblesA(aprobacion, tipo, ahora);
   const omitidos = new Set(sinResponder);
 
   for (const [indice, pedido] of pedidos.entries()) {
-    const pregunta = preguntas[indice % preguntas.length]!;
+    const pregunta = indice === 0 ? inicial : preguntas[(indice - 1) % preguntas.length]!;
     const plazo = plazoDeRespuesta(pedido.fecha);
     const respondido = !omitidos.has(indice);
     const vencido = !respondido && plazo.getTime() <= ahora.getTime();

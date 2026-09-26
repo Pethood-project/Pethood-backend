@@ -35,6 +35,13 @@ const INCLUDE_SOLICITUD = {
     orderBy: { fechaAlta: 'asc' },
     include: { preguntaSeguimiento: { select: { id: true, texto: true } } },
   },
+  // La pregunta que el refugio dejó programada para el próximo pedido automático: es suya
+  // (`solicitudId`) y todavía no la usó ningún pedido.
+  preguntasSeguimiento: {
+    where: { fechaBaja: null, seguimientos: { none: {} } },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { id: true, texto: true, fechaAlta: true },
+  },
   // `satisfies` y no `as const`: hace falta que el tipo quede estrecho para que Prisma
   // infiera el payload con las relaciones, pero `as const` lo vuelve readonly y Prisma
   // rechaza los `orderBy` inmutables.
@@ -85,12 +92,15 @@ export function buscarUsuario(usuarioId: number) {
   });
 }
 
-/** Catálogo vigente de preguntas del flujo pedido (adopción o tránsito). */
+/**
+ * Catálogo vigente de preguntas del flujo pedido (adopción o tránsito). Deja afuera las que
+ * escribieron los refugios para una solicitud puntual: esas no se sortean nunca.
+ */
 export function listarPreguntas(esAdopcion: boolean) {
   return prisma.preguntaSeguimiento.findMany({
-    where: { esAdopcion, fechaBaja: null },
+    where: { esAdopcion, solicitudId: null, fechaBaja: null },
     orderBy: { posicion: 'asc' },
-    select: { id: true, texto: true },
+    select: { id: true, texto: true, esInicial: true },
   });
 }
 
@@ -101,6 +111,8 @@ export interface DatosNuevoPedido {
   fechaPedido: Date;
   plazo: Date;
 }
+
+const INCLUDE_PREGUNTA = { preguntaSeguimiento: { select: { id: true, texto: true } } } as const;
 
 /**
  * Materializa los pedidos que ya vencieron su fecha. `fechaAlta` se fuerza a la fecha del
@@ -114,20 +126,92 @@ export function crearPedidos(pedidos: DatosNuevoPedido[], usuarioAlta: number) {
         data: {
           solicitudId: pedido.solicitudId,
           preguntaSeguimientoId: pedido.preguntaSeguimientoId,
+          esManual: false,
           plazo: pedido.plazo,
           ...datosAlta(usuarioAlta),
           fechaAlta: pedido.fechaPedido,
         },
-        include: { preguntaSeguimiento: { select: { id: true, texto: true } } },
+        include: INCLUDE_PREGUNTA,
       }),
     ),
   );
 }
 
+interface DatosPreguntaDeSolicitud {
+  solicitudId: number;
+  texto: string;
+  esAdopcion: boolean;
+}
+
+/**
+ * Una pregunta escrita por el refugio, atada a su solicitud. `posicion` no aplica (no es del
+ * catálogo): va en 0.
+ */
+function datosPreguntaDeSolicitud(datos: DatosPreguntaDeSolicitud, usuarioAlta: number) {
+  return {
+    texto: datos.texto,
+    esAdopcion: datos.esAdopcion,
+    posicion: 0,
+    solicitud: { connect: { id: datos.solicitudId } },
+    ...datosAlta(usuarioAlta),
+  };
+}
+
+/**
+ * Pedido manual del refugio: se crea en el momento, con su propia pregunta, y queda marcado
+ * como manual para que no ocupe un lugar en la secuencia de días. Pregunta y pedido se
+ * escriben juntos (create anidado = una sola transacción).
+ */
+export function crearPedidoManual(
+  datos: DatosPreguntaDeSolicitud & { fechaPedido: Date; plazo: Date },
+  usuarioAlta: number,
+) {
+  return prisma.seguimiento.create({
+    data: {
+      solicitud: { connect: { id: datos.solicitudId } },
+      preguntaSeguimiento: { create: datosPreguntaDeSolicitud(datos, usuarioAlta) },
+      esManual: true,
+      plazo: datos.plazo,
+      ...datosAlta(usuarioAlta),
+      fechaAlta: datos.fechaPedido,
+    },
+    include: INCLUDE_PREGUNTA,
+  });
+}
+
+/**
+ * Deja una pregunta del refugio esperando al próximo pedido automático. Hay a lo sumo una:
+ * si ya había otra programada se da de baja (lógica) y la reemplaza la nueva.
+ */
+export async function programarPregunta(datos: DatosPreguntaDeSolicitud, usuarioId: number) {
+  const [, creada] = await prisma.$transaction([
+    prisma.preguntaSeguimiento.updateMany({
+      where: { solicitudId: datos.solicitudId, fechaBaja: null, seguimientos: { none: {} } },
+      data: datosBaja(usuarioId),
+    }),
+    prisma.preguntaSeguimiento.create({
+      data: datosPreguntaDeSolicitud(datos, usuarioId),
+      select: { id: true, texto: true, fechaAlta: true },
+    }),
+  ]);
+
+  return creada;
+}
+
+/** Baja lógica de la pregunta programada de la solicitud. Devuelve cuántas dio de baja. */
+export async function cancelarPreguntaProgramada(solicitudId: number, usuarioId: number) {
+  const { count } = await prisma.preguntaSeguimiento.updateMany({
+    where: { solicitudId, fechaBaja: null, seguimientos: { none: {} } },
+    data: datosBaja(usuarioId),
+  });
+
+  return count;
+}
+
 export function buscarSeguimiento(seguimientoId: number) {
   return prisma.seguimiento.findFirst({
     where: { id: seguimientoId, fechaBaja: null },
-    include: { preguntaSeguimiento: { select: { id: true, texto: true } } },
+    include: INCLUDE_PREGUNTA,
   });
 }
 
@@ -140,7 +224,7 @@ export function responderSeguimiento(
   return prisma.seguimiento.update({
     where: { id: seguimientoId },
     data: { ...datos, ...datosModificacion(usuarioId) },
-    include: { preguntaSeguimiento: { select: { id: true, texto: true } } },
+    include: INCLUDE_PREGUNTA,
   });
 }
 

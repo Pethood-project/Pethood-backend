@@ -159,11 +159,32 @@ export function correspondeBorrarSeguimientos(
   return ahora.getTime() > limite.getTime();
 }
 
+/** Lo mínimo de un pedido que hace falta para saber si su pregunta ya "se gastó". */
+export interface PedidoConPregunta {
+  preguntaSeguimientoId: number;
+  descripcion: string | null;
+  plazo: Date | null;
+}
+
+/**
+ * Preguntas que no pueden volver a salir en esa solicitud: las que ya se respondieron y las
+ * que están esperando respuesta. Una que venció sin respuesta vuelve al sorteo — no se
+ * obtuvo la información, así que tiene sentido volver a preguntarla.
+ */
+export function preguntasNoRepetibles(pedidos: PedidoConPregunta[], ahora: Date): number[] {
+  return pedidos
+    .filter(
+      (pedido) =>
+        pedido.descripcion !== null ||
+        (pedido.plazo !== null && pedido.plazo.getTime() > ahora.getTime()),
+    )
+    .map((pedido) => pedido.preguntaSeguimientoId);
+}
+
 /**
  * HU-9.2: las preguntas son "precargadas y agregadas de manera aleatoria". Se evita repetir
- * mientras queden preguntas sin usar en esa solicitud; agotado el catálogo se vuelve a
- * sortear sobre todas, que es preferible a quedarse sin pregunta (adopción llega a 15
- * pedidos y el catálogo puede ser más chico).
+ * las que `preguntasNoRepetibles` descarta mientras queden otras; agotado el catálogo se
+ * vuelve a sortear sobre todas, que es preferible a quedarse sin pregunta.
  *
  * `aleatorio` entra por parámetro para poder testear la elección sin depender de Math.random.
  */
