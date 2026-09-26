@@ -31,6 +31,7 @@ function aPerfil(
     ubicacion: usuario.ubicacion,
     imagenUrl: usuario.imagenUrl,
     roles: rolesDbAApi(nombresDeRol(usuario)),
+    refugio: usuario.refugio,
     tienePassword: Boolean(usuario.contrasena),
     mascotas,
     favoritos: usuario._count.favoritos,

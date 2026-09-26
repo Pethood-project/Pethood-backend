@@ -9,6 +9,9 @@ const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'] as const;
 const includePerfil = {
   estado: true,
   roles: { include: { rol: true } },
+  // Mismo dato que devuelve el login: si no viniera acá, refrescar el perfil lo borraría de
+  // la sesión (y el encabezado de Chats se quedaría sin el nombre del refugio).
+  refugio: { select: { id: true, nombre: true } },
   _count: {
     select: {
       // Las mascotas no se cuentan acá: dependen del perfil con el que se mira (personal o

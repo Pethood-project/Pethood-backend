@@ -57,6 +57,23 @@ export function textoOpcionalNoNuloSchema(opciones: { max: number; etiqueta: str
   });
 }
 
+/**
+ * Vuelve opcional un schema que de por sí es obligatorio (teléfono, correo): lo que llega
+ * vacío o no llega queda en null, y lo que trae algo se valida con el schema original.
+ *
+ * Es para formularios que mandan todos los campos siempre, donde borrar un dato opcional
+ * llega como cadena vacía por multipart: con `.optional()` a secas ese vacío se validaría
+ * como teléfono y fallaría.
+ */
+export function vacioComoNuloSchema<T extends z.ZodTypeAny>(schema: T) {
+  return z
+    .preprocess(
+      (valor) => (typeof valor === 'string' && valor.trim() === '' ? undefined : valor),
+      schema.optional(),
+    )
+    .transform((valor): z.output<T> | null => valor ?? null);
+}
+
 export function fechaPasadaSchema(etiqueta: string) {
   return z.unknown().transform((valor, ctx) => {
     const resultado = validarFechaPasada(valor as string | Date, etiqueta);

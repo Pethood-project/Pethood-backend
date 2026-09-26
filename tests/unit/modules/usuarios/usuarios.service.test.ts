@@ -50,6 +50,7 @@ function perfilFake(overrides: Partial<UsuarioPerfil> = {}): UsuarioPerfil {
     imagenUrl: null,
     ubicacion: 'Palermo, CABA',
     refugioId: null,
+    refugio: null,
     estadoId: 2,
     usuarioAlta: 1,
     fechaAlta: new Date(),

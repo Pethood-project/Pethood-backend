@@ -75,6 +75,8 @@ del perfil que se está mirando.
 - **Perfil:** el switch «Vista de refugio» (solo para miembros de refugio). Al cambiarlo se
   vuelve a Inicio. Menú, contadores y chip de rol siguen al perfil activo: en la vista de
   refugio no hay «Mis solicitudes» ni «Favoritos», y el contador de favoritos no se muestra.
+  En la vista de refugio la tarjeta y el título son los del refugio, y el ícono del
+  encabezado ofrece los datos personales o los del refugio (spec 017).
 - **Inicio:** dos juegos de accesos (`constants/home.ts`) según el perfil.
 - **Barra inferior:** en la vista de refugio no está el botón «Adoptar».
 - **Adoptar y Favoritos:** si se llega desde la vista de refugio, vuelven a Inicio.
