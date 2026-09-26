@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-09-25**
+> Última revisión: **2026-09-26**
 
 ## Cómo se usa
 
@@ -44,6 +44,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 14 | Al activar R2, los archivos privados vuelven a quedar públicos | **Alta** | backend |
 | 15 | Nada llama a la sincronización del estado de la publicación: la mascota no cambia de estado | Baja | backend |
 | 16 | «Mis publicaciones» no permite editar ni dar de baja una publicación | Baja | ambos |
+| 17 | Cualquier miembro del refugio puede editar el perfil del refugio | Media | ambos |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -400,3 +401,23 @@ publicación con solicitudes abiertas) y agregar `PATCH /publicaciones/:id` con 
 criterio de ámbito que `PATCH /mascotas/:id`. En la app, el botón va en la ficha propia
 (`app/publicaciones/[id].tsx`, donde hoy se oculta el pie de «Solicitar adopción»).
 
+---
+
+## 17. Cualquier miembro del refugio puede editar el perfil del refugio — Media
+
+**Qué pasa.** `PATCH /refugio/perfil` (spec 017) deja editar nombre, dirección, contacto,
+descripción y foto del refugio a **cualquier** usuario con `refugio_id`. La idea del equipo
+es que solo lo haga quien tenga un rol específico dentro del refugio (por ejemplo, un
+responsable), pero ese rol todavía no existe: hoy la pertenencia es solo `usuario.refugio_id`
+y el rol global `MIEMBRO_REFUGIO`.
+
+**Qué ya está preparado.** La decisión vive en un único lugar, `puedeEditarPerfil` en
+[`perfil-refugio.service.ts`](../src/modules/perfil-refugio/perfil-refugio.service.ts), que
+hoy devuelve `true`. `GET /refugio/perfil` informa el resultado en `puedeEditar` y la app
+(`app/perfil/refugio.tsx`) ya lo usa para mostrar o no los lápices, la cámara y los botones;
+`PATCH` responde `403 SIN_PERMISO_REFUGIO` si da `false`.
+
+**Cómo se arregla.** Definir con el equipo cómo se modela el rol dentro del refugio (es un
+cambio de modelo: columna en `Usuario` o tabla de membresía, con su migración y
+`MODELO_DATOS.md`), y reemplazar el cuerpo de `puedeEditarPerfil` para que lo consulte. Del
+lado del front no hay nada que tocar.

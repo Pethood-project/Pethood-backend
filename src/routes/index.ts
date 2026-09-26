@@ -9,6 +9,7 @@ import { dashboardRefugioRouter } from '../modules/dashboard-refugio/dashboard-r
 import { favoritosRouter } from '../modules/favoritos/favoritos.routes';
 import { historiaClinicaRouter } from '../modules/historia-clinica/historia-clinica.routes';
 import { mascotasRouter } from '../modules/mascotas/mascotas.routes';
+import { perfilRefugioRouter } from '../modules/perfil-refugio/perfil-refugio.routes';
 import { publicacionesRouter } from '../modules/publicaciones/publicaciones.routes';
 import { solicitudesRouter } from '../modules/solicitudes/solicitudes.routes';
 import { seguimientoRouter } from '../modules/seguimiento/seguimiento.routes';
@@ -24,6 +25,7 @@ apiRouter.use('/auth', authRouter);
 apiRouter.use('/admin', dashboardAdminRouter);
 apiRouter.use('/admin', adminUsuariosRouter);
 apiRouter.use('/refugio', dashboardRefugioRouter);
+apiRouter.use('/refugio', perfilRefugioRouter); // spec 017
 apiRouter.use('/usuarios', usuariosRouter);
 
 // Módulos (descomentar a medida que se implementan las specs):
