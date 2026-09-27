@@ -6,7 +6,10 @@ import { aFechaISO } from '../../shared/validation/dates';
 import { ESTADOS_QUE_HABILITAN_PUBLICACION } from '../catalogos/catalogos.service';
 import {
   ESTADO_PUBLICACION,
+  MARCADOR_FOTO_NUEVA,
+  type AccionEstadoPublicacion,
   type CrearPublicacionDto,
+  type EditarPublicacionDto,
   type FeedPublicacionesDto,
   type FiltrosFeedDto,
   type FiltrosMisPublicacionesDto,
@@ -66,8 +69,9 @@ export async function crearPublicacion(
     );
   }
 
-  if (await repo.buscarActivaDeMascota(datos.mascotaId)) {
-    throw new AppError('YA_PUBLICADA', 'Esa mascota ya tiene una publicación activa', 409);
+  // Un aviso finalizado no traba uno nuevo: ya está cerrado.
+  if (await repo.buscarEnCursoDeMascota(datos.mascotaId)) {
+    throw new AppError('YA_PUBLICADA', 'Esa mascota ya tiene una publicación en curso', 409);
   }
 
   // La quota aplica a lo que se publica a título personal, no al refugio — también para un
@@ -100,9 +104,11 @@ export async function crearPublicacion(
       ? await guardarImagenes(archivos, SUBCARPETA_FOTOS)
       : [mascota.imagenUrl].filter((url): url is string => Boolean(url));
 
-  let publicacion;
+  let creada;
   try {
-    publicacion = await repo.crear(
+    // Si la mascota tenía avisos finalizados, el repository los da de baja en la misma
+    // transacción: la publicación nueva reemplaza a la vieja.
+    creada = await repo.crear(
       {
         // El formulario no pide título: se toma el nombre de la mascota.
         titulo: mascota.nombre ?? 'Mascota en adopción',
@@ -126,6 +132,8 @@ export async function crearPublicacion(
     throw err;
   }
 
+  const { publicacion, retiradas } = creada;
+
   await registrarAuditoria({
     usuarioId,
     accion: 'CREAR',
@@ -133,6 +141,16 @@ export async function crearPublicacion(
     entidadId: publicacion.id,
     detalle: `mascota=${mascota.id}`,
   });
+
+  for (const retiradaId of retiradas) {
+    await registrarAuditoria({
+      usuarioId,
+      accion: 'ELIMINAR',
+      entidad: 'Publicacion',
+      entidadId: retiradaId,
+      detalle: `finalizada, reemplazada por publicación ${publicacion.id}`,
+    });
+  }
 
   return {
     id: publicacion.id,
@@ -158,10 +176,11 @@ const ESTADO_MASCOTA_PUBLICACION_ACTIVA = 'Disponible';
 const ESTADOS_MASCOTA_PUBLICACION_FINALIZADA = ['Adoptado', 'Fallecido'];
 
 /**
- * Regla de las transiciones automáticas: qué estado le corresponde a la publicación según el
- * estado de su mascota. Disponible → Activa; Adoptado/Fallecido → Finalizada; el resto
- * (En_Tratamiento, En_Transito) → Pausada. La misma regla completó el estado de las
- * publicaciones existentes en la migración `estado_publicacion` y la usa el seed.
+ * Qué estado le corresponde a la publicación según el estado de su mascota: Disponible →
+ * Activa; Adoptado/Fallecido → Finalizada; el resto (En_Tratamiento, En_Transito) → Pausada.
+ * Es el estado con el que nace una publicación, y la misma regla completó el estado de las
+ * publicaciones existentes en la migración `estado_publicacion` y la usa el seed. Después
+ * del alta la aplica `sincronizarConEstadoMascota`, con sus salvedades.
  */
 export function estadoPublicacionSegunMascota(estadoMascota: string): NombreEstadoPublicacion {
   if (estadoMascota === ESTADO_MASCOTA_PUBLICACION_ACTIVA) return ESTADO_PUBLICACION.ACTIVA;
@@ -172,22 +191,27 @@ export function estadoPublicacionSegunMascota(estadoMascota: string): NombreEsta
 }
 
 /**
- * Transición automática: lleva la publicación viva de la mascota al estado que le toca según
- * el nuevo estado de la mascota. No hace nada si no tiene publicación o si ya está en ese
- * estado. Todo lo que cambie el estado de una mascota tiene que llamarla después de
- * persistirlo — hoy ninguna pantalla lo cambia después del alta (ver DEUDA_TECNICA.md
- * ítem 15).
+ * Transición automática: lleva la publicación en curso de la mascota al estado que le toca
+ * según el nuevo estado de la mascota. Automáticamente solo se **pausa** o se **finaliza**:
+ * nunca se reactiva sola — una mascota que sale de tratamiento deja la publicación pausada
+ * hasta que alguien la reactive a mano. Y una finalizada no se toca más.
+ *
+ * Todo lo que cambie el estado de una mascota tiene que llamarla después de persistirlo —
+ * hoy ninguna pantalla lo cambia después del alta (ver DEUDA_TECNICA.md ítem 15).
  */
 export async function sincronizarConEstadoMascota(
   mascotaId: number,
   estadoMascota: string,
   usuarioId: number,
 ): Promise<void> {
-  const publicacion = await repo.buscarActivaDeMascota(mascotaId);
+  const publicacion = await repo.buscarEnCursoDeMascota(mascotaId);
   if (!publicacion) return;
 
+  const actual = publicacion.historicoEstados[0]?.estadoPublicacion.nombre;
   const destino = estadoPublicacionSegunMascota(estadoMascota);
-  if (publicacion.historicoEstados[0]?.estadoPublicacion.nombre === destino) return;
+
+  if (destino === ESTADO_PUBLICACION.ACTIVA) return;
+  if (actual === destino || actual === ESTADO_PUBLICACION.FINALIZADA) return;
 
   const estado = await repo.buscarEstadoPublicacionPorNombre(destino);
   if (!estado) {
@@ -202,6 +226,234 @@ export async function sincronizarConEstadoMascota(
     entidadId: publicacion.id,
     detalle: `estado=${destino} (automático, mascota=${estadoMascota})`,
   });
+}
+
+type Actor = { id: number; refugioId: number | null };
+
+/**
+ * Quién puede editar una publicación y cambiarle el estado, desde el perfil activo:
+ * - PERSONAL: quien la publicó, sobre una mascota personal.
+ * - REFUGIO: cualquier miembro del refugio dueño de la mascota, la haya publicado quien sea.
+ *
+ * Es el único lugar donde se decide: cuando existan roles dentro del refugio y haya
+ * miembros que no puedan hacerlo, se restringe acá (DEUDA_TECNICA.md ítem 18).
+ */
+export function puedeEditarPublicacion(
+  publicacion: { usuarioId: number; mascota: { usuarioId: number; refugioId: number | null } },
+  actor: Actor,
+  ambito: Ambito,
+): boolean {
+  if (!esMascotaDelAmbito(publicacion.mascota, actor, ambito)) return false;
+  return ambito === 'REFUGIO' || publicacion.usuarioId === actor.id;
+}
+
+/**
+ * La publicación con su estado vigente, si el usuario la puede gestionar desde el perfil
+ * activo. Si no, 403: la publicación es pública (cualquiera abre la ficha), así que no se
+ * disimula que existe.
+ */
+async function buscarEditable(publicacionId: number, usuarioId: number, ambito: Ambito) {
+  const publicacion = await repo.buscarActivaPorId(publicacionId);
+  const estado = publicacion ? estadoVigente(publicacion) : null;
+
+  // Sin estado vigente es un dato inconsistente: mismo criterio que la ficha.
+  if (!publicacion || !estado) {
+    throw new AppError('NO_ENCONTRADO', 'Esa publicación ya no está disponible', 404);
+  }
+
+  const usuario = await repo.buscarUsuario(usuarioId);
+  if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
+
+  if (!puedeEditarPublicacion(publicacion, usuario, ambito)) {
+    throw new AppError('NO_AUTORIZADO', 'No podés modificar esta publicación', 403);
+  }
+
+  return { publicacion, estado };
+}
+
+export interface ContextoEdicion {
+  usuarioId: number;
+  ambito: Ambito;
+  /** Las fotos nuevas, en el orden de sus marcas en `imagenes`. */
+  archivos: { buffer: Buffer; mimetype: string }[];
+}
+
+/**
+ * Edita los datos de una publicación (todo menos la mascota), con las mismas reglas que al
+ * crearla. Una finalizada no se edita: el aviso está cerrado.
+ *
+ * Las fotos que se quitaron se borran del almacenamiento recién después de guardar, y la de
+ * la mascota nunca: es de otra entidad y sigue en uso.
+ */
+export async function editarPublicacion(
+  publicacionId: number,
+  datos: EditarPublicacionDto,
+  contexto: ContextoEdicion,
+): Promise<PublicacionFeedDto> {
+  const { usuarioId, ambito, archivos } = contexto;
+  const { publicacion, estado } = await buscarEditable(publicacionId, usuarioId, ambito);
+
+  if (estado.nombre === ESTADO_PUBLICACION.FINALIZADA) {
+    throw new AppError(
+      'PUBLICACION_FINALIZADA',
+      'La publicación está finalizada y ya no se puede editar',
+      409,
+    );
+  }
+
+  const fotoMascota = publicacion.mascota.imagenUrl;
+  validarOrdenDeImagenes(datos.imagenes, archivos.length, [
+    ...imagenesDe(publicacion),
+    ...(fotoMascota ? [fotoMascota] : []),
+  ]);
+
+  const nuevas = archivos.length > 0 ? await guardarImagenes(archivos, SUBCARPETA_FOTOS) : [];
+  let siguienteNueva = 0;
+  const ordenadas = datos.imagenes.map((item) =>
+    item === MARCADOR_FOTO_NUEVA ? nuevas[siguienteNueva++]! : item,
+  );
+  // Sin fotos propias vuelve a heredar la de la mascota, como al crear.
+  const imagenes =
+    ordenadas.length > 0 ? ordenadas : [fotoMascota].filter((url): url is string => Boolean(url));
+
+  try {
+    await repo.actualizar(
+      publicacion.id,
+      {
+        descripcion: datos.descripcion,
+        ubicacion: datos.ubicacion,
+        requisitos: datos.requisitos,
+        personalidad: datos.personalidad,
+        desparasitado: datos.desparasitado,
+        vacunas: datos.vacunas,
+        imagenes,
+      },
+      usuarioId,
+    );
+  } catch (err) {
+    if (nuevas.length > 0) await borrarImagenes(nuevas);
+    throw err;
+  }
+
+  const quitadas = publicacion.imagenes.filter(
+    (url) => !imagenes.includes(url) && url !== fotoMascota,
+  );
+  if (quitadas.length > 0) await borrarImagenes(quitadas);
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'MODIFICAR',
+    entidad: 'Publicacion',
+    entidadId: publicacion.id,
+  });
+
+  return obtenerPublicacion(publicacion.id, usuarioId, ambito);
+}
+
+/**
+ * La galería que manda el cliente solo puede reordenar fotos que la publicación ya muestra
+ * (o la de la mascota) y ubicar las nuevas: nunca apuntar a un archivo ajeno.
+ */
+function validarOrdenDeImagenes(
+  orden: string[],
+  cantidadNuevas: number,
+  permitidas: string[],
+): void {
+  const marcas = orden.filter((item) => item === MARCADOR_FOTO_NUEVA).length;
+
+  if (marcas !== cantidadNuevas) {
+    throw new AppError('VALIDACION', 'Las fotos nuevas no coinciden con la galería enviada', 400);
+  }
+
+  const existentes = orden.filter((item) => item !== MARCADOR_FOTO_NUEVA);
+
+  if (existentes.some((url) => !permitidas.includes(url))) {
+    throw new AppError('VALIDACION', 'Una de las fotos no pertenece a la publicación', 400);
+  }
+  if (new Set(existentes).size !== existentes.length) {
+    throw new AppError('VALIDACION', 'La galería tiene fotos repetidas', 400);
+  }
+}
+
+/** De qué estado sale y a cuál va cada acción manual. */
+const TRANSICIONES: Record<
+  AccionEstadoPublicacion,
+  { desde: string[]; hacia: NombreEstadoPublicacion; error: string }
+> = {
+  PAUSAR: {
+    desde: [ESTADO_PUBLICACION.ACTIVA],
+    hacia: ESTADO_PUBLICACION.PAUSADA,
+    error: 'Solo se puede pausar una publicación activa',
+  },
+  REACTIVAR: {
+    desde: [ESTADO_PUBLICACION.PAUSADA],
+    hacia: ESTADO_PUBLICACION.ACTIVA,
+    error: 'Solo se puede reactivar una publicación pausada',
+  },
+  FINALIZAR: {
+    desde: [ESTADO_PUBLICACION.ACTIVA, ESTADO_PUBLICACION.PAUSADA],
+    hacia: ESTADO_PUBLICACION.FINALIZADA,
+    error: 'La publicación ya está finalizada',
+  },
+};
+
+/**
+ * Pausar, reactivar o finalizar a mano. Reactivar además exige que la mascota esté
+ * disponible (si no, quedaría "Activa" pero fuera del feed) y vuelve a chequear la quota
+ * de publicaciones activas, que las pausadas no ocupan.
+ */
+export async function cambiarEstadoPublicacion(
+  publicacionId: number,
+  accion: AccionEstadoPublicacion,
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<PublicacionFeedDto> {
+  const { publicacion, estado } = await buscarEditable(publicacionId, usuarioId, ambito);
+  const transicion = TRANSICIONES[accion];
+
+  if (!transicion.desde.includes(estado.nombre)) {
+    throw new AppError('TRANSICION_INVALIDA', transicion.error, 409);
+  }
+
+  if (accion === 'REACTIVAR') {
+    const estadoMascota = publicacion.mascota.historicoEstados[0]?.estadoMascota.nombre;
+
+    if (estadoMascota !== ESTADO_MASCOTA_PUBLICACION_ACTIVA) {
+      throw new AppError(
+        'MASCOTA_NO_DISPONIBLE',
+        'Para reactivar la publicación, la mascota tiene que estar disponible',
+        409,
+      );
+    }
+
+    if (publicacion.mascota.refugioId === null) {
+      const activas = await repo.contarActivasPersonalesDeUsuario(publicacion.usuarioId);
+
+      if (activas >= MAXIMO_ACTIVAS_POR_ADOPTANTE) {
+        throw new AppError(
+          'LIMITE_DE_PUBLICACIONES',
+          `Llegaste al máximo de ${MAXIMO_ACTIVAS_POR_ADOPTANTE} publicaciones activas`,
+          409,
+        );
+      }
+    }
+  }
+
+  const destino = await repo.buscarEstadoPublicacionPorNombre(transicion.hacia);
+  if (!destino) {
+    throw new AppError('ERROR_INTERNO', 'No pudimos actualizar la publicación', 500);
+  }
+
+  await repo.cambiarEstado(publicacion.id, destino.id, usuarioId);
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Publicacion',
+    entidadId: publicacion.id,
+    detalle: `estado=${transicion.hacia} (manual)`,
+  });
+
+  return obtenerPublicacion(publicacion.id, usuarioId, ambito);
 }
 
 /** Estado vigente del aviso. Sin fila vigente el dato es inconsistente: se trata como ausente. */
@@ -222,6 +474,7 @@ function aFeedDto(
   publicacion: PublicacionConRelaciones,
   enFavoritos: boolean,
   esPropia: boolean,
+  puedeEditar: boolean,
 ): PublicacionFeedDto {
   const { mascota } = publicacion;
   const estado = mascota.historicoEstados[0]!.estadoMascota;
@@ -257,6 +510,7 @@ function aFeedDto(
     refugio: mascota.refugio,
     enFavoritos,
     esPropia,
+    puedeEditar,
   };
 }
 
@@ -282,15 +536,20 @@ export async function listarFeed(
     repo.contarFeed(usuarioId, filtros, usuario.refugioId),
   ]);
 
-  // El feed ya excluye las propias y las guardadas, así que acá `enFavoritos` y `esPropia` son siempre false. Se deja explícito para que la
-  // tarjeta y la ficha lean el mismo campo.
-  return { total, publicaciones: publicaciones.map((pub) => aFeedDto(pub, false, false)) };
+  // El feed ya excluye las propias y las guardadas, así que acá `enFavoritos`, `esPropia` y
+  // `puedeEditar` son siempre false. Se deja explícito para que la tarjeta y la ficha lean
+  // los mismos campos.
+  return {
+    total,
+    publicaciones: publicaciones.map((pub) => aFeedDto(pub, false, false, false)),
+  };
 }
 
 /** Ficha completa de una publicación, con el estado de favorito y de propiedad ya resueltos. */
 export async function obtenerPublicacion(
   publicacionId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<PublicacionFeedDto> {
   const publicacion = await repo.buscarActivaPorId(publicacionId);
 
@@ -310,12 +569,14 @@ export async function obtenerPublicacion(
   }
 
   const favoritas = await repo.filtrarFavoritas(usuarioId, [publicacion.mascotaId]);
-  const esPropia = esMascotaPropia(publicacion.mascota, {
-    id: usuario.id,
-    refugioId: usuario.refugioId,
-  });
+  const actor = { id: usuario.id, refugioId: usuario.refugioId };
 
-  return aFeedDto(publicacion, favoritas.has(publicacion.mascotaId), esPropia);
+  return aFeedDto(
+    publicacion,
+    favoritas.has(publicacion.mascotaId),
+    esMascotaPropia(publicacion.mascota, actor),
+    puedeEditarPublicacion(publicacion, actor, ambito),
+  );
 }
 
 /**
@@ -370,14 +631,15 @@ export async function listarMisPublicaciones(
 }
 
 /**
- * Id de la publicación activa de una mascota, si tiene una. Lo consume `mascotas.service`
- * para la ficha de detalle (HU-6.4): el botón "Ver publicación asociada" solo aparece con
- * un id, no con un booleano, porque de ahí sale directo el link a la ficha.
+ * Id de la publicación de una mascota (la en curso o, si no tiene, la última finalizada).
+ * Lo consume `mascotas.service` para la ficha de detalle (HU-6.4): el botón "Ver
+ * publicación asociada" solo aparece con un id, no con un booleano, porque de ahí sale
+ * directo el link a la ficha.
  */
 export async function obtenerPublicacionActivaIdDeMascota(
   mascotaId: number,
 ): Promise<number | null> {
-  const publicacion = await repo.buscarActivaDeMascota(mascotaId);
+  const publicacion = await repo.buscarUltimaDeMascota(mascotaId);
   return publicacion?.id ?? null;
 }
 

@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../../src/middlewares/errorHandler';
 import * as repo from '../../../src/modules/publicaciones/publicaciones.repository';
+import { MARCADOR_FOTO_NUEVA } from '../../../src/modules/publicaciones/publicaciones.dto';
 import * as service from '../../../src/modules/publicaciones/publicaciones.service';
+import { registrarAuditoria } from '../../../src/shared/logAuditoria';
+import { borrarImagenes, guardarImagenes } from '../../../src/shared/storage';
 
 vi.mock('../../../src/modules/publicaciones/publicaciones.repository');
 vi.mock('../../../src/shared/logAuditoria');
+vi.mock('../../../src/shared/storage');
 
 const USUARIO = 7;
 const PUBLICACION = 40;
@@ -47,6 +51,7 @@ function publicacionActiva(duenio: number, refugioId: number | null = null) {
     imagenes: [],
     fechaAlta: new Date('2026-08-19T15:00:00.000Z'),
     mascotaId: 8,
+    usuarioId: duenio,
     historicoEstados: [{ estadoPublicacion: ESTADOS_PUBLICACION.Activa }],
     mascota: mascota(duenio, refugioId),
   };
@@ -62,7 +67,9 @@ describe('obtenerPublicacion — esPropia', () => {
   it('404 si la publicación no existe', async () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(null as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).rejects.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -72,7 +79,9 @@ describe('obtenerPublicacion — esPropia', () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue(null as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).rejects.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -82,7 +91,9 @@ describe('obtenerPublicacion — esPropia', () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).resolves.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({
       esPropia: false,
     });
   });
@@ -91,7 +102,9 @@ describe('obtenerPublicacion — esPropia', () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(USUARIO) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).resolves.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({
       esPropia: true,
     });
   });
@@ -100,7 +113,9 @@ describe('obtenerPublicacion — esPropia', () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99, 1) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 1 } as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).resolves.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({
       esPropia: true,
     });
   });
@@ -109,7 +124,9 @@ describe('obtenerPublicacion — esPropia', () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99, 1) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 2 } as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).resolves.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({
       esPropia: false,
     });
   });
@@ -164,7 +181,9 @@ describe('estadoPublicacionSegunMascota — transición automática', () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(USUARIO) as never);
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).resolves.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({
       estado: { id: 1, nombre: 'Activa' },
     });
   });
@@ -173,7 +192,9 @@ describe('estadoPublicacionSegunMascota — transición automática', () => {
     const sinEstado = { ...publicacionActiva(USUARIO), historicoEstados: [] };
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(sinEstado as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).rejects.toMatchObject({
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
     });
   });
@@ -211,10 +232,27 @@ describe('crearPublicacion — estado inicial', () => {
       verificado: true,
       refugioId: null,
     } as never);
-    vi.mocked(repo.buscarActivaDeMascota).mockResolvedValue(null as never);
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(null as never);
     vi.mocked(repo.contarActivasPersonalesDeUsuario).mockResolvedValue(0);
-    vi.mocked(repo.crear).mockResolvedValue({ id: PUBLICACION, imagenes: [] } as never);
+    vi.mocked(repo.crear).mockResolvedValue({
+      publicacion: { id: PUBLICACION, imagenes: [] },
+      retiradas: [],
+    } as never);
     catalogoPorNombre();
+  });
+
+  it('si reemplaza avisos finalizados de la mascota, deja constancia de cada baja', async () => {
+    vi.mocked(repo.buscarMascota).mockResolvedValue(mascotaEn('Disponible') as never);
+    vi.mocked(repo.crear).mockResolvedValue({
+      publicacion: { id: PUBLICACION, imagenes: [] },
+      retiradas: [31],
+    } as never);
+
+    await service.crearPublicacion(DATOS, CONTEXTO);
+
+    expect(registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({ accion: 'ELIMINAR', entidad: 'Publicacion', entidadId: 31 }),
+    );
   });
 
   it.each([
@@ -253,24 +291,37 @@ describe('sincronizarConEstadoMascota — la publicación sigue a la mascota', (
 
   beforeEach(catalogoPorNombre);
 
-  it('mascota adoptada → la publicación activa pasa a Finalizada', async () => {
-    vi.mocked(repo.buscarActivaDeMascota).mockResolvedValue(publicacionEn('Activa') as never);
+  it.each([
+    ['Adoptado', 'Activa', 3],
+    ['Fallecido', 'Pausada', 3],
+    ['En_Transito', 'Activa', 2],
+    ['En_Tratamiento', 'Activa', 2],
+  ] as const)('mascota %s → la publicación %s cambia al estado %i', async (mascota, desde, id) => {
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn(desde) as never);
 
-    await service.sincronizarConEstadoMascota(8, 'Adoptado', USUARIO);
+    await service.sincronizarConEstadoMascota(8, mascota, USUARIO);
 
-    expect(repo.cambiarEstado).toHaveBeenCalledWith(PUBLICACION, 3, USUARIO);
+    expect(repo.cambiarEstado).toHaveBeenCalledWith(PUBLICACION, id, USUARIO);
   });
 
-  it('mascota que vuelve a estar disponible → la pausada se reactiva', async () => {
-    vi.mocked(repo.buscarActivaDeMascota).mockResolvedValue(publicacionEn('Pausada') as never);
+  it('mascota que sale de tratamiento → la pausada NO se reactiva sola', async () => {
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Pausada') as never);
 
     await service.sincronizarConEstadoMascota(8, 'Disponible', USUARIO);
 
-    expect(repo.cambiarEstado).toHaveBeenCalledWith(PUBLICACION, 1, USUARIO);
+    expect(repo.cambiarEstado).not.toHaveBeenCalled();
+  });
+
+  it('una finalizada no se toca más', async () => {
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Finalizada') as never);
+
+    await service.sincronizarConEstadoMascota(8, 'En_Tratamiento', USUARIO);
+
+    expect(repo.cambiarEstado).not.toHaveBeenCalled();
   });
 
   it('no escribe nada si ya está en el estado que corresponde', async () => {
-    vi.mocked(repo.buscarActivaDeMascota).mockResolvedValue(publicacionEn('Pausada') as never);
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Pausada') as never);
 
     await service.sincronizarConEstadoMascota(8, 'En_Tratamiento', USUARIO);
 
@@ -278,7 +329,7 @@ describe('sincronizarConEstadoMascota — la publicación sigue a la mascota', (
   });
 
   it('no hace nada si la mascota no tiene publicación', async () => {
-    vi.mocked(repo.buscarActivaDeMascota).mockResolvedValue(null as never);
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(null as never);
 
     await service.sincronizarConEstadoMascota(8, 'Adoptado', USUARIO);
 
@@ -355,10 +406,272 @@ describe('listarMisPublicaciones — cada perfil ve solo las suyas', () => {
   });
 });
 
+describe('puedeEditarPublicacion — quién gestiona el aviso', () => {
+  const personal = { usuarioId: USUARIO, mascota: { usuarioId: USUARIO, refugioId: null } };
+  const delRefugio = { usuarioId: 99, mascota: { usuarioId: 99, refugioId: 3 } };
+
+  it('desde el perfil personal, quien la publicó', () => {
+    expect(
+      service.puedeEditarPublicacion(personal, { id: USUARIO, refugioId: null }, 'PERSONAL'),
+    ).toBe(true);
+  });
+
+  it('desde el perfil personal, nadie más', () => {
+    expect(service.puedeEditarPublicacion(personal, { id: 5, refugioId: null }, 'PERSONAL')).toBe(
+      false,
+    );
+  });
+
+  it('desde el refugio, cualquier miembro, aunque la haya publicado otro', () => {
+    expect(
+      service.puedeEditarPublicacion(delRefugio, { id: USUARIO, refugioId: 3 }, 'REFUGIO'),
+    ).toBe(true);
+  });
+
+  it('lo del refugio no se gestiona desde el perfil personal', () => {
+    expect(service.puedeEditarPublicacion(delRefugio, { id: 99, refugioId: 3 }, 'PERSONAL')).toBe(
+      false,
+    );
+  });
+
+  it('un miembro de otro refugio no la gestiona', () => {
+    expect(
+      service.puedeEditarPublicacion(delRefugio, { id: USUARIO, refugioId: 4 }, 'REFUGIO'),
+    ).toBe(false);
+  });
+
+  it('la ficha informa puedeEditar según el perfil activo', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(USUARIO) as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
+
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({ puedeEditar: true });
+  });
+});
+
+function publicacionEnEstado(estado: keyof typeof ESTADOS_PUBLICACION, extra: object = {}) {
+  return {
+    ...publicacionActiva(USUARIO),
+    historicoEstados: [{ estadoPublicacion: ESTADOS_PUBLICACION[estado] }],
+    ...extra,
+  };
+}
+
+describe('editarPublicacion', () => {
+  const FOTO_A = '/api/v1/archivos/publicaciones/a.jpg';
+  const FOTO_B = '/api/v1/archivos/publicaciones/b.jpg';
+  const FOTO_MASCOTA = '/api/v1/archivos/mascotas/toby.jpg';
+  const NUEVA = '/api/v1/archivos/publicaciones/nueva.jpg';
+  const ARCHIVO = { buffer: Buffer.from('x'), mimetype: 'image/jpeg' };
+
+  const DATOS = {
+    descripcion: 'Súper mimoso',
+    ubicacion: 'Godoy Cruz',
+    requisitos: ['Casa con patio'],
+    personalidad: ['Tranquilo'],
+    desparasitado: true,
+    vacunas: 'Rabia',
+    imagenes: [] as string[],
+  };
+  const CONTEXTO = { usuarioId: USUARIO, ambito: 'PERSONAL' as const, archivos: [] };
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(
+      publicacionEnEstado('Activa', { imagenes: [FOTO_A, FOTO_B] }) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
+    vi.mocked(guardarImagenes).mockResolvedValue([NUEVA]);
+  });
+
+  it('403 si no la puede gestionar, sin tocar nada', async () => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 5, refugioId: null } as never);
+
+    await expect(
+      service.editarPublicacion(PUBLICACION, DATOS, { ...CONTEXTO, usuarioId: 5 }),
+    ).rejects.toMatchObject({ codigo: 'NO_AUTORIZADO', httpStatus: 403 });
+    expect(repo.actualizar).not.toHaveBeenCalled();
+  });
+
+  it('409 si está finalizada', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionEnEstado('Finalizada') as never);
+
+    await expect(service.editarPublicacion(PUBLICACION, DATOS, CONTEXTO)).rejects.toMatchObject({
+      codigo: 'PUBLICACION_FINALIZADA',
+      httpStatus: 409,
+    });
+    expect(repo.actualizar).not.toHaveBeenCalled();
+  });
+
+  it('una pausada se puede editar', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(
+      publicacionEnEstado('Pausada', { imagenes: [FOTO_A] }) as never,
+    );
+
+    await service.editarPublicacion(PUBLICACION, { ...DATOS, imagenes: [FOTO_A] }, CONTEXTO);
+
+    expect(repo.actualizar).toHaveBeenCalled();
+  });
+
+  it('reordena, ubica las nuevas en su marca y borra solo las quitadas', async () => {
+    await service.editarPublicacion(
+      PUBLICACION,
+      { ...DATOS, imagenes: [MARCADOR_FOTO_NUEVA, FOTO_B] },
+      { ...CONTEXTO, archivos: [ARCHIVO] },
+    );
+
+    expect(repo.actualizar).toHaveBeenCalledWith(
+      PUBLICACION,
+      expect.objectContaining({ imagenes: [NUEVA, FOTO_B], descripcion: 'Súper mimoso' }),
+      USUARIO,
+    );
+    expect(borrarImagenes).toHaveBeenCalledWith([FOTO_A]);
+  });
+
+  it('sin fotos vuelve a heredar la de la mascota, que nunca se borra', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(
+      publicacionEnEstado('Activa', { imagenes: [FOTO_MASCOTA, FOTO_A] }) as never,
+    );
+
+    await service.editarPublicacion(PUBLICACION, DATOS, CONTEXTO);
+
+    expect(repo.actualizar).toHaveBeenCalledWith(
+      PUBLICACION,
+      expect.objectContaining({ imagenes: [FOTO_MASCOTA] }),
+      USUARIO,
+    );
+    expect(borrarImagenes).toHaveBeenCalledWith([FOTO_A]);
+  });
+
+  it('400 si la galería apunta a una foto que no es de la publicación', async () => {
+    await expect(
+      service.editarPublicacion(
+        PUBLICACION,
+        { ...DATOS, imagenes: ['/api/v1/archivos/publicaciones/ajena.jpg'] },
+        CONTEXTO,
+      ),
+    ).rejects.toMatchObject({ codigo: 'VALIDACION', httpStatus: 400 });
+    expect(guardarImagenes).not.toHaveBeenCalled();
+  });
+
+  it('400 si las marcas no coinciden con las fotos subidas', async () => {
+    await expect(
+      service.editarPublicacion(
+        PUBLICACION,
+        { ...DATOS, imagenes: [FOTO_A] },
+        { ...CONTEXTO, archivos: [ARCHIVO] },
+      ),
+    ).rejects.toMatchObject({ codigo: 'VALIDACION' });
+  });
+
+  it('400 si repite una foto', async () => {
+    await expect(
+      service.editarPublicacion(PUBLICACION, { ...DATOS, imagenes: [FOTO_A, FOTO_A] }, CONTEXTO),
+    ).rejects.toMatchObject({ codigo: 'VALIDACION' });
+  });
+
+  it('si falla la base, borra las fotos nuevas y no las viejas', async () => {
+    vi.mocked(repo.actualizar).mockRejectedValue(new Error('base caída'));
+
+    await expect(
+      service.editarPublicacion(
+        PUBLICACION,
+        { ...DATOS, imagenes: [FOTO_A, MARCADOR_FOTO_NUEVA] },
+        { ...CONTEXTO, archivos: [ARCHIVO] },
+      ),
+    ).rejects.toThrow('base caída');
+    expect(borrarImagenes).toHaveBeenCalledTimes(1);
+    expect(borrarImagenes).toHaveBeenCalledWith([NUEVA]);
+  });
+});
+
+describe('cambiarEstadoPublicacion — pausar, reactivar, finalizar', () => {
+  beforeEach(() => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
+    vi.mocked(repo.contarActivasPersonalesDeUsuario).mockResolvedValue(0);
+    catalogoPorNombre();
+  });
+
+  it.each([
+    ['PAUSAR', 'Activa', 2],
+    ['REACTIVAR', 'Pausada', 1],
+    ['FINALIZAR', 'Activa', 3],
+    ['FINALIZAR', 'Pausada', 3],
+  ] as const)('%s desde %s', async (accion, desde, destino) => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionEnEstado(desde) as never);
+
+    await service.cambiarEstadoPublicacion(PUBLICACION, accion, USUARIO, 'PERSONAL');
+
+    expect(repo.cambiarEstado).toHaveBeenCalledWith(PUBLICACION, destino, USUARIO);
+  });
+
+  it.each([
+    ['PAUSAR', 'Pausada'],
+    ['PAUSAR', 'Finalizada'],
+    ['REACTIVAR', 'Activa'],
+    ['REACTIVAR', 'Finalizada'],
+    ['FINALIZAR', 'Finalizada'],
+  ] as const)('409 al %s desde %s', async (accion, desde) => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionEnEstado(desde) as never);
+
+    await expect(
+      service.cambiarEstadoPublicacion(PUBLICACION, accion, USUARIO, 'PERSONAL'),
+    ).rejects.toMatchObject({ codigo: 'TRANSICION_INVALIDA', httpStatus: 409 });
+    expect(repo.cambiarEstado).not.toHaveBeenCalled();
+  });
+
+  it('no reactiva si la mascota sigue en tratamiento', async () => {
+    const pausada = publicacionEnEstado('Pausada');
+    pausada.mascota.historicoEstados = [{ estadoMascota: { id: 3, nombre: 'En_Tratamiento' } }];
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(pausada as never);
+
+    await expect(
+      service.cambiarEstadoPublicacion(PUBLICACION, 'REACTIVAR', USUARIO, 'PERSONAL'),
+    ).rejects.toMatchObject({ codigo: 'MASCOTA_NO_DISPONIBLE', httpStatus: 409 });
+  });
+
+  it('reactivar respeta la quota de publicaciones activas del adoptante', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionEnEstado('Pausada') as never);
+    vi.mocked(repo.contarActivasPersonalesDeUsuario).mockResolvedValue(
+      service.MAXIMO_ACTIVAS_POR_ADOPTANTE,
+    );
+
+    await expect(
+      service.cambiarEstadoPublicacion(PUBLICACION, 'REACTIVAR', USUARIO, 'PERSONAL'),
+    ).rejects.toMatchObject({ codigo: 'LIMITE_DE_PUBLICACIONES' });
+    expect(repo.cambiarEstado).not.toHaveBeenCalled();
+  });
+
+  it('la quota no aplica a las del refugio', async () => {
+    const delRefugio = {
+      ...publicacionEnEstado('Pausada'),
+      mascota: mascota(99, 3),
+      usuarioId: 99,
+    };
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(delRefugio as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 3 } as never);
+    vi.mocked(repo.contarActivasPersonalesDeUsuario).mockResolvedValue(99);
+
+    await service.cambiarEstadoPublicacion(PUBLICACION, 'REACTIVAR', USUARIO, 'REFUGIO');
+
+    expect(repo.cambiarEstado).toHaveBeenCalledWith(PUBLICACION, 1, USUARIO);
+  });
+
+  it('403 si no la puede gestionar', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99) as never);
+
+    await expect(
+      service.cambiarEstadoPublicacion(PUBLICACION, 'PAUSAR', USUARIO, 'PERSONAL'),
+    ).rejects.toMatchObject({ codigo: 'NO_AUTORIZADO', httpStatus: 403 });
+  });
+});
+
 describe('formato de error', () => {
   it('los errores son AppError, así el errorHandler los traduce al formato de la API', async () => {
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(null as never);
 
-    await expect(service.obtenerPublicacion(PUBLICACION, USUARIO)).rejects.toBeInstanceOf(AppError);
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).rejects.toBeInstanceOf(AppError);
   });
 });

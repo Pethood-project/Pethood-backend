@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-09-26**
+> Última revisión: **2026-09-27**
 
 ## Cómo se usa
 
@@ -43,8 +43,10 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 13 | El socket de chat no conoce el perfil activo (switch refugio/adoptante) | Baja | ambos |
 | 14 | Al activar R2, los archivos privados vuelven a quedar públicos | **Alta** | backend |
 | 15 | Nada llama a la sincronización del estado de la publicación: la mascota no cambia de estado | Baja | backend |
-| 16 | «Mis publicaciones» no permite editar ni dar de baja una publicación | Baja | ambos |
+| 16 | No se puede eliminar una publicación (sí editarla y pausarla/finalizarla) | Baja | ambos |
 | 17 | Cualquier miembro del refugio puede editar el perfil del refugio | Media | ambos |
+| 18 | Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones | Media | backend |
+| 19 | Pausar o finalizar una publicación no toca sus solicitudes abiertas | Media | backend |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -374,32 +376,23 @@ no tiene quién la llame.
 
 **Cómo se arregla.** Quien implemente el cambio de estado de una mascota (una HU nueva, o
 marcarla `Adoptado` al cerrar una adopción) llama a `sincronizarConEstadoMascota` después de
-persistir el estado nuevo. Cuando existan las transiciones manuales (ítem 16), definir qué
-gana: por ejemplo, una publicación pausada a mano no debería reactivarse sola porque la
-mascota volvió a `Disponible`.
-
-**Relacionado:** `POST /solicitudes` sigue validando el estado de la **mascota**
-(`Disponible`), no el de la publicación. Hoy es equivalente; con la pausa manual deja de serlo
-y hay que exigir también publicación `Activa`.
+persistir el estado nuevo. La convivencia con las transiciones manuales ya está resuelta
+(spec 018): la sincronización solo pausa o finaliza, nunca reactiva, y no toca una
+finalizada.
 
 ---
 
-## 16. «Mis publicaciones» no permite editar ni dar de baja — Baja
+## 16. No se puede eliminar una publicación — Baja
 
-**Qué pasa.** La pantalla lista y abre las publicaciones del perfil activo, pero no las edita:
-no hay HU de edición de publicación (Módulo 6 sólo tiene HU-6.2 *Editar mascota*). La única
-forma de sacar un aviso es eliminar la mascota (HU-6.3), que da de baja sus publicaciones en
-la misma transacción.
+**Qué pasa.** Editar, pausar, reactivar y finalizar ya existen (spec 018). Lo que falta de lo
+decidido es **eliminar** (baja lógica de la publicación): hoy la única forma de dar de baja
+un aviso es eliminar la mascota (HU-6.3), que da de baja sus publicaciones en la misma
+transacción. Finalizar cubre casi todo el caso de uso (saca el aviso del feed para siempre),
+pero la publicación sigue en «Mis publicaciones».
 
-**Decidido para esa HU:** además de editar los datos, acciones manuales de **pausar**,
-**finalizar**, **reactivar** y **eliminar** (baja lógica). Las tres primeras son cambios de
-estado con `cambiarEstado` del repository, que ya existe; reactivar tiene que volver a
-chequear la quota de 5 activas.
-
-**Cómo se arregla.** Definir la HU con el equipo (qué campos se editan, si se edita una
-publicación con solicitudes abiertas) y agregar `PATCH /publicaciones/:id` con el mismo
-criterio de ámbito que `PATCH /mascotas/:id`. En la app, el botón va en la ficha propia
-(`app/publicaciones/[id].tsx`, donde hoy se oculta el pie de «Solicitar adopción»).
+**Cómo se arregla.** Definir con el equipo si hace falta además de finalizar y, si sí,
+`DELETE /publicaciones/:id` con el mismo criterio de permiso (`puedeEditarPublicacion`) y el
+mismo bloqueo por solicitudes abiertas que la baja de mascota.
 
 ---
 
@@ -421,3 +414,34 @@ hoy devuelve `true`. `GET /refugio/perfil` informa el resultado en `puedeEditar`
 cambio de modelo: columna en `Usuario` o tabla de membresía, con su migración y
 `MODELO_DATOS.md`), y reemplazar el cuerpo de `puedeEditarPerfil` para que lo consulte. Del
 lado del front no hay nada que tocar.
+
+---
+
+## 18. Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones — Media
+
+**Qué pasa.** Es el mismo hueco que el ítem 17, aplicado a las publicaciones (spec 018): desde
+la vista de refugio, **cualquier** miembro edita, pausa, reactiva y finaliza cualquier
+publicación del refugio. La idea es que haya miembros que no puedan hacerlo, pero los roles
+dentro del refugio todavía no existen.
+
+**Qué ya está preparado.** La decisión vive en un único lugar, `puedeEditarPublicacion` en
+[`publicaciones.service.ts`](../src/modules/publicaciones/publicaciones.service.ts). La ficha
+devuelve el resultado en `puedeEditar` y la app ya muestra u oculta las acciones con eso;
+`PUT` y `PATCH /estado` responden 403 si da `false`.
+
+**Cómo se arregla.** Junto con el ítem 17: una vez modelado el rol dentro del refugio, que
+`puedeEditarPublicacion` lo consulte en la rama `REFUGIO`. Del lado del front no hay nada que
+tocar.
+
+---
+
+## 19. Pausar o finalizar una publicación no toca sus solicitudes abiertas — Media
+
+**Qué pasa.** Pausar o finalizar a mano (spec 018) saca el aviso del feed y bloquea
+solicitudes **nuevas** (`409 PUBLICACION_NO_ACTIVA`), pero las que ya estaban `Pendiente` o
+`En_Revision` siguen abiertas: el refugio las puede seguir resolviendo y el solicitante las
+sigue viendo como en curso. Si finaliza, nada le avisa al solicitante.
+
+**Cómo se arregla.** Definir con el equipo qué pasa con ellas (¿se cancelan al finalizar?
+¿se bloquea finalizar con solicitudes abiertas, como la baja de mascota?) y aplicarlo en
+`cambiarEstadoPublicacion`.

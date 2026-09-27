@@ -29,3 +29,4 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 015 | Soporte (HU-15.1, HU-15.2, HU-15.3) | 13 | BORRADOR |
 | 016 | Switch de perfil refugio / adoptante (transversal) | 13 | EN REVISIÓN |
 | 017 | Perfil del refugio | 13 | EN REVISIÓN |
+| 018 | Editar publicación y cambiar su estado (sin HU) | 13 | EN REVISIÓN |

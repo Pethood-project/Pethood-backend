@@ -2,7 +2,9 @@ import type { NextFunction, Request, Response } from 'express';
 import { AppError } from '../../middlewares/errorHandler';
 import { parsearId } from '../../shared/validation/numbers';
 import {
+  cambiarEstadoPublicacionSchema,
   crearPublicacionSchema,
+  editarPublicacionSchema,
   filtrosFeedSchema,
   filtrosMisPublicacionesSchema,
 } from './publicaciones.dto';
@@ -76,7 +78,65 @@ export async function obtener(req: Request, res: Response, next: NextFunction): 
     const id = parsearId(req.params.id);
     if (id === null) throw new AppError('VALIDACION', 'La publicación no es válida', 400);
 
-    res.json(await service.obtenerPublicacion(id, req.usuario!.usuarioId));
+    res.json(await service.obtenerPublicacion(id, req.usuario!.usuarioId, req.ambito!));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Edición de los datos de la publicación. Multipart, igual que el alta: la validación va
+ * acá, después de multer. Responde la ficha actualizada.
+ */
+export async function editar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const id = parsearId(req.params.id);
+    if (id === null) throw new AppError('VALIDACION', 'La publicación no es válida', 400);
+
+    const resultado = editarPublicacionSchema.safeParse(req.body);
+
+    if (!resultado.success) {
+      const primero = resultado.error.issues[0];
+      throw new AppError('VALIDACION', primero?.message ?? 'Datos inválidos', 400);
+    }
+
+    const publicacion = await service.editarPublicacion(id, resultado.data, {
+      usuarioId: req.usuario!.usuarioId,
+      ambito: req.ambito!,
+      archivos: Array.isArray(req.files) ? req.files : [],
+    });
+
+    res.json(publicacion);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Pausar, reactivar o finalizar a mano. Responde la ficha con el estado nuevo. */
+export async function cambiarEstado(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const id = parsearId(req.params.id);
+    if (id === null) throw new AppError('VALIDACION', 'La publicación no es válida', 400);
+
+    const resultado = cambiarEstadoPublicacionSchema.safeParse(req.body);
+
+    if (!resultado.success) {
+      const primero = resultado.error.issues[0];
+      throw new AppError('VALIDACION', primero?.message ?? 'Datos inválidos', 400);
+    }
+
+    res.json(
+      await service.cambiarEstadoPublicacion(
+        id,
+        resultado.data.accion,
+        req.usuario!.usuarioId,
+        req.ambito!,
+      ),
+    );
   } catch (err) {
     next(err);
   }

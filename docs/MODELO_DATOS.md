@@ -102,7 +102,7 @@ Relaciones de estado: 1 Publicacion → N Publicacion_Estado (histórico; una so
 
 Histórico N:1 de estados de una publicación, mismo patrón que `Mascota_Estado`. `publicacion_estado_id PK`, FK `publicacion_id FK NOT NULL`, FK `estado_publicacion_id FK NOT NULL` + auditoría (alta/baja, sin campo de modificación propio). Cambiar de estado es baja de la fila vigente + alta de una nueva, así queda el historial completo. Un índice único **parcial** (`publicacion_estado_activo_uq`, sólo en la migración) garantiza una sola fila vigente por publicación. **Agregado fuera del diagrama de clases (2026-09-25).**
 
-**Toda publicación nace con estado**, según el de su mascota en ese momento. Las transiciones hoy son **automáticas** y siguen al estado de la mascota:
+**Toda publicación nace con estado**, según el de su mascota en ese momento:
 
 | Mascota | Publicación | Efecto |
 | --- | --- | --- |
@@ -110,9 +110,16 @@ Histórico N:1 de estados de una publicación, mismo patrón que `Mascota_Estado
 | `En_Transito`, `En_Tratamiento` | `Pausada` | sigue viva, pero fuera del feed |
 | `Adoptado`, `Fallecido` | `Finalizada` | aviso cerrado |
 
-El feed muestra sólo las publicaciones `Activa`, y la quota de 5 publicaciones activas cuenta sólo esas. Las publicaciones que existían antes de este cambio recibieron su estado con la misma regla en la migración `20260925125459_estado_publicacion`.
+Después del alta el estado cambia de dos formas (spec 018):
 
-**Previsto (con la HU de modificar publicación):** transiciones manuales — pausar, finalizar, reactivar — y eliminar (baja lógica de la publicación). Ver `DEUDA_TECNICA.md` ítem 16.
+- **Manual**, por quien gestiona la publicación: pausar (Activa → Pausada), reactivar (Pausada → Activa, con la mascota `Disponible` y dentro de la quota) y finalizar (Activa o Pausada → Finalizada).
+- **Automática**, siguiendo a la mascota con la misma tabla, pero **solo para pausar o finalizar**: una mascota que vuelve a `Disponible` no reactiva sola su publicación.
+
+`Finalizada` es terminal: no se edita ni vuelve a cambiar de estado. La mascota sí se puede publicar de nuevo en otra publicación, que reemplaza a la finalizada: al crearla, las finalizadas anteriores de esa mascota se dan de baja (lógica) en la misma transacción. Por eso "la publicación de una mascota" es la **en curso** (Activa o Pausada).
+
+El feed muestra sólo las publicaciones `Activa`, sólo esas reciben solicitudes, y la quota de 5 publicaciones activas cuenta sólo esas. Las publicaciones que existían antes de este cambio recibieron su estado con la misma regla en la migración `20260925125459_estado_publicacion`.
+
+**Pendiente:** eliminar una publicación (baja lógica). Ver `DEUDA_TECNICA.md` ítem 16.
 
 ### Favorito
 
