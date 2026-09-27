@@ -45,8 +45,11 @@ const booleanoSchema = z
   .optional()
   .transform((valor) => valor === true || valor === 'true');
 
-export const crearPublicacionSchema = z.object({
-  mascotaId: idSchema('La mascota'),
+/**
+ * Lo que se carga al publicar y se puede editar después, con las mismas reglas en los dos
+ * casos. La mascota queda afuera: se elige al crear y no se cambia.
+ */
+const camposEditables = {
   descripcion: textoSchema({
     max: LIMITES.publicacion.descripcion.max,
     etiqueta: 'La descripción',
@@ -62,9 +65,61 @@ export const crearPublicacionSchema = z.object({
     max: LIMITES.publicacion.vacunas.max,
     etiqueta: 'Las vacunas',
   }),
+};
+
+export const crearPublicacionSchema = z.object({
+  mascotaId: idSchema('La mascota'),
+  ...camposEditables,
 });
 
 export type CrearPublicacionDto = z.infer<typeof crearPublicacionSchema>;
+
+/**
+ * En `imagenes` de la edición, el lugar que ocupa cada foto nueva: la primera marca es el
+ * primer archivo de `fotos`, la segunda el segundo, y así.
+ */
+export const MARCADOR_FOTO_NUEVA = 'nueva';
+
+/**
+ * Edición de una publicación: reemplaza todos los datos editables (el formulario manda el
+ * aviso entero, igual que al crearlo). Una lista que no viaja queda vacía, como al crear.
+ *
+ * `imagenes` es la galería final en orden: cada ítem es una foto que la publicación ya
+ * tenía (su URL, tal como la devolvió la API) o `MARCADOR_FOTO_NUEVA` en el lugar de una
+ * de las fotos nuevas. Sin ninguna, hereda la foto de la mascota, como al crear.
+ */
+export const editarPublicacionSchema = z.object({
+  ...camposEditables,
+  imagenes: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((valor) => {
+      if (valor === undefined) return [];
+      return Array.isArray(valor) ? valor : [valor];
+    })
+    .refine((valores) => valores.length <= MAXIMO_IMAGENES, {
+      message: `Podés subir hasta ${MAXIMO_IMAGENES} fotos`,
+    }),
+});
+
+export type EditarPublicacionDto = z.infer<typeof editarPublicacionSchema>;
+
+/**
+ * Cambios de estado manuales:
+ * - PAUSAR: Activa → Pausada.
+ * - REACTIVAR: Pausada → Activa.
+ * - FINALIZAR: Activa o Pausada → Finalizada (terminal).
+ */
+export const ACCIONES_ESTADO_PUBLICACION = ['PAUSAR', 'REACTIVAR', 'FINALIZAR'] as const;
+export type AccionEstadoPublicacion = (typeof ACCIONES_ESTADO_PUBLICACION)[number];
+
+export const cambiarEstadoPublicacionSchema = z.object({
+  accion: z.enum(ACCIONES_ESTADO_PUBLICACION, {
+    errorMap: () => ({ message: 'La acción no es válida' }),
+  }),
+});
+
+export type CambiarEstadoPublicacionDto = z.infer<typeof cambiarEstadoPublicacionSchema>;
 
 /** Tamaño de página del feed y tope duro, para que un cliente no pida la tabla entera. */
 export const FEED_LIMITE_POR_DEFECTO = 20;
@@ -154,6 +209,12 @@ export interface PublicacionFeedDto {
    * propia mascota.
    */
   esPropia: boolean;
+  /**
+   * Si el usuario la puede editar y cambiar de estado desde el perfil activo: quien la
+   * publicó (perfil personal) o cualquier miembro del refugio dueño (perfil de refugio).
+   * Siempre `false` en el feed.
+   */
+  puedeEditar: boolean;
 }
 
 export interface FeedPublicacionesDto {
@@ -165,12 +226,14 @@ export interface FeedPublicacionesDto {
 /**
  * Nombres del catálogo `Estado_Publicacion` — el estado del AVISO, no el de la mascota.
  * - Activa: se ve en el feed y se puede solicitar.
- * - Pausada: sigue viva pero no aparece en el feed (hoy: la mascota está en tratamiento o en
- *   tránsito).
- * - Finalizada: el aviso quedó cerrado (hoy: la mascota fue adoptada o falleció).
+ * - Pausada: sigue viva pero no aparece en el feed (la pausó quien la gestiona, o la mascota
+ *   pasó a tratamiento o tránsito).
+ * - Finalizada: el aviso quedó cerrado para siempre (lo finalizó quien la gestiona, o la
+ *   mascota fue adoptada o falleció). La mascota se puede volver a publicar en otro aviso.
  *
- * Hoy las transiciones son automáticas y siguen al estado de la mascota
- * (`estadoPublicacionSegunMascota` en el servicio).
+ * Las transiciones manuales son `ACCIONES_ESTADO_PUBLICACION`; las automáticas siguen al
+ * estado de la mascota (`sincronizarConEstadoMascota` en el servicio) y solo pausan o
+ * finalizan: reactivar es siempre a mano.
  */
 export const ESTADO_PUBLICACION = {
   ACTIVA: 'Activa',

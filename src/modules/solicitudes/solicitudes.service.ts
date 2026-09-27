@@ -321,6 +321,9 @@ function aDatosHogar(hogar: HogarDto): repo.DatosHogar {
 /** Estado del que sale una mascota que todavía se puede solicitar. */
 const ESTADO_SOLICITABLE = 'Disponible';
 
+/** Solo un aviso activo recibe solicitudes: uno pausado o finalizado está fuera del feed. */
+const ESTADO_PUBLICACION_SOLICITABLE = 'Activa';
+
 export async function crearSolicitud(
   datos: CrearSolicitudDto,
   usuarioId: number,
@@ -339,6 +342,17 @@ export async function crearSolicitud(
   const estadoMascota = publicacion.mascota.historicoEstados[0]?.estadoMascota.nombre;
   if (estadoMascota !== ESTADO_SOLICITABLE) {
     throw new AppError('MASCOTA_NO_DISPONIBLE', 'Esta mascota ya no está disponible', 409);
+  }
+
+  // Desde que la publicación se puede pausar a mano, la mascota puede estar disponible con
+  // el aviso pausado: manda el aviso.
+  const estadoPublicacion = publicacion.historicoEstados[0]?.estadoPublicacion.nombre;
+  if (estadoPublicacion !== ESTADO_PUBLICACION_SOLICITABLE) {
+    throw new AppError(
+      'PUBLICACION_NO_ACTIVA',
+      'Esta publicación no está recibiendo solicitudes en este momento',
+      409,
+    );
   }
 
   const tipo = await repo.buscarTipoSolicitudPorNombre(datos.tipoSolicitud);

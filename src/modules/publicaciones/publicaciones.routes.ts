@@ -27,3 +27,16 @@ publicacionesRouter.post(
   comprimirImagen,
   controller.crear,
 );
+
+// Edición de los datos (todo menos la mascota). Reemplaza el aviso entero, como lo manda el
+// formulario: por eso PUT y no PATCH. Las fotos nuevas se comprimen antes de persistir.
+publicacionesRouter.put(
+  '/:id',
+  autenticar,
+  uploadImagenes('fotos', MAXIMO_IMAGENES),
+  comprimirImagen,
+  controller.editar,
+);
+
+// Pausar, reactivar o finalizar a mano: `{ accion: 'PAUSAR' | 'REACTIVAR' | 'FINALIZAR' }`.
+publicacionesRouter.patch('/:id/estado', autenticar, controller.cambiarEstado);

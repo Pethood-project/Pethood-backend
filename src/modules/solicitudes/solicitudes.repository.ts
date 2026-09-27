@@ -52,6 +52,12 @@ export function buscarPublicacionParaSolicitar(publicacionId: number) {
   return prisma.publicacion.findFirst({
     where: { id: publicacionId, fechaBaja: null, mascota: { fechaBaja: null } },
     include: {
+      historicoEstados: {
+        where: { fechaBaja: null },
+        include: { estadoPublicacion: true },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
       mascota: {
         include: {
           historicoEstados: {

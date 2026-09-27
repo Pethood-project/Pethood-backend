@@ -574,9 +574,11 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
     estadoMascota = 'Disponible',
     duenio = MIEMBRO_REFUGIO,
     refugioId: number | null = null,
+    estadoPublicacion = 'Activa',
   ) {
     return {
       id: PUBLICACION,
+      historicoEstados: [{ estadoPublicacion: { nombre: estadoPublicacion } }],
       mascota: {
         id: 8,
         usuarioId: duenio,
@@ -729,6 +731,18 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
     await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).rejects.toMatchObject({
       codigo: 'MASCOTA_NO_DISPONIBLE',
     });
+  });
+
+  it('no se puede solicitar sobre una publicación pausada, aunque la mascota esté disponible', async () => {
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue(
+      publicacionDisponible('Disponible', MIEMBRO_REFUGIO, null, 'Pausada') as never,
+    );
+
+    await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).rejects.toMatchObject({
+      codigo: 'PUBLICACION_NO_ACTIVA',
+      httpStatus: 409,
+    });
+    expect(repo.crearConHogar).not.toHaveBeenCalled();
   });
 
   it('devuelve el período de tránsito como día de calendario, no como instante', async () => {

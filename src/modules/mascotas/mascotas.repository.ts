@@ -1,6 +1,7 @@
 import type { GeneroMascota, TamanioMascota } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
+import { ESTADO_PUBLICACION } from '../publicaciones/publicaciones.dto';
 
 export interface DatosNuevaMascota {
   nombre: string;
@@ -188,8 +189,21 @@ export function listarPorAmbito(
         orderBy: { fechaAlta: 'desc' },
         take: 1,
       },
-      // Solo para saber si ya está publicada (`listarPublicables`): con una alcanza.
-      publicaciones: { where: { fechaBaja: null }, select: { id: true }, take: 1 },
+      // Solo para saber si tiene una publicación en curso (`listarPublicables`): con una
+      // alcanza. Las finalizadas no cuentan: la mascota se puede volver a publicar.
+      publicaciones: {
+        where: {
+          fechaBaja: null,
+          historicoEstados: {
+            some: {
+              fechaBaja: null,
+              estadoPublicacion: { nombre: { not: ESTADO_PUBLICACION.FINALIZADA } },
+            },
+          },
+        },
+        select: { id: true },
+        take: 1,
+      },
     },
     orderBy: { fechaAlta: 'desc' },
   });

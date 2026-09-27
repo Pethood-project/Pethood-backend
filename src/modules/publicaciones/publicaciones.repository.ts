@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta, datosBaja } from '../../shared/auditoria';
+import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { restarAnios } from '../../shared/validation/dates';
 import {
   ESTADO_PUBLICACION,
@@ -25,18 +25,46 @@ export interface DatosNuevaPublicacion {
   estadoPublicacionId: number;
 }
 
+/**
+ * Alta de una publicación. En la misma transacción da de baja (lógica) los avisos
+ * finalizados anteriores de la misma mascota: publicarla de nuevo reemplaza al viejo, que
+ * deja de aparecer en «Mis publicaciones». Sus solicitudes quedan como historial.
+ *
+ * Devuelve la publicación nueva y los ids de las finalizadas que retiró, para la auditoría.
+ */
 export function crear(datos: DatosNuevaPublicacion, usuarioAlta: number) {
   const { imagenes, estadoPublicacionId, ...resto } = datos;
 
-  return prisma.publicacion.create({
-    data: {
-      ...resto,
-      imagenes,
-      // imagenUrl se mantiene con la portada, para lo que ya lee ese campo.
-      imagenUrl: imagenes[0] ?? null,
-      ...datosAlta(usuarioAlta),
-      historicoEstados: { create: { estadoPublicacionId, ...datosAlta(usuarioAlta) } },
-    },
+  return prisma.$transaction(async (tx) => {
+    const finalizadas = await tx.publicacion.findMany({
+      where: {
+        mascotaId: datos.mascotaId,
+        fechaBaja: null,
+        historicoEstados: conEstadoVigente({ nombre: ESTADO_PUBLICACION.FINALIZADA }),
+      },
+      select: { id: true },
+    });
+    const retiradas = finalizadas.map((publicacion) => publicacion.id);
+
+    if (retiradas.length > 0) {
+      await tx.publicacion.updateMany({
+        where: { id: { in: retiradas } },
+        data: datosBaja(usuarioAlta),
+      });
+    }
+
+    const publicacion = await tx.publicacion.create({
+      data: {
+        ...resto,
+        imagenes,
+        // imagenUrl se mantiene con la portada, para lo que ya lee ese campo.
+        imagenUrl: imagenes[0] ?? null,
+        ...datosAlta(usuarioAlta),
+        historicoEstados: { create: { estadoPublicacionId, ...datosAlta(usuarioAlta) } },
+      },
+    });
+
+    return { publicacion, retiradas };
   });
 }
 
@@ -104,20 +132,66 @@ export function contarActivasPersonalesDeUsuario(usuarioId: number) {
   });
 }
 
+/** Estado vigente de la publicación, para las transiciones. */
+const ESTADO_VIGENTE = {
+  where: { fechaBaja: null },
+  include: { estadoPublicacion: true },
+  orderBy: { fechaAlta: 'desc' },
+  take: 1,
+} as const;
+
 /**
- * Publicación viva (sin baja) de una mascota, en el estado que esté: una mascota tiene a lo
- * sumo una. Trae el estado vigente para la sincronización automática.
+ * Publicación en curso (Activa o Pausada) de una mascota: a lo sumo hay una. Las
+ * finalizadas no cuentan: son avisos cerrados, y la mascota se puede volver a publicar.
+ * Trae el estado vigente para la sincronización automática.
  */
-export function buscarActivaDeMascota(mascotaId: number) {
+export function buscarEnCursoDeMascota(mascotaId: number) {
+  return prisma.publicacion.findFirst({
+    where: {
+      mascotaId,
+      fechaBaja: null,
+      historicoEstados: conEstadoVigente({ nombre: { not: ESTADO_PUBLICACION.FINALIZADA } }),
+    },
+    include: { historicoEstados: ESTADO_VIGENTE },
+    orderBy: { fechaAlta: 'desc' },
+  });
+}
+
+/**
+ * La publicación viva (sin baja) más reciente de una mascota, en el estado que esté: la en
+ * curso si tiene una y, si no, el último aviso finalizado.
+ */
+export function buscarUltimaDeMascota(mascotaId: number) {
   return prisma.publicacion.findFirst({
     where: { mascotaId, fechaBaja: null },
-    include: {
-      historicoEstados: {
-        where: { fechaBaja: null },
-        include: { estadoPublicacion: true },
-        orderBy: { fechaAlta: 'desc' },
-        take: 1,
-      },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { id: true },
+  });
+}
+
+export interface DatosEdicionPublicacion {
+  descripcion: string;
+  ubicacion: string;
+  requisitos: string[];
+  personalidad: string[];
+  desparasitado: boolean;
+  vacunas: string | null;
+  /** En orden: la primera es la portada. */
+  imagenes: string[];
+}
+
+export function actualizar(
+  publicacionId: number,
+  datos: DatosEdicionPublicacion,
+  usuarioModificacion: number,
+) {
+  return prisma.publicacion.update({
+    where: { id: publicacionId },
+    data: {
+      ...datos,
+      // Mismo par que en el alta: imagenUrl acompaña a la portada.
+      imagenUrl: datos.imagenes[0] ?? null,
+      ...datosModificacion(usuarioModificacion),
     },
   });
 }
@@ -135,12 +209,7 @@ const ESTADO_VISIBLE_EN_FEED = 'Disponible';
 
 /** Todo lo que hace falta para pintar la tarjeta y la ficha completa. */
 const RELACIONES_FEED = {
-  historicoEstados: {
-    where: { fechaBaja: null },
-    include: { estadoPublicacion: true },
-    orderBy: { fechaAlta: 'desc' },
-    take: 1,
-  },
+  historicoEstados: ESTADO_VIGENTE,
   mascota: {
     include: {
       raza: { include: { especie: true } },
