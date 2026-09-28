@@ -75,9 +75,9 @@ Ver catálogos arriba.
 
 ### Publicacion
 
-`publicacion_id PK`, `publicacion_titulo`, `publicacion_descripcion` (máx. 50 caracteres, trim), `publicacion_ubicacion`, `publicacion_requisitos`, `publicacion_imagen_url`, FK `mascota_id FK NOT NULL`, FK `usuario_id FK NOT NULL`.
+`publicacion_id PK`, `publicacion_titulo`, `publicacion_descripcion` (máx. 200 caracteres desde el 2026-09-28, antes 50; trim), `publicacion_ubicacion`, `publicacion_requisitos`, `publicacion_imagen_url`, FK `mascota_id FK NOT NULL`, FK `usuario_id FK NOT NULL`.
 
-**Campos agregados fuera del diagrama de clases (2026-08-13, HU-6.1):** `publicacion_ubicacion` (texto libre ≤50 caracteres con trim, AC-27) y `publicacion_requisitos` (`text[]`, los "Requisitos del adoptante" del tag input de AC-26, cada etiqueta ≤25 caracteres). Los requisitos se modelan como array plano y no como tabla hija porque cada uno es solo una etiqueta de texto libre sin atributos ni ciclo de vida propio. Pendiente: reflejarlos en el diagrama de clases del grupo.
+**Campos agregados fuera del diagrama de clases (2026-08-13, HU-6.1):** `publicacion_ubicacion` (texto libre ≤50 caracteres con trim, AC-27) y `publicacion_requisitos` (`text[]`, los "Requisitos del adoptante" del tag input de AC-26, cada etiqueta ≤20 caracteres desde el 2026-09-28; antes ≤25). Los requisitos se modelan como array plano y no como tabla hija porque cada uno es solo una etiqueta de texto libre sin atributos ni ciclo de vida propio. Pendiente: reflejarlos en el diagrama de clases del grupo.
 
 **Campos agregados por el diseño de GUI-24 (2026-08-17):** tampoco están en el diagrama de clases.
 
@@ -86,9 +86,10 @@ Ver catálogos arriba.
 | `publicacion_imagenes` | `text[]` | Hasta 5 fotos. **El orden del array es el orden de la galería**: la primera es la portada. `publicacion_imagen_url` se mantiene sincronizado con esa portada para no romper lo que ya lee ese campo. Si no se suben fotos propias, se hereda la de la mascota. |
 | `publicacion_personalidad` | `text[]` | Rasgos elegidos como pastillas (≤25 caracteres cada uno). Hoy las opciones están fijas en el frontend; cuando se definan, deberían pasar a ser un catálogo como Especie o Raza. |
 | `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
-| `publicacion_vacunas` | `text` | Texto libre ≤200. **Provisional**: el diseño muestra pastillas por vacuna (Rabia, Parvovirus, Moquillo, Triple) y conceptualmente esto pertenece a `Historia_Clinica` (Módulo 8, Fase 6). Se guarda como texto hasta que ese módulo exista. |
 
-**A revisar con el equipo:** los datos de salud (desparasitado, vacunas) viven hoy en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`. Cuando se implemente la Fase 6, evaluar migrarlos.
+**Vacunas (2026-09-27, spec 019):** `publicacion_vacunas` (texto libre) se eliminó. Las vacunas son de la mascota y viven en `Historia_Clinica` (`historia_clinica_tipo_vacuna`); la publicación las muestra leyéndolas de ahí.
+
+**A revisar con el equipo:** `publicacion_desparasitado` sigue en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`, como pasó con las vacunas.
 
 **Pendiente de definición:** `publicacion_titulo` es NOT NULL en el schema, pero el formulario de GUI-24 (AC-25 a AC-28) no pide un título — solo descripción, requisitos y ubicación. Confirmar con el equipo si el título se deriva del nombre de la mascota o si falta el campo en la pantalla.
 
@@ -146,6 +147,8 @@ Ver catálogos. Incluye `tipo_solicitud_secuencia_dias` para parametrizar ventan
 ### Historia_Clinica
 
 `historia_clinica_id PK`, `historia_clinica_fecha_visita`, `historia_clinica_fecha_proxima`, `historia_clinica_requiere_revision`, `historia_clinica_vacunacion`, `historia_clinica_titulo`, `historia_clinica_descripcion`, `historia_clinica_documento_url`, FK `mascota_id FK NOT NULL`.
+
+**Campo agregado fuera del diagrama de clases (2026-09-27, spec 019):** `historia_clinica_tipo_vacuna` (enum `tipo_vacuna`, nullable) — qué vacuna del plan de vacunación se aplicó: `PRIMOVACUNACION`, `MULTIPLE`, `REFUERZO_MULTIPLE`, `TRIVALENTE_FELINA`, `REFUERZO_TRIVALENTE_LEUCEMIA`, `REFUERZO_LEUCEMIA`, `ANTIRRABICA`. Va junto con `historia_clinica_vacunacion = true`; nulo en los registros que no son vacuna. Las vacunas de una mascota (sus medallas) son sus registros vigentes con este campo cargado. Es enum y no catálogo porque el plan es fijo y el código ramifica por tipo (especie que lo admite, color de la medalla). Pendiente: reflejarlo en el diagrama de clases del grupo.
 
 **Regla de negocio crítica: inmutabilidad.** No existe operación de UPDATE sobre un registro de historia clínica ya persistido. "Modificar" = dar de baja lógica del registro erróneo + crear uno nuevo. El campo de fecha de modificación genérico no debería usarse nunca en la práctica para esta entidad (si aparece poblado, es una señal de bug).
 

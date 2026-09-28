@@ -30,3 +30,4 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 016 | Switch de perfil refugio / adoptante (transversal) | 13 | EN REVISIÓN |
 | 017 | Perfil del refugio | 13 | EN REVISIÓN |
 | 018 | Editar publicación y cambiar su estado (sin HU) | 13 | EN REVISIÓN |
+| 019 | Vacunas de la mascota (HU-6.1, HU-8.1) | 13 | APROBADA |

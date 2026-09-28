@@ -14,11 +14,12 @@ export const LIMITES = {
   },
 
   publicacion: {
-    descripcion: { max: 50 },
-    requisito: { max: 25 },
+    /** «Sobre <nombre>» en la ficha: texto libre. Antes ≤50 (REQUISITOS.md), el equipo lo subió. */
+    descripcion: { max: 200 },
+    /** Cada requisito se muestra como medallita en la ficha: 20 para que entre en una línea. */
+    requisito: { max: 20 },
     ubicacion: { max: 50 },
     personalidad: { max: 25 },
-    vacunas: { max: 200 },
     imagenes: { max: 5 },
   },
 

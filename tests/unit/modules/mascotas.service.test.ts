@@ -31,6 +31,7 @@ const DATOS_ADOPTANTE: CrearMascotaDto = {
   tamanio: 'MEDIANO',
   especieId: 1,
   razaId: 2,
+  vacunas: [],
 };
 
 /** Arma lo que devolvería el repository tras crear, con el estado pedido. */
@@ -47,6 +48,7 @@ function mascotaCreada(estado: { id: number; nombre: string }, refugioId: number
     usuarioId: 2,
     raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
     historicoEstados: [{ estadoMascota: estado }],
+    historiaClinica: [] as { id?: number; tipoVacuna?: string; fechaVisita?: Date }[],
   };
 }
 
@@ -62,6 +64,7 @@ beforeEach(() => {
     id: 2,
     especieId: 1,
     nombre: 'Labrador',
+    especie: { id: 1, nombre: 'Perro' },
   } as never);
   vi.mocked(guardarImagen).mockResolvedValue('/api/v1/archivos/mascotas/x.jpg');
   vi.mocked(obtenerPublicacionActivaIdDeMascota).mockResolvedValue(null);
@@ -198,6 +201,7 @@ describe('crearMascota — estado elegido por el refugio', () => {
     tamanio: 'GRANDE',
     especieId: 1,
     razaId: 2,
+    vacunas: [],
   };
 
   beforeEach(() => {
@@ -478,6 +482,76 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
   });
 });
 
+describe('crearMascota — vacunas iniciales (spec 019)', () => {
+  beforeEach(() => {
+    vi.mocked(repo.buscarEstadoMascotaPorNombre).mockResolvedValue(ESTADOS.Disponible as never);
+    vi.mocked(repo.crearConEstado).mockResolvedValue(mascotaCreada(ESTADOS.Disponible) as never);
+  });
+
+  it('las da de alta en la historia clínica con el nombre y la descripción del plan', async () => {
+    await service.crearMascota(
+      {
+        ...DATOS_ADOPTANTE,
+        vacunas: [
+          { tipo: 'PRIMOVACUNACION', fecha: new Date(2022, 4, 1) },
+          { tipo: 'ANTIRRABICA', fecha: new Date(2022, 7, 1) },
+        ],
+      },
+      { usuarioId: 2, archivo: ARCHIVO },
+    );
+
+    const vacunas = vi.mocked(repo.crearConEstado).mock.calls[0]![0].vacunas;
+    expect(vacunas).toEqual([
+      expect.objectContaining({
+        tipoVacuna: 'PRIMOVACUNACION',
+        fechaVisita: new Date(2022, 4, 1),
+        titulo: 'Primovacunación',
+      }),
+      expect.objectContaining({ tipoVacuna: 'ANTIRRABICA', titulo: 'Antirrábica' }),
+    ]);
+    expect(vacunas[1]!.descripcion).toContain('obligatoria por ley');
+  });
+
+  it('rechaza una vacuna que no es del plan de la especie', async () => {
+    await expect(
+      service.crearMascota(
+        {
+          ...DATOS_ADOPTANTE,
+          vacunas: [{ tipo: 'TRIVALENTE_FELINA', fecha: new Date(2022, 4, 1) }],
+        },
+        { usuarioId: 2, archivo: ARCHIVO },
+      ),
+    ).rejects.toMatchObject({ codigo: 'VALIDACION', httpStatus: 400 });
+    expect(guardarImagen).not.toHaveBeenCalled();
+  });
+
+  it('rechaza la misma vacuna dos veces', async () => {
+    await expect(
+      service.crearMascota(
+        {
+          ...DATOS_ADOPTANTE,
+          vacunas: [
+            { tipo: 'ANTIRRABICA', fecha: new Date(2022, 7, 1) },
+            { tipo: 'ANTIRRABICA', fecha: new Date(2023, 7, 1) },
+          ],
+        },
+        { usuarioId: 2, archivo: ARCHIVO },
+      ),
+    ).rejects.toMatchObject({ mensaje: 'No podés cargar la misma vacuna dos veces' });
+  });
+
+  it('rechaza una vacuna anterior al nacimiento', async () => {
+    await expect(
+      service.crearMascota(
+        { ...DATOS_ADOPTANTE, vacunas: [{ tipo: 'ANTIRRABICA', fecha: new Date(2022, 0, 1) }] },
+        { usuarioId: 2, archivo: ARCHIVO },
+      ),
+    ).rejects.toMatchObject({
+      mensaje: 'La fecha de la vacuna Antirrábica no puede ser anterior al nacimiento',
+    });
+  });
+});
+
 describe('obtenerMascota — ficha individual (HU-6.4)', () => {
   it('404 si la mascota no existe', async () => {
     vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(null as never);
@@ -569,6 +643,25 @@ describe('obtenerMascota — ficha individual (HU-6.4)', () => {
     await expect(service.obtenerMascota(10, 2, 'PERSONAL')).resolves.toMatchObject({
       publicacionActivaId: null,
     });
+  });
+
+  it('devuelve una medalla por vacuna vigente, con la aplicación más reciente', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue({
+      ...mascotaCreada(ESTADOS.Disponible),
+      historiaClinica: [
+        { tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2023, 7, 1) },
+        { tipoVacuna: 'PRIMOVACUNACION', fechaVisita: new Date(2022, 4, 1) },
+        { tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2024, 7, 1) },
+      ],
+    } as never);
+
+    const ficha = await service.obtenerMascota(10, 2, 'PERSONAL');
+
+    // En el orden del calendario, no en el de carga.
+    expect(ficha.vacunas).toEqual([
+      expect.objectContaining({ tipo: 'PRIMOVACUNACION', fechaAplicacion: '2022-05-01' }),
+      expect.objectContaining({ tipo: 'ANTIRRABICA', fechaAplicacion: '2024-08-01' }),
+    ]);
   });
 
   it('con publicación activa, devuelve su id para el botón "Ver publicación asociada"', async () => {

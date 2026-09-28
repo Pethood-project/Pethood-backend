@@ -3,6 +3,7 @@
  * decimales) salen de `shared/validation`; acá solo se compone lo propio de Mascota.
  */
 import { z } from 'zod';
+import { TIPOS_VACUNA, type VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
@@ -11,6 +12,7 @@ import {
   fechaPasadaSchema,
   idSchema,
   listaDeIdsSchema,
+  listaJsonSchema,
   textoOpcionalSchema,
   textoSchema,
 } from '../../shared/validation/schemas';
@@ -20,6 +22,16 @@ export const GENEROS = ['MACHO', 'HEMBRA'] as const;
 
 /** Un adoptante indica si registra una mascota propia o si la ofrece en adopción. */
 export const DESTINOS = ['PROPIA', 'ADOPCION'] as const;
+
+/**
+ * Vacuna que la mascota ya tiene al cargarla (spec 019). Se da de alta como registro de su
+ * historia clínica; que sea del plan de la especie y posterior al nacimiento lo chequea el
+ * service, que es quien conoce la especie de la raza elegida.
+ */
+const vacunaInicialSchema = z.object({
+  tipo: z.enum(TIPOS_VACUNA, { errorMap: () => ({ message: 'La vacuna no es válida' }) }),
+  fecha: fechaPasadaSchema('La fecha de la vacuna'),
+});
 
 /** Campos que piden por igual el formulario del adoptante y el del refugio. */
 const camposBase = {
@@ -34,6 +46,11 @@ const camposBase = {
   descripcion: textoOpcionalSchema({
     max: LIMITES.mascota.descripcion.max,
     etiqueta: 'La descripción',
+  }),
+  /** JSON en el multipart: `[{ "tipo": "ANTIRRABICA", "fecha": "2026-05-10" }]`. Opcional. */
+  vacunas: listaJsonSchema(vacunaInicialSchema, {
+    max: TIPOS_VACUNA.length,
+    etiqueta: 'Las vacunas',
   }),
 };
 
@@ -119,8 +136,10 @@ export interface MascotaCreadaDto {
 
 /**
  * Ficha de detalle (HU-6.4): igual que el listado, más el id de la publicación activa para
- * el botón "Ver publicación asociada". `null` si la mascota no está publicada.
+ * el botón "Ver publicación asociada" (`null` si la mascota no está publicada) y sus vacunas.
  */
 export interface FichaMascotaDto extends MascotaCreadaDto {
   publicacionActivaId: number | null;
+  /** Medallas: una por vacuna vigente en la historia clínica (spec 019). */
+  vacunas: VacunaAplicadaDto[];
 }

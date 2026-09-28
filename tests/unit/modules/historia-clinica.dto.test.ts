@@ -88,15 +88,38 @@ describe('crearHistoriaClinicaSchema — fecha próxima', () => {
   });
 });
 
-describe('crearHistoriaClinicaSchema — booleanos desde multipart', () => {
-  it('vacunacion ausente colapsa a false', () => {
+describe('crearHistoriaClinicaSchema — vacuna (spec 019)', () => {
+  it('sin tipoVacuna es un registro común', () => {
     const resultado = crearHistoriaClinicaSchema.safeParse(DATOS_BASE);
-    expect(resultado.success && resultado.data.vacunacion).toBe(false);
+    expect(resultado.success && resultado.data.tipoVacuna).toBeNull();
   });
 
-  it('vacunacion como texto "true" se lee como true', () => {
-    const resultado = crearHistoriaClinicaSchema.safeParse({ ...DATOS_BASE, vacunacion: 'true' });
-    expect(resultado.success && resultado.data.vacunacion).toBe(true);
+  it('un tipoVacuna vacío (multipart) cuenta como ausente', () => {
+    const resultado = crearHistoriaClinicaSchema.safeParse({ ...DATOS_BASE, tipoVacuna: '' });
+    expect(resultado.success && resultado.data.tipoVacuna).toBeNull();
+  });
+
+  it('una vacuna no necesita título ni descripción', () => {
+    const resultado = crearHistoriaClinicaSchema.safeParse({
+      fechaVisita: ayer(),
+      tipoVacuna: 'ANTIRRABICA',
+    });
+    expect(resultado.success && resultado.data.tipoVacuna).toBe('ANTIRRABICA');
+  });
+
+  it('rechaza un tipo de vacuna que no existe', () => {
+    const resultado = crearHistoriaClinicaSchema.safeParse({
+      fechaVisita: ayer(),
+      tipoVacuna: 'COVID',
+    });
+    expect(!resultado.success && resultado.error.issues[0]!.message).toBe('La vacuna no es válida');
+  });
+
+  it('un registro común sin título avisa qué falta', () => {
+    const resultado = crearHistoriaClinicaSchema.safeParse({ ...DATOS_BASE, titulo: '' });
+    expect(!resultado.success && resultado.error.issues[0]!.message).toBe(
+      'El título es obligatorio',
+    );
   });
 });
 

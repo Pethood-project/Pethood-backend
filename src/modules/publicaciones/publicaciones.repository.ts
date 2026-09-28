@@ -16,7 +16,6 @@ export interface DatosNuevaPublicacion {
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
-  vacunas: string | null;
   /** En orden: la primera es la portada. */
   imagenes: string[];
   mascotaId: number;
@@ -175,7 +174,6 @@ export interface DatosEdicionPublicacion {
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
-  vacunas: string | null;
   /** En orden: la primera es la portada. */
   imagenes: string[];
 }
@@ -210,6 +208,8 @@ const ESTADO_VISIBLE_EN_FEED = 'Disponible';
 /** Todo lo que hace falta para pintar la tarjeta y la ficha completa. */
 const RELACIONES_FEED = {
   historicoEstados: ESTADO_VIGENTE,
+  // Quién la publicó, para el «Publicado por» de la ficha cuando no es de un refugio.
+  usuario: { select: { nombre: true, apellido: true } },
   mascota: {
     include: {
       raza: { include: { especie: true } },
@@ -219,6 +219,11 @@ const RELACIONES_FEED = {
         include: { estadoMascota: true },
         orderBy: { fechaAlta: 'desc' },
         take: 1,
+      },
+      // Las vacunas vigentes de la mascota, para las medallas de la ficha (spec 019).
+      historiaClinica: {
+        where: { fechaBaja: null, tipoVacuna: { not: null } },
+        select: { tipoVacuna: true, fechaVisita: true },
       },
     },
   },

@@ -35,6 +35,7 @@ function mascota(usuarioId: number, refugioId: number | null = null) {
     raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
     refugio: refugioId ? { id: refugioId, nombre: 'Refugio Patitas', direccion: 'Calle 1' } : null,
     historicoEstados: [{ estadoMascota: { id: 1, nombre: 'Disponible' } }],
+    historiaClinica: [{ tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2025, 4, 1) }],
   };
 }
 
@@ -47,11 +48,11 @@ function publicacionActiva(duenio: number, refugioId: number | null = null) {
     requisitos: [],
     personalidad: [],
     desparasitado: true,
-    vacunas: 'Al día',
     imagenes: [],
     fechaAlta: new Date('2026-08-19T15:00:00.000Z'),
     mascotaId: 8,
     usuarioId: duenio,
+    usuario: { nombre: 'Ana', apellido: 'López' },
     historicoEstados: [{ estadoPublicacion: ESTADOS_PUBLICACION.Activa }],
     mascota: mascota(duenio, refugioId),
   };
@@ -130,6 +131,30 @@ describe('obtenerPublicacion — esPropia', () => {
       esPropia: false,
     });
   });
+
+  it('publicadoPor trae a la persona cuando la publicación no es de un refugio', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99) as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
+
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({
+      refugio: null,
+      publicadoPor: { nombre: 'Ana', apellido: 'López' },
+    });
+  });
+
+  it('publicadoPor en null en una publicación de refugio: no expone a su personal', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(99, 1) as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 2 } as never);
+
+    await expect(
+      service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL'),
+    ).resolves.toMatchObject({
+      refugio: { nombre: 'Refugio Patitas' },
+      publicadoPor: null,
+    });
+  });
 });
 
 describe('listarFeed', () => {
@@ -188,6 +213,21 @@ describe('estadoPublicacionSegunMascota — transición automática', () => {
     });
   });
 
+  it('la ficha muestra las vacunas de la historia clínica de la mascota (spec 019)', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionActiva(USUARIO) as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
+
+    const ficha = await service.obtenerPublicacion(PUBLICACION, USUARIO, 'PERSONAL');
+
+    expect(ficha.vacunas).toEqual([
+      expect.objectContaining({
+        tipo: 'ANTIRRABICA',
+        nombre: 'Antirrábica',
+        fechaAplicacion: '2025-05-01',
+      }),
+    ]);
+  });
+
   it('404 en la ficha si la publicación no tiene estado vigente (dato inconsistente)', async () => {
     const sinEstado = { ...publicacionActiva(USUARIO), historicoEstados: [] };
     vi.mocked(repo.buscarActivaPorId).mockResolvedValue(sinEstado as never);
@@ -222,7 +262,6 @@ describe('crearPublicacion — estado inicial', () => {
     requisitos: [],
     personalidad: [],
     desparasitado: false,
-    vacunas: null,
   };
   const CONTEXTO = { usuarioId: USUARIO, ambito: 'PERSONAL' as const, archivos: [] };
 
@@ -471,7 +510,6 @@ describe('editarPublicacion', () => {
     requisitos: ['Casa con patio'],
     personalidad: ['Tranquilo'],
     desparasitado: true,
-    vacunas: 'Rabia',
     imagenes: [] as string[],
   };
   const CONTEXTO = { usuarioId: USUARIO, ambito: 'PERSONAL' as const, archivos: [] };

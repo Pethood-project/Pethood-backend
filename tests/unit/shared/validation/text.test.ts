@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mensajeLongitud,
   parsearListaDeValores,
+  parsearListaJson,
   mensajeObligatorio,
   validarTexto,
 } from '../../../../src/shared/validation/text';
@@ -158,5 +159,29 @@ describe('parsearListaDeValores', () => {
 
   it('rechaza un parámetro repetido (llega como array)', () => {
     expect(parsearListaDeValores(['Pendiente'], ESTADOS, 'El estado').valido).toBe(false);
+  });
+});
+
+describe('parsearListaJson', () => {
+  it('ausente o vacía es una lista vacía', () => {
+    expect(parsearListaJson(undefined, 'Las vacunas')).toEqual({ valido: true, valor: [] });
+    expect(parsearListaJson('', 'Las vacunas')).toEqual({ valido: true, valor: [] });
+  });
+
+  it('parsea el JSON que llega como texto en un multipart', () => {
+    expect(parsearListaJson('[{"tipo":"ANTIRRABICA"}]', 'Las vacunas')).toEqual({
+      valido: true,
+      valor: [{ tipo: 'ANTIRRABICA' }],
+    });
+  });
+
+  it('acepta el array ya parseado de un body JSON', () => {
+    expect(parsearListaJson([1, 2], 'Las vacunas')).toEqual({ valido: true, valor: [1, 2] });
+  });
+
+  it('rechaza un JSON roto o que no es una lista', () => {
+    const error = { valido: false, error: 'Las vacunas: formato inválido' };
+    expect(parsearListaJson('[{', 'Las vacunas')).toEqual(error);
+    expect(parsearListaJson('{"tipo":"ANTIRRABICA"}', 'Las vacunas')).toEqual(error);
   });
 });

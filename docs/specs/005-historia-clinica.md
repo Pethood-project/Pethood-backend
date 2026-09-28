@@ -42,9 +42,9 @@ Body de `POST` / `PATCH` (multipart/form-data):
 fechaVisita: "2026-03-10"       // obligatorio en POST, opcional en PATCH (mantiene el valor vigente si no viene)
 fechaProxima: "2026-09-10"      // opcional; si viene, debe ser estrictamente posterior a hoy
 requiereRevision: "true"        // opcional, default false
-vacunacion: "true"              // solo en POST; no es editable en PATCH
-titulo: "Control anual"         // obligatorio en POST, opcional en PATCH
-descripcion: "..."              // obligatorio en POST, opcional en PATCH
+tipoVacuna: "ANTIRRABICA"       // solo en POST; con él el registro es una vacuna (spec 019). No es editable en PATCH
+titulo: "Control anual"         // obligatorio en POST salvo en una vacuna (se titula con su nombre), opcional en PATCH
+descripcion: "..."              // obligatorio en POST salvo en una vacuna (default: la del plan), opcional en PATCH
 documento: <file>               // opcional, imagen (jpg/png/webp) o pdf, ≤5MB
 rotacion: "90"                  // opcional, solo si documento es imagen: 90 | 180 | 270
 cropX / cropY / cropWidth / cropHeight: "0" / "0" / "800" / "600"  // opcional, los cuatro juntos o ninguno; px sobre la imagen original
@@ -75,14 +75,15 @@ Los nombres de HU en el código (`HU-8.1`, `HU-8.2`, `HU-8.3`) son la referencia
    valores conservadores documentados en el propio `limits.ts`.
 5. **Documento**: imagen (jpg/png/webp) o pdf, ≤5MB (tabla de REQUISITOS.md §4). Si ya había uno
    vinculado al registro, el nuevo lo reemplaza.
-6. **Vacunación**: si el registro se marca como vacuna, el título pasa a integrar la lista de
-   vacunas visible en el perfil de la mascota (HU-8.1, último criterio) — se resuelve leyendo
-   `HistoriaClinica` filtrando `vacunacion=true` desde el endpoint de mascota/perfil existente, no
-   se desnormaliza en `Mascota`.
+6. **Vacunación** (reemplazada por spec 019): una vacuna se carga eligiendo `tipoVacuna` del
+   plan de la especie, y pasa a integrar las vacunas visibles en el perfil de la mascota (HU-8.1,
+   último criterio) como medalla — se resuelve leyendo `HistoriaClinica` filtrando
+   `tipoVacuna` no nulo, no se desnormaliza en `Mascota`. `vacunacion` ya no se recibe: lo
+   deriva el backend.
 7. **Inmutabilidad / modificación (HU-8.3)**: "modificar" nunca hace UPDATE. Da de baja lógica el
    registro anterior y crea uno nuevo con los campos fusionados (los que no vinieron en el PATCH
-   conservan el valor del registro anterior, salvo `vacunacion` que no es editable y siempre se
-   arrastra).
+   conservan el valor del registro anterior, salvo `vacunacion` y `tipoVacuna`, que no son
+   editables y siempre se arrastran; en una vacuna el título tampoco se edita).
 8. **Permisos de edición y baja (HU-8.3 / HU-8.4, misma regla)**:
    - Adoptante: solo si es dueño de la mascota **y** creó el registro que edita/elimina
      (`historiaClinica.usuarioAlta === actor.usuarioId`).
@@ -128,3 +129,5 @@ segunda persona singular, consistente con el resto de los mensajes del backend).
 - 2026-08-24: se decide exponer el alta y el listado anidados bajo `/mascotas/:mascotaId/...` y el
   detalle/edición como recurso propio `/historias-clinicas/:id`, siguiendo el patrón ya usado por
   `mascotasRouter` (`/mias`) y por la relación 1:N del modelo.
+- 2026-09-27: el alta de vacunas cambia con la spec 019: `vacunacion` deja de ser un tilde y
+  pasa a derivarse de `tipoVacuna`, que se elige de un plan de vacunación por especie.

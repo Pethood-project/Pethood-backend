@@ -2,6 +2,7 @@ import { AppError } from '../../middlewares/errorHandler';
 import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
+import { vacunasAplicadas, validarVacunaDeMascota } from '../../shared/vacunas';
 import { aFechaISO } from '../../shared/validation/dates';
 import {
   ESTADOS_QUE_HABILITAN_PUBLICACION,
@@ -42,7 +43,11 @@ export interface ResultadoEliminacion {
   publicacionesDadasDeBaja: number;
 }
 
-type MascotaConRelaciones = Awaited<ReturnType<typeof repo.crearConEstado>>;
+/** Lo que necesita `aDto`: la mascota con raza, especie y estado vigente. */
+type MascotaConRelaciones = Omit<
+  Awaited<ReturnType<typeof repo.crearConEstado>>,
+  'historiaClinica'
+>;
 
 function aDto(mascota: MascotaConRelaciones): MascotaCreadaDto {
   const estado = mascota.historicoEstados[0]!.estadoMascota;
@@ -137,6 +142,37 @@ async function resolverRaza(razaId: number, especieId: number) {
   return raza;
 }
 
+/**
+ * Vacunas que la mascota ya tiene al darla de alta (spec 019), listas para crearse como
+ * registros de historia clínica. Cada una tiene que ser del plan de la especie y posterior
+ * al nacimiento, y no se repite: un mismo tipo dos veces en el alta es un error de carga.
+ */
+function resolverVacunasIniciales(
+  vacunas: CrearMascotaDto['vacunas'],
+  mascota: { especie: string; fechaNacimiento: Date },
+): repo.DatosVacunaInicial[] {
+  const tipos = new Set(vacunas.map((vacuna) => vacuna.tipo));
+
+  if (tipos.size !== vacunas.length) {
+    throw new AppError('VALIDACION', 'No podés cargar la misma vacuna dos veces', 400);
+  }
+
+  return vacunas.map(({ tipo, fecha }) => {
+    const resultado = validarVacunaDeMascota(tipo, fecha, mascota);
+
+    if (!resultado.valida) {
+      throw new AppError('VALIDACION', resultado.error, 400);
+    }
+
+    return {
+      tipoVacuna: tipo,
+      fechaVisita: fecha,
+      titulo: resultado.vacuna.nombre,
+      descripcion: resultado.vacuna.descripcion,
+    };
+  });
+}
+
 async function resolverEstadoInicial(datos: CrearMascotaDto): Promise<number> {
   if (datos.actor === 'ADOPTANTE') {
     const nombre = ESTADO_POR_DESTINO[datos.destino];
@@ -173,6 +209,10 @@ export async function crearMascota(
 
   const usuario = await exigirUsuarioVerificado(contexto.usuarioId);
   const raza = await resolverRaza(datos.razaId, datos.especieId);
+  const vacunas = resolverVacunasIniciales(datos.vacunas, {
+    especie: raza.especie.nombre,
+    fechaNacimiento: datos.fechaNacimiento,
+  });
   const estadoMascotaId = await resolverEstadoInicial(datos);
 
   if (datos.actor === 'REFUGIO' && !usuario.refugioId) {
@@ -181,7 +221,7 @@ export async function crearMascota(
 
   const imagenUrl = await guardarImagen(contexto.archivo, SUBCARPETA_FOTOS);
 
-  let mascota: MascotaConRelaciones;
+  let mascota: Awaited<ReturnType<typeof repo.crearConEstado>>;
   try {
     // La mascota queda asociada automáticamente a quien la crea.
     mascota = await repo.crearConEstado(
@@ -198,6 +238,7 @@ export async function crearMascota(
         refugioId: datos.actor === 'REFUGIO' ? usuario.refugioId : null,
         usuarioId: usuario.id,
         estadoMascotaId,
+        vacunas,
       },
       usuario.id,
     );
@@ -212,8 +253,20 @@ export async function crearMascota(
     accion: 'CREAR',
     entidad: 'Mascota',
     entidadId: mascota.id,
-    detalle: `actor=${datos.actor}`,
+    detalle: `actor=${datos.actor} vacunas=${vacunas.length}`,
   });
+
+  // Cada vacuna es un registro de historia clínica más: se audita igual que un alta desde
+  // ese módulo.
+  for (const registro of mascota.historiaClinica) {
+    await registrarAuditoria({
+      usuarioId: usuario.id,
+      accion: 'CREAR',
+      entidad: 'HistoriaClinica',
+      entidadId: registro.id,
+      detalle: `mascota=${mascota.id}`,
+    });
+  }
 
   return aDto(mascota);
 }
@@ -360,7 +413,11 @@ export async function obtenerMascota(
 
   const publicacionActivaId = await obtenerPublicacionActivaIdDeMascota(mascotaId);
 
-  return { ...aDto(mascota as MascotaConRelaciones), publicacionActivaId };
+  return {
+    ...aDto(mascota as MascotaConRelaciones),
+    publicacionActivaId,
+    vacunas: vacunasAplicadas(mascota.historiaClinica, mascota.raza.especie.nombre),
+  };
 }
 
 /**

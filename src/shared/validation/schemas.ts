@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { validarFechaFutura, validarFechaPasada } from './dates';
 import { parsearDecimal, parsearListaDeIds } from './numbers';
-import { parsearListaDeValores, validarTexto, type OpcionesTexto } from './text';
+import { parsearListaDeValores, parsearListaJson, validarTexto, type OpcionesTexto } from './text';
 
 export function textoSchema(opciones: Omit<OpcionesTexto, 'obligatorio'>) {
   return z.unknown().transform((valor, ctx) => {
@@ -210,4 +210,29 @@ export function enteroSchema(opciones: { min: number; max: number; etiqueta: str
     .int(`${etiqueta} no es válido`)
     .min(min, `${etiqueta} debe estar entre ${min} y ${max}`)
     .max(max, `${etiqueta} debe estar entre ${min} y ${max}`);
+}
+
+/**
+ * Lista de objetos que llega como JSON en un campo multipart (ver `parsearListaJson`). Cada
+ * ítem se valida con `item`, así sus mensajes llegan tal cual al usuario.
+ */
+export function listaJsonSchema<T extends z.ZodTypeAny>(
+  item: T,
+  opciones: { max: number; etiqueta: string },
+) {
+  const { max, etiqueta } = opciones;
+
+  return z
+    .unknown()
+    .transform((valor, ctx) => {
+      const resultado = parsearListaJson(valor, etiqueta);
+
+      if (!resultado.valido) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+        return z.NEVER;
+      }
+
+      return resultado.valor;
+    })
+    .pipe(z.array(item).max(max, `${etiqueta}: como máximo ${max}`));
 }

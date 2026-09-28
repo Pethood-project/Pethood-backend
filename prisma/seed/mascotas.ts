@@ -5,7 +5,14 @@
 // "Adoptado"/"En_Transito" son las que tienen solicitud aprobada y seguimiento; las de Ana a
 // título personal son las de "Mis mascotas" con historia clínica. Los estados están variados
 // para que los dashboards tengan algo en cada bucket.
-import type { GeneroMascota, Mascota, Publicacion, TamanioMascota } from '@prisma/client';
+import type {
+  GeneroMascota,
+  Mascota,
+  Publicacion,
+  TamanioMascota,
+  TipoVacuna,
+} from '@prisma/client';
+import { buscarVacuna } from '../../src/shared/vacunas';
 import {
   foto,
   FOTOS_GATO,
@@ -27,7 +34,6 @@ interface DefPublicacion {
   tagline: string;
   requisitos: string[];
   personalidad: string[];
-  vacunas: string;
   desparasitado?: boolean;
   /** Antigüedad de la publicación: cubre los 4 buckets del dashboard (0-15/15-30/30-60/+60). */
   diasAtras: number;
@@ -41,7 +47,8 @@ interface DefHistoriaClinica {
   diasAtras: number;
   proximaEnDias?: number;
   requiereRevision?: boolean;
-  vacunacion?: boolean;
+  /** Si el registro es una vacuna: el título tiene que ser el nombre de esa vacuna. */
+  tipoVacuna?: TipoVacuna;
 }
 
 interface DefMascota {
@@ -59,6 +66,11 @@ interface DefMascota {
   fotos: string[];
   /** Histórico de estados, del más viejo al vigente: [estado, hace cuántos días]. */
   historial: [string, number][];
+  /**
+   * Plan de vacunación que ya tenía al cargarla, como en el alta desde la app (spec 019):
+   * cada una se registra en la historia clínica a la edad del calendario.
+   */
+  vacunas?: TipoVacuna[];
   publicacion?: DefPublicacion;
   historiaClinica?: DefHistoriaClinica[];
 }
@@ -86,20 +98,20 @@ const CATALOGO: DefMascota[] = [
       'que la visitan.',
     fotos: [perro(0), perro(1), perro(2), perro(3)],
     historial: [['Disponible', 3]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Labradora joven, ideal para familia con chicos',
       requisitos: ['Casa con patio', 'Paseos diarios'],
       personalidad: ['Juguetón', 'Cariñoso', 'Bueno con chicos'],
-      vacunas: 'Rabia, Parvovirus, Moquillo',
       diasAtras: 3,
     },
     historiaClinica: [
       {
-        titulo: 'Vacuna antirrábica',
+        titulo: 'Antirrábica',
         descripcion: 'Dosis anual aplicada sin reacciones. Próxima en 12 meses.',
         diasAtras: 40,
         proximaEnDias: 325,
-        vacunacion: true,
+        tipoVacuna: 'ANTIRRABICA',
       },
       {
         titulo: 'Control general de ingreso',
@@ -126,11 +138,11 @@ const CATALOGO: DefMascota[] = [
       'convive sin problema con otros perros y con gatos. Busca una casa donde envejecer tranquilo.',
     fotos: [perro(4), perro(5), perro(6)],
     historial: [['Disponible', 20]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Caniche senior, tranquilo y de sillón',
       requisitos: ['Ambiente tranquilo'],
       personalidad: ['Tranquilo', 'Cariñoso', 'Bueno con otras mascotas'],
-      vacunas: 'Rabia, Quíntuple',
       diasAtras: 20,
     },
   },
@@ -151,11 +163,11 @@ const CATALOGO: DefMascota[] = [
       'siga el ritmo. A cambio duerme sobre tu cabeza todas las noches.',
     fotos: [gato(0), gato(1), gato(2), gato(3), gato(4)],
     historial: [['Disponible', 40]],
+    vacunas: ['TRIVALENTE_FELINA'],
     publicacion: {
       tagline: 'Siamés joven con mucha energía',
       requisitos: ['Balcón con red'],
       personalidad: ['Activo', 'Independiente', 'Juguetón'],
-      vacunas: 'Triple felina',
       diasAtras: 40,
     },
   },
@@ -176,11 +188,11 @@ const CATALOGO: DefMascota[] = [
       'perros, gatos y chicos sin que haya que explicarle nada.',
     fotos: [perro(7), perro(8), perro(9)],
     historial: [['Disponible', 75]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'REFUERZO_MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Mestizo mediano, equilibrado y sociable',
-      requisitos: ['Experiencia con perros'],
+      requisitos: ['Experiencia previa'],
       personalidad: ['Sociable', 'Protector', 'Bueno con chicos', 'Bueno con otras mascotas'],
-      vacunas: 'Rabia, Séxtuple',
       diasAtras: 75,
     },
   },
@@ -201,11 +213,11 @@ const CATALOGO: DefMascota[] = [
       'cuando ella lo decide.',
     fotos: [gato(4), gato(3), gato(0)],
     historial: [['Disponible', 10]],
+    vacunas: ['TRIVALENTE_FELINA', 'REFUERZO_TRIVALENTE_LEUCEMIA', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Gata tranquila para casa sin perros',
       requisitos: ['Casa sin perros'],
       personalidad: ['Tranquilo', 'Independiente'],
-      vacunas: 'Triple felina, Rabia',
       diasAtras: 10,
     },
   },
@@ -226,11 +238,11 @@ const CATALOGO: DefMascota[] = [
       'paciencia para acompañarlo en el primer año, que es el que más trabajo da.',
     fotos: [perro(9), perro(3), perro(1), perro(2), perro(7)],
     historial: [['Disponible', 1]],
+    vacunas: ['PRIMOVACUNACION'],
     publicacion: {
       tagline: 'Cachorro bulldog de 7 meses',
-      requisitos: ['Tiempo para un cachorro', 'Control veterinario'],
+      requisitos: ['Tiempo para cachorro', 'Control veterinario'],
       personalidad: ['Juguetón', 'Activo', 'Bueno con chicos'],
-      vacunas: 'Primera dosis aplicada',
       diasAtras: 1,
     },
   },
@@ -250,11 +262,11 @@ const CATALOGO: DefMascota[] = [
       'raza: si no tiene qué hacer, inventa. Ideal para alguien que haga deporte o tenga campo.',
     fotos: [perro(6), perro(0)],
     historial: [['Disponible', 210]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'REFUERZO_MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Border collie, necesita mucha actividad',
-      requisitos: ['Actividad física diaria', 'Espacio amplio'],
+      requisitos: ['Actividad diaria', 'Espacio amplio'],
       personalidad: ['Activo', 'Inteligente', 'Protector'],
-      vacunas: 'Rabia, Séxtuple',
       diasAtras: 210,
     },
   },
@@ -276,11 +288,11 @@ const CATALOGO: DefMascota[] = [
       'agua y traer la pelota hasta que no le quedan fuerzas.',
     fotos: [perro(0), perro(2)],
     historial: [['Disponible', 25]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'REFUERZO_MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Golden joven, cariñoso y familiero',
-      requisitos: ['Casa con patio', 'Compañía durante el día'],
+      requisitos: ['Casa con patio', 'Compañía de día'],
       personalidad: ['Cariñoso', 'Juguetón', 'Bueno con chicos'],
-      vacunas: 'Rabia, Séxtuple',
       diasAtras: 25,
     },
   },
@@ -300,11 +312,11 @@ const CATALOGO: DefMascota[] = [
       'con gatos y le tiene un poco de miedo a los perros grandes.',
     fotos: [perro(3), perro(5)],
     historial: [['Disponible', 18]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Perrita chica, ideal para departamento',
       requisitos: ['Paseos diarios'],
       personalidad: ['Activo', 'Cariñoso', 'Bueno con otras mascotas'],
-      vacunas: 'Rabia, Quíntuple',
       diasAtras: 18,
     },
   },
@@ -327,11 +339,11 @@ const CATALOGO: DefMascota[] = [
       ['Disponible', 45],
       ['En_Transito', 10],
     ],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'REFUERZO_MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Beagle en tránsito, busca familia definitiva',
       requisitos: ['Control veterinario'],
       personalidad: ['Cariñoso', 'Glotón', 'Tranquilo'],
-      vacunas: 'Rabia, Séxtuple',
       diasAtras: 45,
     },
     historiaClinica: [
@@ -364,11 +376,11 @@ const CATALOGO: DefMascota[] = [
       ['Disponible', 90],
       ['En_Tratamiento', 30],
     ],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'REFUERZO_MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'En recuperación, busca hogar paciente',
       requisitos: ['Sin escaleras', 'Control veterinario'],
       personalidad: ['Tranquilo', 'Noble', 'Cariñoso'],
-      vacunas: 'Rabia, Séxtuple',
       diasAtras: 90,
     },
     historiaClinica: [
@@ -413,11 +425,11 @@ const CATALOGO: DefMascota[] = [
       ['Disponible', 60],
       ['Adoptado', 3],
     ],
+    vacunas: ['TRIVALENTE_FELINA', 'REFUERZO_TRIVALENTE_LEUCEMIA', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Persa mimosa, adoptada recientemente',
       requisitos: ['Cepillado diario'],
       personalidad: ['Tranquilo', 'Cariñoso'],
-      vacunas: 'Triple felina, Rabia',
       diasAtras: 60,
     },
   },
@@ -440,11 +452,11 @@ const CATALOGO: DefMascota[] = [
       ['Disponible', 130],
       ['Adoptado', 100],
     ],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'REFUERZO_MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Mestiza mediana, ya adoptada',
       requisitos: [],
       personalidad: ['Sociable', 'Juguetón'],
-      vacunas: 'Rabia, Séxtuple',
       diasAtras: 130,
       cerradaHaceDias: 99,
     },
@@ -466,11 +478,11 @@ const CATALOGO: DefMascota[] = [
       ['Disponible', 930],
       ['Adoptado', 900],
     ],
+    vacunas: ['TRIVALENTE_FELINA'],
     publicacion: {
       tagline: 'Siamesa adulta, ya adoptada',
       requisitos: [],
       personalidad: ['Independiente', 'Tranquilo'],
-      vacunas: 'Triple felina',
       diasAtras: 930,
       cerradaHaceDias: 899,
     },
@@ -538,11 +550,11 @@ const CATALOGO: DefMascota[] = [
       'Ideal para gente que trabaja desde casa.',
     fotos: [perro(2), perro(4)],
     historial: [['Disponible', 12]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Salchicha con carácter, compañera de home office',
-      requisitos: ['Compañía durante el día'],
+      requisitos: ['Compañía de día'],
       personalidad: ['Independiente', 'Cariñoso'],
-      vacunas: 'Rabia, Quíntuple',
       diasAtras: 12,
     },
   },
@@ -560,11 +572,11 @@ const CATALOGO: DefMascota[] = [
     descripcion: 'Chispa es una gatita de cinco meses rescatada con sus hermanos. Muy juguetona.',
     fotos: [gato(0), gato(4)],
     historial: [['Disponible', 8]],
+    vacunas: ['TRIVALENTE_FELINA'],
     publicacion: {
       tagline: 'Gatita de 5 meses, muy juguetona',
       requisitos: ['Balcón con red'],
       personalidad: ['Juguetón', 'Activo', 'Cariñoso'],
-      vacunas: 'Primera dosis triple felina',
       diasAtras: 8,
     },
   },
@@ -584,11 +596,11 @@ const CATALOGO: DefMascota[] = [
       'de más.',
     fotos: [perro(6), perro(1)],
     historial: [['Disponible', 33]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'REFUERZO_MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Perro grande de campo, guardián tranquilo',
       requisitos: ['Espacio amplio'],
       personalidad: ['Tranquilo', 'Protector'],
-      vacunas: 'Rabia, Séxtuple',
       diasAtras: 33,
     },
   },
@@ -609,11 +621,11 @@ const CATALOGO: DefMascota[] = [
     historial: [['Adoptado', 500]],
     historiaClinica: [
       {
-        titulo: 'Vacuna triple felina',
+        titulo: 'Trivalente Felina',
         descripcion: 'Refuerzo anual. Sin reacciones.',
         diasAtras: 20,
         proximaEnDias: 345,
-        vacunacion: true,
+        tipoVacuna: 'TRIVALENTE_FELINA',
       },
       {
         titulo: 'Control de peso',
@@ -644,11 +656,11 @@ const CATALOGO: DefMascota[] = [
     historial: [['Adoptado', 700]],
     historiaClinica: [
       {
-        titulo: 'Vacuna antirrábica',
+        titulo: 'Antirrábica',
         descripcion: 'Dosis anual aplicada.',
         diasAtras: 100,
         proximaEnDias: 265,
-        vacunacion: true,
+        tipoVacuna: 'ANTIRRABICA',
       },
     ],
   },
@@ -669,11 +681,11 @@ const CATALOGO: DefMascota[] = [
       'la alergia de su hijo y le busca familia.',
     fotos: [perro(5), perro(8)],
     historial: [['Disponible', 6]],
+    vacunas: ['PRIMOVACUNACION', 'MULTIPLE', 'ANTIRRABICA'],
     publicacion: {
       tagline: 'Perrita rescatada, la publica una vecina',
       requisitos: ['Paseos diarios'],
       personalidad: ['Cariñoso', 'Tranquilo'],
-      vacunas: 'Rabia, Quíntuple',
       diasAtras: 6,
     },
   },
@@ -782,7 +794,61 @@ async function crearHistoriaClinica(
             ? null
             : new Date(fechaVisita.getTime() + registro.proximaEnDias * 86_400_000),
         requiereRevision: registro.requiereRevision ?? false,
-        vacunacion: registro.vacunacion ?? false,
+        vacunacion: registro.tipoVacuna !== undefined,
+        tipoVacuna: registro.tipoVacuna ?? null,
+        usuarioAlta,
+        fechaAlta: fechaVisita,
+      },
+    });
+  }
+}
+
+/** Edad típica de cada vacuna del calendario, en semanas (ver `src/shared/vacunas.ts`). */
+const SEMANAS_DEL_CALENDARIO: Record<TipoVacuna, number> = {
+  PRIMOVACUNACION: 7,
+  MULTIPLE: 10,
+  REFUERZO_MULTIPLE: 15,
+  TRIVALENTE_FELINA: 8,
+  REFUERZO_TRIVALENTE_LEUCEMIA: 12,
+  REFUERZO_LEUCEMIA: 16,
+  ANTIRRABICA: 16,
+};
+
+/**
+ * Vacunas que la mascota ya tenía al cargarla: un registro de historia clínica por cada una
+ * que todavía no tenga, fechado a la edad del calendario (nunca después de hoy).
+ */
+async function crearVacunasIniciales(
+  usuarioAlta: number,
+  mascota: Mascota,
+  especie: string,
+  tipos: TipoVacuna[],
+) {
+  const hoy = new Date();
+
+  for (const tipo of tipos) {
+    const vacuna = buscarVacuna(tipo, especie);
+    if (!vacuna) throw new Error(`La vacuna ${tipo} no es del plan de ${especie}`);
+
+    const existente = await prisma.historiaClinica.findFirst({
+      where: { mascotaId: mascota.id, tipoVacuna: tipo, fechaBaja: null },
+    });
+    if (existente) continue;
+
+    const nacimiento = mascota.fechaNacimiento ?? hoy;
+    const segunCalendario = new Date(
+      nacimiento.getTime() + SEMANAS_DEL_CALENDARIO[tipo] * 7 * 86_400_000,
+    );
+    const fechaVisita = segunCalendario > hoy ? hoy : segunCalendario;
+
+    await prisma.historiaClinica.create({
+      data: {
+        mascotaId: mascota.id,
+        titulo: vacuna.nombre,
+        descripcion: vacuna.descripcion,
+        fechaVisita,
+        vacunacion: true,
+        tipoVacuna: tipo,
         usuarioAlta,
         fechaAlta: fechaVisita,
       },
@@ -842,7 +908,6 @@ export async function seedMascotas(catalogos: Catalogos, actores: Actores): Prom
             requisitos: def.publicacion.requisitos,
             personalidad: def.publicacion.personalidad,
             desparasitado: def.publicacion.desparasitado ?? true,
-            vacunas: def.publicacion.vacunas,
             imagenes,
             imagenUrl: imagenes[0],
             mascotaId: mascota.id,
@@ -868,13 +933,17 @@ export async function seedMascotas(catalogos: Catalogos, actores: Actores): Prom
       await crearHistoriaClinica(duenio.id, mascota.id, def.historiaClinica);
     }
 
+    if (def.vacunas) {
+      await crearVacunasIniciales(duenio.id, mascota, def.raza.split('/')[0]!, def.vacunas);
+    }
+
     resultado.set(def.clave, { mascota, publicacion });
   }
 
   log(
     `🐾 Mascotas: ${CATALOGO.length} (${mascotasNuevas} nuevas), ` +
       `${CATALOGO.filter((d) => d.publicacion).length} publicaciones (${publicacionesNuevas} nuevas), ` +
-      `${CATALOGO.reduce((n, d) => n + (d.historiaClinica?.length ?? 0), 0)} registros de historia clínica`,
+      `${CATALOGO.reduce((n, d) => n + (d.historiaClinica?.length ?? 0) + (d.vacunas?.length ?? 0), 0)} registros de historia clínica`,
   );
 
   return resultado;

@@ -1,4 +1,4 @@
-import type { GeneroMascota, TamanioMascota } from '@prisma/client';
+import type { GeneroMascota, TamanioMascota, TipoVacuna } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { ESTADO_PUBLICACION } from '../publicaciones/publicaciones.dto';
@@ -16,11 +16,23 @@ export interface DatosNuevaMascota {
   refugioId: number | null;
   usuarioId: number;
   estadoMascotaId: number;
+  /** Vacunas que ya tiene: se dan de alta como registros de su historia clínica. */
+  vacunas: DatosVacunaInicial[];
 }
 
-/** Mascota + su primera fila de Mascota_Estado en una sola transacción. */
+export interface DatosVacunaInicial {
+  tipoVacuna: TipoVacuna;
+  fechaVisita: Date;
+  titulo: string;
+  descripcion: string;
+}
+
+/**
+ * Mascota + su primera fila de Mascota_Estado + los registros de historia clínica de las
+ * vacunas que ya tiene, en una sola transacción: si falla una parte no queda nada a medias.
+ */
 export function crearConEstado(datos: DatosNuevaMascota, usuarioAlta: number) {
-  const { estadoMascotaId, ...mascota } = datos;
+  const { estadoMascotaId, vacunas, ...mascota } = datos;
 
   return prisma.mascota.create({
     data: {
@@ -29,10 +41,18 @@ export function crearConEstado(datos: DatosNuevaMascota, usuarioAlta: number) {
       historicoEstados: {
         create: { estadoMascotaId, ...datosAlta(usuarioAlta) },
       },
+      historiaClinica: {
+        create: vacunas.map((vacuna) => ({
+          ...vacuna,
+          vacunacion: true,
+          ...datosAlta(usuarioAlta),
+        })),
+      },
     },
     include: {
       raza: { include: { especie: true } },
       historicoEstados: { include: { estadoMascota: true } },
+      historiaClinica: { select: { id: true } },
     },
   });
 }
@@ -75,7 +95,10 @@ export function buscarPorId(mascotaId: number) {
   return prisma.mascota.findFirst({ where: { id: mascotaId, fechaBaja: null } });
 }
 
-/** Mascota activa por id con las relaciones que necesita la ficha de detalle (HU-6.4). */
+/**
+ * Mascota activa por id con las relaciones que necesita la ficha de detalle (HU-6.4),
+ * incluidas sus vacunas vigentes para las medallas.
+ */
 export function buscarPorIdConRelaciones(mascotaId: number) {
   return prisma.mascota.findFirst({
     where: { id: mascotaId, fechaBaja: null },
@@ -86,6 +109,10 @@ export function buscarPorIdConRelaciones(mascotaId: number) {
         include: { estadoMascota: true },
         orderBy: { fechaAlta: 'desc' },
         take: 1,
+      },
+      historiaClinica: {
+        where: { fechaBaja: null, tipoVacuna: { not: null } },
+        select: { tipoVacuna: true, fechaVisita: true },
       },
     },
   });
