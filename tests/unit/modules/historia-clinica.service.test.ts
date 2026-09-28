@@ -15,7 +15,7 @@ const DATOS: CrearHistoriaClinicaDto = {
   fechaVisita: new Date(2026, 2, 1),
   fechaProxima: null,
   requiereRevision: false,
-  vacunacion: false,
+  tipoVacuna: null,
   titulo: 'Control anual',
   descripcion: 'Todo bien',
 };
@@ -34,6 +34,7 @@ const REGISTRO_GUARDADO = {
   fechaProxima: null,
   requiereRevision: false,
   vacunacion: false,
+  tipoVacuna: null,
   titulo: 'Control anual',
   descripcion: 'Todo bien',
   documentoUrl: null,
@@ -165,6 +166,84 @@ describe('crearHistoriaClinica — documento', () => {
   });
 });
 
+describe('crearHistoriaClinica — vacuna (spec 019)', () => {
+  const PERRO = {
+    ...MASCOTA_ADOPTANTE,
+    fechaNacimiento: new Date(2025, 0, 1),
+    raza: { especie: { nombre: 'Perro' } },
+  };
+  const VACUNA: CrearHistoriaClinicaDto = {
+    ...DATOS,
+    fechaVisita: new Date(2025, 4, 1),
+    tipoVacuna: 'ANTIRRABICA',
+    titulo: null,
+    descripcion: null,
+  };
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarMascota).mockResolvedValue(PERRO as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(ADOPTANTE as never);
+    vi.mocked(repo.crear).mockResolvedValue(REGISTRO_GUARDADO as never);
+  });
+
+  it('se titula con el nombre de la vacuna y toma la descripción del plan', async () => {
+    await service.crearHistoriaClinica(10, VACUNA, { usuarioId: 2, ambito: 'PERSONAL' });
+
+    expect(vi.mocked(repo.crear).mock.calls[0]![0]).toMatchObject({
+      vacunacion: true,
+      tipoVacuna: 'ANTIRRABICA',
+      titulo: 'Antirrábica',
+      descripcion: 'A partir de los 3 a 4 meses: Vacuna Antirrábica (obligatoria por ley).',
+    });
+  });
+
+  it('respeta la descripción que haya escrito el usuario', async () => {
+    await service.crearHistoriaClinica(
+      10,
+      { ...VACUNA, descripcion: 'Aplicada en la veterinaria del barrio' },
+      { usuarioId: 2, ambito: 'PERSONAL' },
+    );
+
+    expect(vi.mocked(repo.crear).mock.calls[0]![0].descripcion).toBe(
+      'Aplicada en la veterinaria del barrio',
+    );
+  });
+
+  it('rechaza una vacuna que no es de la especie de la mascota', async () => {
+    await expect(
+      service.crearHistoriaClinica(
+        10,
+        { ...VACUNA, tipoVacuna: 'TRIVALENTE_FELINA' },
+        { usuarioId: 2, ambito: 'PERSONAL' },
+      ),
+    ).rejects.toMatchObject({
+      codigo: 'VALIDACION',
+      mensaje: 'Esa vacuna no corresponde a la especie de la mascota',
+    });
+    expect(repo.crear).not.toHaveBeenCalled();
+  });
+
+  it('rechaza una vacuna anterior al nacimiento', async () => {
+    await expect(
+      service.crearHistoriaClinica(
+        10,
+        { ...VACUNA, fechaVisita: new Date(2024, 11, 1) },
+        { usuarioId: 2, ambito: 'PERSONAL' },
+      ),
+    ).rejects.toMatchObject({ codigo: 'VALIDACION' });
+  });
+
+  it('un registro común no queda marcado como vacuna', async () => {
+    await service.crearHistoriaClinica(10, DATOS, { usuarioId: 2, ambito: 'PERSONAL' });
+
+    expect(vi.mocked(repo.crear).mock.calls[0]![0]).toMatchObject({
+      vacunacion: false,
+      tipoVacuna: null,
+      titulo: 'Control anual',
+    });
+  });
+});
+
 describe('editarHistoriaClinica — permisos (HU-8.3)', () => {
   it('404 si el registro no existe', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(null as never);
@@ -274,6 +353,30 @@ describe('editarHistoriaClinica — fusión de campos (inmutabilidad)', () => {
     expect(vi.mocked(repo.reemplazar).mock.calls[0]![1].vacunacion).toBe(
       REGISTRO_GUARDADO.vacunacion,
     );
+  });
+
+  it('en una vacuna se arrastran el tipo y el título, aunque llegue otro título', async () => {
+    const vacuna = {
+      ...REGISTRO_GUARDADO,
+      vacunacion: true,
+      tipoVacuna: 'ANTIRRABICA',
+      titulo: 'Antirrábica',
+    };
+    vi.mocked(repo.buscarPorId).mockResolvedValue(vacuna as never);
+    vi.mocked(repo.reemplazar).mockResolvedValue({ ...vacuna, id: 101 } as never);
+
+    await service.editarHistoriaClinica(
+      100,
+      { titulo: 'Otra cosa', descripcion: 'Dosis anual' },
+      { usuarioId: 2, ambito: 'PERSONAL' },
+    );
+
+    expect(vi.mocked(repo.reemplazar).mock.calls[0]![1]).toMatchObject({
+      tipoVacuna: 'ANTIRRABICA',
+      vacunacion: true,
+      titulo: 'Antirrábica',
+      descripcion: 'Dosis anual',
+    });
   });
 
   it('borra el documento viejo cuando se sube uno nuevo', async () => {

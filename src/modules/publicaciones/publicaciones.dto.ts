@@ -1,11 +1,7 @@
 import { z } from 'zod';
+import type { VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
-import {
-  idSchema,
-  listaDeIdsSchema,
-  textoOpcionalSchema,
-  textoSchema,
-} from '../../shared/validation/schemas';
+import { idSchema, listaDeIdsSchema, textoSchema } from '../../shared/validation/schemas';
 import { validarTexto } from '../../shared/validation/text';
 
 /** Hasta 5 fotos por publicación; el orden recibido es el orden de la galería. */
@@ -61,10 +57,6 @@ const camposEditables = {
   requisitos: listaSchema(LIMITES.publicacion.requisito.max, 'Cada requisito'),
   personalidad: listaSchema(LIMITES.publicacion.personalidad.max, 'Cada rasgo'),
   desparasitado: booleanoSchema,
-  vacunas: textoOpcionalSchema({
-    max: LIMITES.publicacion.vacunas.max,
-    etiqueta: 'Las vacunas',
-  }),
 };
 
 export const crearPublicacionSchema = z.object({
@@ -191,7 +183,11 @@ export interface PublicacionFeedDto {
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
-  vacunas: string | null;
+  /**
+   * Medallas de la mascota: salen de su historia clínica, no se cargan en la publicación
+   * (spec 019).
+   */
+  vacunas: VacunaAplicadaDto[];
   /** En orden; la primera es la portada. Rutas relativas al origen de la API. */
   imagenes: string[];
   fechaPublicacion: string;
@@ -200,6 +196,11 @@ export interface PublicacionFeedDto {
   mascota: MascotaPublicadaDto;
   /** Null cuando publica un adoptante particular y no un refugio. */
   refugio: { id: number; nombre: string; direccion: string } | null;
+  /**
+   * La persona que la publicó, solo cuando no es de un refugio (`refugio` null): la ficha la
+   * muestra en «Publicado por». En una de refugio es null, para no exponer a su personal.
+   */
+  publicadoPor: { nombre: string; apellido: string } | null;
   /** Si el usuario que consulta ya la tiene guardada. */
   enFavoritos: boolean;
   /**
@@ -282,7 +283,6 @@ export interface PublicacionCreadaDto {
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
-  vacunas: string | null;
   imagenes: string[];
   mascotaId: number;
   usuarioId: number;

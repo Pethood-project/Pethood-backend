@@ -52,6 +52,25 @@ enum TamanioMascota {
   GRANDE
 }
 
+// Vacuna de un registro de historia clínica (spec 019). El plan de vacunación de perros y
+// gatos es fijo y el código ramifica por el valor (especie que la admite, color de la
+// medalla en la app), por eso es enum y no un catálogo editable. El nombre visible, la
+// especie y la descripción de cada una viven en `src/shared/vacunas.ts`.
+//
+// ANTIRRABICA es una sola para las dos especies: es la misma vacuna y la medalla tiene
+// que verse igual en un perro que en un gato.
+enum TipoVacuna {
+  PRIMOVACUNACION
+  MULTIPLE
+  REFUERZO_MULTIPLE
+  TRIVALENTE_FELINA
+  REFUERZO_TRIVALENTE_LEUCEMIA
+  REFUERZO_LEUCEMIA
+  ANTIRRABICA
+
+  @@map("tipo_vacuna")
+}
+
 // ─────────────── CATÁLOGOS ───────────────
 // Todas gestionables desde el panel admin (MODELO_DATOS.md, nota de cierre).
 
@@ -424,7 +443,6 @@ model Publicacion {
   requisitos    String[] @map("publicacion_requisitos")
   personalidad  String[] @map("publicacion_personalidad")
   desparasitado Boolean  @default(false) @map("publicacion_desparasitado")
-  vacunas       String?  @map("publicacion_vacunas")
   imagenes      String[] @map("publicacion_imagenes")
   imagenUrl     String?  @map("publicacion_imagen_url")
   mascotaId     Int      @map("mascota_id")
@@ -570,6 +588,10 @@ model HistoriaClinica {
   fechaProxima     DateTime? @map("historia_clinica_fecha_proxima")
   requiereRevision Boolean   @default(false) @map("historia_clinica_requiere_revision")
   vacunacion       Boolean   @default(false) @map("historia_clinica_vacunacion")
+  // Qué vacuna se aplicó (spec 019). Va junto con `vacunacion = true`; las vacunas de la
+  // mascota (sus medallas) salen de los registros vigentes con este campo cargado. Nulo en
+  // los registros que no son vacuna y en las vacunas cargadas antes de que existiera.
+  tipoVacuna       TipoVacuna? @map("historia_clinica_tipo_vacuna")
   titulo           String    @map("historia_clinica_titulo")
   descripcion      String    @map("historia_clinica_descripcion")
   documentoUrl     String?   @map("historia_clinica_documento_url")

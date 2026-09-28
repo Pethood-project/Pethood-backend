@@ -2,6 +2,7 @@ import { AppError } from '../../middlewares/errorHandler';
 import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
+import { vacunasAplicadas } from '../../shared/vacunas';
 import { aFechaISO } from '../../shared/validation/dates';
 import { ESTADOS_QUE_HABILITAN_PUBLICACION } from '../catalogos/catalogos.service';
 import {
@@ -117,7 +118,6 @@ export async function crearPublicacion(
         requisitos: datos.requisitos,
         personalidad: datos.personalidad,
         desparasitado: datos.desparasitado,
-        vacunas: datos.vacunas,
         imagenes,
         mascotaId: mascota.id,
         usuarioId,
@@ -160,7 +160,6 @@ export async function crearPublicacion(
     requisitos: publicacion.requisitos,
     personalidad: publicacion.personalidad,
     desparasitado: publicacion.desparasitado,
-    vacunas: publicacion.vacunas,
     imagenes: publicacion.imagenes,
     mascotaId: publicacion.mascotaId,
     usuarioId: publicacion.usuarioId,
@@ -325,7 +324,6 @@ export async function editarPublicacion(
         requisitos: datos.requisitos,
         personalidad: datos.personalidad,
         desparasitado: datos.desparasitado,
-        vacunas: datos.vacunas,
         imagenes,
       },
       usuarioId,
@@ -487,7 +485,8 @@ function aFeedDto(
     requisitos: publicacion.requisitos,
     personalidad: publicacion.personalidad,
     desparasitado: publicacion.desparasitado,
-    vacunas: publicacion.vacunas,
+    // Las vacunas no son de la publicación sino de la mascota: salen de su historia clínica.
+    vacunas: vacunasAplicadas(mascota.historiaClinica, mascota.raza.especie.nombre),
     // Una publicación sin fotos propias reusa la de la mascota, que es obligatoria en el
     // alta: así la galería nunca queda vacía.
     imagenes: imagenesDe(publicacion),
@@ -508,6 +507,7 @@ function aFeedDto(
       estado: { id: estado.id, nombre: estado.nombre },
     },
     refugio: mascota.refugio,
+    publicadoPor: mascota.refugio ? null : publicacion.usuario,
     enFavoritos,
     esPropia,
     puedeEditar,

@@ -70,6 +70,28 @@ export function validarTexto(valor: unknown, opciones: OpcionesTexto): Resultado
   return { valido: true, valor: recortado };
 }
 
+export type ResultadoListaJson =
+  { valido: true; valor: unknown[] } | { valido: false; error: string };
+
+/**
+ * Lista de objetos que viaja como JSON dentro de un campo de texto: es la forma de mandar
+ * una lista de pares (ej. vacuna + fecha) en un multipart, que solo sabe de strings. Acepta
+ * también el array ya parseado (body JSON). Ausente o vacía → lista vacía.
+ */
+export function parsearListaJson(valor: unknown, etiqueta: string): ResultadoListaJson {
+  if (valor === undefined || valor === null || valor === '') return { valido: true, valor: [] };
+  if (Array.isArray(valor)) return { valido: true, valor };
+  if (typeof valor !== 'string') return { valido: false, error: `${etiqueta}: formato inválido` };
+
+  try {
+    const parseado: unknown = JSON.parse(valor);
+    if (!Array.isArray(parseado)) return { valido: false, error: `${etiqueta}: formato inválido` };
+    return { valido: true, valor: parseado };
+  } catch {
+    return { valido: false, error: `${etiqueta}: formato inválido` };
+  }
+}
+
 export type ResultadoListaValores<T extends string> =
   { valido: true; valor: T[] } | { valido: false; error: string };
 

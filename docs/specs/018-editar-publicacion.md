@@ -1,7 +1,7 @@
 # Spec 018 — Editar publicación y cambiar su estado
 
 **Estado:** EN REVISIÓN
-**Sprint:** 13 · **Responsable:** Grupo 09 · **Última actualización:** 2026-09-27
+**Sprint:** 13 · **Responsable:** Grupo 09 · **Última actualización:** 2026-09-28
 
 ## 1. Objetivo
 
@@ -14,8 +14,8 @@ acá (§9).
 
 - **Incluye:**
   - Editar todos los datos de la publicación que se cargan al crearla (GUI-24): fotos,
-    descripción para el swipe, desparasitado, vacunas, personalidad, requisitos de adoptante
-    y ubicación.
+    descripción para el swipe, desparasitado, personalidad, requisitos de adoptante y
+    ubicación. (Las vacunas salieron de la publicación con la spec 019: son de la mascota.)
   - Cambios de estado manuales: pausar, reactivar y finalizar, cada uno con cartel de
     confirmación en la app.
   - Ajuste de las transiciones automáticas (que siguen al estado de la mascota) para que
@@ -51,12 +51,11 @@ viaja queda vacía. Campos multipart, con las mismas reglas que `POST /publicaci
 
 | Campo | Regla |
 |---|---|
-| `descripcion` | obligatoria, trim, ≤50 |
+| `descripcion` | obligatoria, trim, ≤200 |
 | `ubicacion` | obligatoria, trim, ≤50 |
-| `requisitos` (repetido) | cada uno ≤25 |
+| `requisitos` (repetido) | cada uno ≤20 |
 | `personalidad` (repetido) | cada uno ≤25 |
 | `desparasitado` | `'true'` / `'false'` |
-| `vacunas` | opcional, ≤200 |
 | `imagenes` (repetido) | galería final en orden, ≤5. Cada ítem es la ruta de una foto que la publicación ya muestra, o `nueva` en el lugar de una foto nueva |
 | `fotos` (archivos) | las fotos nuevas, en el orden de sus marcas `nueva`. ≤5 MB, se comprimen |
 
@@ -140,6 +139,9 @@ con la mascota en tratamiento, tránsito, etc.), `409 LIMITE_DE_PUBLICACIONES` (
   toca ninguna de las viejas.
 - Una galería que apunta a un archivo ajeno se rechaza (400): el cliente no puede enganchar
   fotos de otra publicación.
+- Una publicación cargada antes del 2026-09-28 puede tener requisitos de 21 a 25
+  caracteres. Se muestran igual, pero al editarla el backend los rechaza (400): hay que
+  acortarlos o quitarlos para poder guardar.
 
 ## 9. Notas y decisiones
 
@@ -155,3 +157,7 @@ con la mascota en tratamiento, tránsito, etc.), `409 LIMITE_DE_PUBLICACIONES` (
   baja (lógica) en la misma transacción que el alta: dejan de aparecer en «Mis
   publicaciones» y quedan en `LogAuditoria` como `ELIMINAR`. Sus solicitudes quedan como
   historial.
+- 2026-09-28 — Cada requisito pasa de ≤25 a ≤20 caracteres (backend y app): la ficha los
+  muestra como medallitas y tienen que entrar en una línea.
+- 2026-09-28 — La descripción pasa de ≤50 a ≤200 caracteres (backend y app): la ficha la
+  muestra como texto libre en «Sobre <nombre>». La columna ya era `text`: no hay migración.

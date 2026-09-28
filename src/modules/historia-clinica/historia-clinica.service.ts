@@ -3,6 +3,7 @@ import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
 import { firmarUrlArchivo } from '../../shared/urlFirmada';
+import { validarVacunaDeMascota } from '../../shared/vacunas';
 import { aFechaISO } from '../../shared/validation/dates';
 import type {
   CrearHistoriaClinicaDto,
@@ -29,6 +30,7 @@ function aDto(registro: Registro): HistoriaClinicaDto {
     fechaProxima: registro.fechaProxima ? aFechaISO(registro.fechaProxima) : null,
     requiereRevision: registro.requiereRevision,
     vacunacion: registro.vacunacion,
+    tipoVacuna: registro.tipoVacuna,
     titulo: registro.titulo,
     descripcion: registro.descripcion,
     // Comprobante médico: privado, la URL sale firmada y vence.
@@ -88,12 +90,42 @@ async function exigirAcceso(mascotaId: number, usuarioId: number, ambito: Ambito
   return { mascota, usuario };
 }
 
+/**
+ * Título y descripción con los que se guarda el alta. Una vacuna (spec 019) se titula con
+ * su nombre y, si no trae descripción, lleva la del plan de vacunación; tiene que ser del
+ * plan de la especie y posterior al nacimiento, igual que al cargarla con la mascota.
+ */
+function resolverContenido(
+  datos: CrearHistoriaClinicaDto,
+  mascota: Mascota,
+): { titulo: string; descripcion: string } {
+  if (!datos.tipoVacuna) {
+    // El DTO ya exige los dos cuando no es vacuna.
+    return { titulo: datos.titulo!, descripcion: datos.descripcion! };
+  }
+
+  const resultado = validarVacunaDeMascota(datos.tipoVacuna, datos.fechaVisita, {
+    especie: mascota.raza.especie.nombre,
+    fechaNacimiento: mascota.fechaNacimiento,
+  });
+
+  if (!resultado.valida) {
+    throw new AppError('VALIDACION', resultado.error, 400);
+  }
+
+  return {
+    titulo: resultado.vacuna.nombre,
+    descripcion: datos.descripcion ?? resultado.vacuna.descripcion,
+  };
+}
+
 export async function crearHistoriaClinica(
   mascotaId: number,
   datos: CrearHistoriaClinicaDto,
   contexto: Contexto,
 ): Promise<HistoriaClinicaDto> {
-  await exigirAcceso(mascotaId, contexto.usuarioId, contexto.ambito);
+  const { mascota } = await exigirAcceso(mascotaId, contexto.usuarioId, contexto.ambito);
+  const { titulo, descripcion } = resolverContenido(datos, mascota);
 
   const documentoUrl = contexto.archivo
     ? await guardarImagen(contexto.archivo, SUBCARPETA_DOCUMENTOS)
@@ -106,9 +138,10 @@ export async function crearHistoriaClinica(
         fechaVisita: datos.fechaVisita,
         fechaProxima: datos.fechaProxima,
         requiereRevision: datos.requiereRevision,
-        vacunacion: datos.vacunacion,
-        titulo: datos.titulo,
-        descripcion: datos.descripcion,
+        vacunacion: datos.tipoVacuna !== null,
+        tipoVacuna: datos.tipoVacuna,
+        titulo,
+        descripcion,
         documentoUrl,
         mascotaId,
       },
@@ -174,7 +207,8 @@ export async function obtenerHistoriaClinica(
 /**
  * "Modificar" (HU-8.3): nunca actualiza el registro persistido. Da de baja el anterior y
  * crea uno nuevo con los campos fusionados — lo que no vino en el PATCH conserva el valor
- * vigente. `vacunacion` no es editable y siempre se arrastra del registro anterior.
+ * vigente. `vacunacion` y `tipoVacuna` no son editables y siempre se arrastran del registro
+ * anterior; en una vacuna el título tampoco, porque es el nombre de la vacuna.
  */
 export async function editarHistoriaClinica(
   historiaClinicaId: number,
@@ -202,7 +236,8 @@ export async function editarHistoriaClinica(
         fechaProxima: datos.fechaProxima !== undefined ? datos.fechaProxima : registro.fechaProxima,
         requiereRevision: datos.requiereRevision ?? registro.requiereRevision,
         vacunacion: registro.vacunacion,
-        titulo: datos.titulo ?? registro.titulo,
+        tipoVacuna: registro.tipoVacuna,
+        titulo: registro.tipoVacuna ? registro.titulo : (datos.titulo ?? registro.titulo),
         descripcion: datos.descripcion ?? registro.descripcion,
         documentoUrl: documentoNuevo ?? registro.documentoUrl,
         mascotaId: registro.mascotaId,

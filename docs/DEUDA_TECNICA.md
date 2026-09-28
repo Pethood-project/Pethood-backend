@@ -47,6 +47,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 17 | Cualquier miembro del refugio puede editar el perfil del refugio | Media | ambos |
 | 18 | Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones | Media | backend |
 | 19 | Pausar o finalizar una publicación no toca sus solicitudes abiertas | Media | backend |
+| 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -445,3 +446,19 @@ sigue viendo como en curso. Si finaliza, nada le avisa al solicitante.
 **Cómo se arregla.** Definir con el equipo qué pasa con ellas (¿se cancelan al finalizar?
 ¿se bloquea finalizar con solicitudes abiertas, como la baja de mascota?) y aplicarlo en
 `cambiarEstadoPublicacion`.
+
+---
+
+## 20. Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla — Baja
+
+**Qué pasa.** Antes de la spec 019 una vacuna era un registro de historia clínica con el
+tilde `vacunacion` y un título libre. Esos registros quedaron con `vacunacion = true` y
+`tipoVacuna` nulo: siguen en la historia clínica con la etiqueta genérica «Vacuna», pero no
+aparecen como medalla en la ficha de la mascota ni en la publicación. Además, la migración
+`20260927120000_vacunas_historia_clinica` descartó el texto de `publicacion_vacunas`, que no
+se puede traducir a un tipo con fecha.
+
+**Cómo se arregla.** Si hace falta recuperarlas, volver a cargarlas desde la app (historia
+clínica → «Vacuna») o escribir una migración de datos que asigne el tipo por título y
+especie (ej. «antirrábica» → `ANTIRRABICA`). En una base de desarrollo alcanza con volver a
+correr el seed sobre una base vacía.

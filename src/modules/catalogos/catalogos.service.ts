@@ -1,4 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { vacunasDeEspecie } from '../../shared/vacunas';
 import * as repo from './catalogos.repository';
 
 /**
@@ -21,6 +22,24 @@ export async function listarRazasDeEspecie(especieId: number) {
   }
 
   return repo.listarRazasDeEspecie(especieId);
+}
+
+/**
+ * Vacunas del plan de la especie (spec 019), en el orden del calendario: alimentan el
+ * selector del alta de mascota y el de historia clínica. Vacío si la especie no tiene plan.
+ */
+export async function listarVacunasDeEspecie(especieId: number) {
+  const especie = await repo.existeEspecie(especieId);
+
+  if (!especie) {
+    throw new AppError('NO_ENCONTRADO', 'La especie no existe', 404);
+  }
+
+  return vacunasDeEspecie(especie.nombre).map(({ tipo, nombre, descripcion }) => ({
+    tipo,
+    nombre,
+    descripcion,
+  }));
 }
 
 /** Estados del aviso (Activa, Pausada, Finalizada), para el filtro de "Mis publicaciones". */

@@ -1,3 +1,4 @@
+import type { TipoVacuna } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja } from '../../shared/auditoria';
 
@@ -6,6 +7,7 @@ export interface DatosNuevaHistoriaClinica {
   fechaProxima: Date | null;
   requiereRevision: boolean;
   vacunacion: boolean;
+  tipoVacuna: TipoVacuna | null;
   titulo: string;
   descripcion: string;
   documentoUrl: string | null;
@@ -18,11 +20,20 @@ export function crear(datos: DatosNuevaHistoriaClinica, usuarioAlta: number) {
   });
 }
 
-/** Mascota activa por id, con lo necesario para resolver el permiso de acceso. */
+/**
+ * Mascota activa por id, con lo necesario para resolver el permiso de acceso y para validar
+ * una vacuna (especie y fecha de nacimiento).
+ */
 export function buscarMascota(mascotaId: number) {
   return prisma.mascota.findFirst({
     where: { id: mascotaId, fechaBaja: null },
-    select: { id: true, usuarioId: true, refugioId: true },
+    select: {
+      id: true,
+      usuarioId: true,
+      refugioId: true,
+      fechaNacimiento: true,
+      raza: { select: { especie: { select: { nombre: true } } } },
+    },
   });
 }
 
