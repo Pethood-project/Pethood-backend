@@ -48,7 +48,12 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 18 | Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones | Media | backend |
 | 19 | Pausar o finalizar una publicación no toca sus solicitudes abiertas | Media | backend |
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
+<<<<<<< HEAD
+| 21 | La ubicación es texto libre: no hay catálogo de Provincia/Localidad | Media | ambos |
+| 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
+=======
 | 21 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
+>>>>>>> origin/dev
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -466,6 +471,37 @@ correr el seed sobre una base vacía.
 
 ---
 
+<<<<<<< HEAD
+## 21. La ubicación es texto libre: no hay catálogo de Provincia/Localidad — Media
+
+**Qué pasa.** `REQUISITOS.md` y `MODELO_DATOS.md` piden filtrar por ubicación administrativa
+(Provincia/Localidad), pero no existe ese catálogo. Hoy la ubicación es texto libre en tres
+lugares: el perfil (`usuario_ubicacion`), la publicación (`publicacion_ubicacion`) y el aviso
+de animal perdido (`animal_perdido_ubicacion`, spec 020). En el portal de perdidos el filtro
+de selección múltiple se arma con las ubicaciones ya cargadas
+(`GET /animales-perdidos/ubicaciones`) y compara sin distinguir mayúsculas, pero sí acentos:
+"Maipu" y "Maipú" son dos opciones distintas, y un error de tipeo crea una opción nueva.
+
+**Por qué quedó así.** Decisión de equipo del 2026-09-29: el catálogo se quiere definir una
+sola vez para toda la app (también lo necesita HU-11.3) y aplicarlo después en cada lugar.
+
+**Cómo se arregla.** Modelar `Provincia` y `Localidad` (con auditoría, gestionables desde
+web-admin), sembrarlas, reemplazar las tres columnas de texto por una FK a `Localidad` con una
+migración de datos, y sacar el endpoint de ubicaciones del portal de perdidos.
+
+---
+
+## 22. Los `limite` de otros listados responden en inglés si vienen fuera de rango — Baja
+
+**Qué pasa.** Los listados paginados de solicitudes, historial del chat y administración de
+usuarios validan `limite` con `z.coerce.number().max(...)`: un valor fuera de rango responde
+con el mensaje de Zod en inglés ("Number must be less than or equal to 50"). Es un parámetro
+que arma el cliente, no el usuario, así que en la práctica no se ve.
+
+**Cómo se arregla.** Usar `limitePaginaSchema` de `shared/validation/schemas.ts` (creado en la
+spec 020), que ya da el error en español. `idSchema` tenía el mismo problema cuando faltaba un
+id y quedó corregido para todos los módulos en esa misma spec.
+=======
 ## 21. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
 
 **Qué pasa.** El rediseño de Inicio (adoptante y refugio) trae secciones de Campañas y de
@@ -483,3 +519,4 @@ distinto filtro, porque no hay un endpoint de resumen.
 el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se notan lentos,
 sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
 consulta.
+>>>>>>> origin/dev

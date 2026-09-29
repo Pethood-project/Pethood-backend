@@ -30,6 +30,14 @@ export function listarEstadosPublicacion() {
   });
 }
 
+export function listarEstadosAnimalPerdido() {
+  return prisma.estadoAnimalPerdido.findMany({
+    where: { fechaBaja: null },
+    select: { id: true, nombre: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
 export function listarEstadosMascota() {
   return prisma.estadoMascota.findMany({
     where: { fechaBaja: null },

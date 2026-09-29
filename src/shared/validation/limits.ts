@@ -167,4 +167,25 @@ export const LIMITES = {
     /** Tamaño de página del historial y su techo. Ver "Paginación" en docs/api-chat-sala.md. */
     pagina: { porDefecto: 30, maximo: 50 },
   },
+
+  /** Aviso de mascota perdida o encontrada (spec 020, HU-13.1). */
+  animalPerdido: {
+    /** Lo fija la HU. Obligatorio sólo en un aviso "Perdido": eso lo decide el servicio. */
+    nombre: { max: 30 },
+    /** Lo fija la HU. */
+    descripcion: { max: 300 },
+    /**
+     * Dónde se perdió o se encontró, en texto libre y con el mismo techo que la ubicación del
+     * perfil. Provisorio hasta que exista el catálogo de Provincia/Localidad.
+     */
+    ubicacion: { max: 80 },
+    /** Fotos por aviso: la primera es la portada de la tarjeta, el resto va en la galería. */
+    imagenes: { max: 5 },
+    latitud: { min: -90, max: 90 },
+    longitud: { min: -180, max: 180 },
+    /** Cuántas ubicaciones se pueden elegir a la vez en el filtro del portal. */
+    filtroUbicaciones: { maximo: 20 },
+    /** Tamaño de página del portal y su techo (paginación por cursor). */
+    pagina: { porDefecto: 20, maximo: 50 },
+  },
 } as const;

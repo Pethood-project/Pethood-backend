@@ -240,7 +240,17 @@ Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
 
 ### Animal_Perdido
 
-`animal_perdido_id PK`, `animal_perdido_descripcion`, `animal_perdido_imagen_url`, `animal_perdido_latitud`, `animal_perdido_longitud`, `animal_perdido_fecha_resuelto`, FK `usuario_reportante_id FK NOT NULL`, FK `mascota_id` (nullable — puede reportarse un animal encontrado que no está registrado como Mascota propia de nadie en el sistema), FK `animal_perdido_estado_animal_perdido FK NOT NULL`.
+`animal_perdido_id PK`, `animal_perdido_nombre` (nullable), `animal_perdido_descripcion`, `animal_perdido_imagen_url`, `animal_perdido_imagenes` (TEXT[]), `animal_perdido_ubicacion` (nullable), `animal_perdido_fecha_suceso` (nullable), `animal_perdido_latitud`, `animal_perdido_longitud`, `animal_perdido_fecha_resuelto`, FK `usuario_reportante_id FK NOT NULL`, FK `mascota_id` (nullable — puede reportarse un animal encontrado que no está registrado como Mascota propia de nadie en el sistema), FK `especie_id` (nullable), FK `animal_perdido_estado_animal_perdido FK NOT NULL`.
+
+**Campos agregados fuera del diagrama de clases (2026-09-29, HU-13.1, spec 020):** `animal_perdido_nombre`, `animal_perdido_ubicacion` y `especie_id` **no figuran en el diagrama de clases original**, pero los pide la HU: el nombre de hasta 30 caracteres y los filtros del portal por localidad y por especie. Son nullables en base, igual que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la imponen el DTO y el servicio:
+
+- `animal_perdido_nombre`: obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar, porque quien encuentra un animal no sabe cómo se llama.
+- `animal_perdido_ubicacion`: dónde se perdió o se encontró, en **texto libre** como `usuario_ubicacion`. Es **provisorio**: el equipo va a definir un catálogo de Provincia/Localidad para toda la app y reemplazarlo por una FK (ver `DEUDA_TECNICA.md`).
+- `especie_id`: FK directa y no derivada de `mascota_id` → raza → especie, porque un animal encontrado no tiene Mascota asociada.
+- `animal_perdido_fecha_suceso`: día en que se perdió o se encontró (campo "Fecha" del formulario, pantalla 26 del diseño). No es la fecha de publicación, que sigue siendo `animal_perdido_fecha_alta`. Obligatoria en el alta y no futura.
+- `animal_perdido_imagenes`: de 1 a 5 fotos. **El orden del array es el de la galería del detalle.** Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`: `animal_perdido_imagen_url` es la PRIMERA, la portada de la tarjeta del portal.
+
+Pendiente: reflejarlos en el diagrama de clases del grupo.
 
 **Resuelto:** `animal_perdido_latitud` / `animal_perdido_longitud` se mantienen — sí se captura la coordenada al reportar un animal perdido/encontrado (ej. desde el GPS del dispositivo al momento del reporte). Lo que **no existe** es un mapa interactivo en la UI: el usuario busca y visualiza por ubicación administrativa (Provincia/Localidad), no por un mapa con pines. No quitar estos campos del modelo ni reemplazarlos por FK a Provincia/Localidad — conviven ambos: lat/long como dato del reporte, Provincia/Localidad como criterio de filtro para el usuario.
 
@@ -359,6 +369,7 @@ Ver catálogos.
 - Animal_Perdido
   -> Usuario (reportante)
   -> Mascota (opcional)
+  -> Especie (opcional en base, obligatoria en el alta — spec 020)
   -> Estado_Animal_Perdido
 
 - Faq

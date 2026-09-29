@@ -70,3 +70,15 @@ export async function listarEstadosMascota(
     next(err);
   }
 }
+
+export async function listarEstadosAnimalPerdido(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    res.json(await service.listarEstadosAnimalPerdido());
+  } catch (err) {
+    next(err);
+  }
+}

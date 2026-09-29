@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  parsearCoordenada,
   parsearDecimal,
   parsearId,
   parsearListaDeIds,
@@ -7,6 +8,48 @@ import {
 import { LIMITES } from '../../../../src/shared/validation/limits';
 
 const peso = { ...LIMITES.mascota.peso, etiqueta: 'El peso' };
+const latitud = { ...LIMITES.animalPerdido.latitud, etiqueta: 'La latitud' };
+
+describe('parsearCoordenada', () => {
+  it('acepta negativos, que es lo normal en Argentina', () => {
+    expect(parsearCoordenada('-32.9264', latitud)).toEqual({ valido: true, valor: -32.9264 });
+  });
+
+  it('guarda todos los decimales del GPS, sin redondear', () => {
+    expect(parsearCoordenada('-32.92641234567', latitud)).toEqual({
+      valido: true,
+      valor: -32.92641234567,
+    });
+  });
+
+  it('acepta coma decimal y un number', () => {
+    expect(parsearCoordenada('-32,5', latitud)).toEqual({ valido: true, valor: -32.5 });
+    expect(parsearCoordenada(-32.5, latitud)).toEqual({ valido: true, valor: -32.5 });
+  });
+
+  it('rechaza un valor fuera del rango del eje', () => {
+    expect(parsearCoordenada('-90.5', latitud)).toEqual({
+      valido: false,
+      error: 'La latitud debe estar entre -90 y 90',
+    });
+  });
+
+  it('rechaza exponentes, infinitos y texto, que Number() aceptaría', () => {
+    for (const valor of ['1e2', 'Infinity', 'abc', '--3', '12.']) {
+      expect(parsearCoordenada(valor, latitud)).toEqual({
+        valido: false,
+        error: 'La latitud no es válida',
+      });
+    }
+  });
+
+  it('rechaza un valor ausente', () => {
+    expect(parsearCoordenada('', latitud)).toEqual({
+      valido: false,
+      error: 'La latitud es obligatoria',
+    });
+  });
+});
 
 describe('parsearDecimal', () => {
   it('acepta coma como separador decimal y la normaliza a punto', () => {

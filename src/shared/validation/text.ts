@@ -4,10 +4,18 @@ const REGEX_SOLO_LETRAS = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+$/;
 
 export type ResultadoTexto = { valido: true; valor: string } | { valido: false; error: string };
 
+function esFemenina(etiqueta: string): boolean {
+  return /^(La|Las)\s/.test(etiqueta.trim());
+}
+
 /** Concuerda en género con el artículo de la etiqueta ("La ubicación" → obligatoria). */
 export function mensajeObligatorio(etiqueta: string): string {
-  const femenino = /^(La|Las)\s/.test(etiqueta.trim());
-  return `${etiqueta} es ${femenino ? 'obligatoria' : 'obligatorio'}`;
+  return `${etiqueta} es ${esFemenina(etiqueta) ? 'obligatoria' : 'obligatorio'}`;
+}
+
+/** Igual criterio de género: "La especie no es válida", "El estado no es válido". */
+export function mensajeInvalido(etiqueta: string): string {
+  return `${etiqueta} no es ${esFemenina(etiqueta) ? 'válida' : 'válido'}`;
 }
 
 /** Un solo mensaje para "muy corto" y "muy largo", no dos distintos. */
@@ -90,6 +98,52 @@ export function parsearListaJson(valor: unknown, etiqueta: string): ResultadoLis
   } catch {
     return { valido: false, error: `${etiqueta}: formato inválido` };
   }
+}
+
+export type ResultadoListaTextos =
+  { valido: true; valor: string[] } | { valido: false; error: string };
+
+/**
+ * Lista de textos libres de un filtro de selección múltiple, como llega por query string.
+ *
+ * A diferencia de los ids y los valores de catálogo, NO se separan por coma: un texto libre
+ * puede tenerla ("Godoy Cruz, Mendoza"). Se manda un parámetro por valor
+ * (`?ubicaciones=Maipú&ubicaciones=Godoy%20Cruz`), que Express entrega como arreglo; uno solo
+ * llega como string.
+ *
+ * Ausente o vacía es "sin filtro" (lista vacía). Hace trim, descarta los vacíos y los
+ * repetidos sin distinguir mayúsculas, y rechaza la lista entera si un valor es demasiado
+ * largo o si hay más de los permitidos: un filtro aplicado a medias muestra un resultado que
+ * el usuario no pidió.
+ */
+export function parsearListaDeTextos(
+  valor: unknown,
+  opciones: { max: number; maximoElementos: number; etiqueta: string },
+): ResultadoListaTextos {
+  const { max, maximoElementos, etiqueta } = opciones;
+  const invalido = mensajeInvalido(etiqueta);
+
+  if (valor === undefined || valor === null || valor === '') return { valido: true, valor: [] };
+
+  const crudos = Array.isArray(valor) ? valor : [valor];
+  const textos: string[] = [];
+
+  for (const crudo of crudos) {
+    if (typeof crudo !== 'string') return { valido: false, error: invalido };
+
+    const limpio = crudo.trim();
+    if (!limpio) continue;
+    if (limpio.length > max) return { valido: false, error: invalido };
+
+    const repetido = textos.some((texto) => texto.toLowerCase() === limpio.toLowerCase());
+    if (!repetido) textos.push(limpio);
+  }
+
+  if (textos.length > maximoElementos) {
+    return { valido: false, error: `Podés elegir hasta ${maximoElementos} opciones a la vez` };
+  }
+
+  return { valido: true, valor: textos };
 }
 
 export type ResultadoListaValores<T extends string> =
