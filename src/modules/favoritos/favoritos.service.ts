@@ -50,6 +50,7 @@ function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
     especie: { id: mascota.raza.especie.id, nombre: mascota.raza.especie.nombre },
     raza: { id: mascota.raza.id, nombre: mascota.raza.nombre },
     estado: { id: estado.id, nombre: estado.nombre },
+    refugio: mascota.refugio ? { id: mascota.refugio.id, nombre: mascota.refugio.nombre } : null,
     publicacionId: publicacion?.id ?? null,
     solicitudAbiertaId: publicacion?.solicitudes[0]?.id ?? null,
     fechaAgregado: favorito.fechaAlta.toISOString(),

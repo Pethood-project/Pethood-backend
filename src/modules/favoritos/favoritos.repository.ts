@@ -19,9 +19,10 @@ function visiblesDe(usuarioId: number) {
   };
 }
 
-/** Estado vigente de la mascota + su raza/especie, para armar la tarjeta. */
+/** Estado vigente de la mascota + su raza/especie y su refugio, para armar la tarjeta. */
 const RELACIONES_TARJETA = {
   raza: { include: { especie: true } },
+  refugio: { select: { id: true, nombre: true } },
   historicoEstados: {
     where: { fechaBaja: null },
     include: { estadoMascota: true },
