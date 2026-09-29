@@ -1,6 +1,17 @@
 // Campañas y donaciones (dashboards), reseñas (valoración del perfil), reportes de
 // moderación y reportes de animales perdidos.
-import { enDias, foto, haceDias, haceMeses, id, log, prisma, type Catalogos } from './comun';
+import {
+  enDias,
+  foto,
+  FOTOS_GATO,
+  FOTOS_PERRO,
+  haceDias,
+  haceMeses,
+  id,
+  log,
+  prisma,
+  type Catalogos,
+} from './comun';
 import type { Mascotas } from './mascotas';
 import type { Actores } from './usuarios';
 
@@ -286,71 +297,286 @@ async function seedReportes(actores: Actores) {
 }
 
 interface DefAnimalPerdido {
-  reportante: 'ana' | 'carla' | 'elena';
+  reportante: 'ana' | 'bruno' | 'carla' | 'elena' | 'lucia' | 'martin' | 'nico' | 'sofia';
   mascota?: string;
+  /** Obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar (HU-13.1). */
+  nombre?: string;
+  especie: 'Perro' | 'Gato';
+  /** Texto libre, como lo escribiría una persona (spec 020). */
+  ubicacion: string;
   descripcion: string;
-  imagen: string;
+  /** De 1 a 5, en el orden de la galería: la primera es la portada. */
+  imagenes: string[];
   latitud: number;
   longitud: number;
   estado: 'Perdido' | 'Encontrado' | 'Resuelto';
   diasAtras: number;
 }
 
+/** Coordenadas aproximadas de cada departamento del Gran Mendoza. */
+const COORDENADAS = {
+  godoyCruz: { latitud: -32.9264, longitud: -68.8447 },
+  guaymallen: { latitud: -32.8947, longitud: -68.7972 },
+  lasHeras: { latitud: -32.8503, longitud: -68.8262 },
+  maipu: { latitud: -32.9833, longitud: -68.7833 },
+  capital: { latitud: -32.8895, longitud: -68.8458 },
+  lujan: { latitud: -33.0333, longitud: -68.8833 },
+};
+
+/**
+ * Avisos del portal de perdidos (GUI-06). Variados a propósito en estado, especie, ubicación,
+ * reportante y antigüedad, para poder probar el orden, el cursor y cada filtro de verdad.
+ *
+ * "godoy cruz" en minúscula es intencional: la ubicación es texto libre y el filtro tiene que
+ * encontrarla junto con "Godoy Cruz".
+ */
 const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
   {
     reportante: 'ana',
     mascota: 'thor',
+    nombre: 'Thor',
+    especie: 'Perro',
+    ubicacion: 'Godoy Cruz',
     descripcion:
       'Thor, labrador dorado de 6 años, se escapó del patio en Godoy Cruz. Tiene collar azul ' +
       'con chapita. Es muy manso, se deja agarrar.',
-    imagen: foto('photo-1552053831-71594a27632d'),
-    latitud: -32.9264,
-    longitud: -68.8447,
+    // Varias fotos, para probar la galería del detalle.
+    imagenes: [
+      foto('photo-1552053831-71594a27632d'),
+      foto(FOTOS_PERRO[1]!),
+      foto(FOTOS_PERRO[5]!),
+    ],
+    ...COORDENADAS.godoyCruz,
     estado: 'Perdido',
     diasAtras: 6,
   },
   {
     reportante: 'carla',
+    especie: 'Perro',
+    ubicacion: 'Guaymallén',
     descripcion:
       'Encontré un perro mestizo marrón, mediano, sin collar, en la plaza de Guaymallén. ' +
       'Está bien alimentado, seguro tiene dueño. Lo tengo en casa.',
-    imagen: foto('photo-1568572933382-74d440642117'),
-    latitud: -32.8947,
-    longitud: -68.7972,
+    imagenes: [foto('photo-1568572933382-74d440642117')],
+    ...COORDENADAS.guaymallen,
     estado: 'Encontrado',
     diasAtras: 2,
   },
   {
     reportante: 'elena',
+    nombre: 'Luna',
+    especie: 'Gato',
+    ubicacion: 'Las Heras',
     descripcion: 'Gata gris atigrada perdida en Las Heras. Ya apareció, gracias a todos.',
-    imagen: foto('photo-1518791841217-8f162f1e1131'),
-    latitud: -32.8503,
-    longitud: -68.8262,
+    imagenes: [foto('photo-1518791841217-8f162f1e1131')],
+    ...COORDENADAS.lasHeras,
     estado: 'Resuelto',
     diasAtras: 25,
   },
+  {
+    reportante: 'martin',
+    nombre: 'Rocco',
+    especie: 'Perro',
+    ubicacion: 'Maipú',
+    descripcion:
+      'Rocco, beagle tricolor de 3 años. Se asustó con la pirotecnia y saltó el paredón. ' +
+      'Responde a su nombre y le encanta la pelota.',
+    imagenes: [foto(FOTOS_PERRO[2]!)],
+    ...COORDENADAS.maipu,
+    estado: 'Perdido',
+    diasAtras: 1,
+  },
+  {
+    reportante: 'lucia',
+    nombre: 'Michi',
+    especie: 'Gato',
+    ubicacion: 'Ciudad de Mendoza',
+    descripcion:
+      'Gato naranja castrado de 4 años, con collar rojo y cascabel. Nunca sale a la calle, ' +
+      'debe estar escondido y asustado cerca de calle Belgrano.',
+    imagenes: [foto(FOTOS_GATO[0]!), foto(FOTOS_GATO[2]!)],
+    ...COORDENADAS.capital,
+    estado: 'Perdido',
+    diasAtras: 3,
+  },
+  {
+    reportante: 'sofia',
+    especie: 'Gato',
+    ubicacion: 'Luján de Cuyo',
+    descripcion:
+      'Encontré una gatita tricolor muy chiquita, de unos 2 meses, en la entrada de Chacras. ' +
+      'La tengo en casa con comida y abrigo.',
+    imagenes: [foto(FOTOS_GATO[3]!)],
+    ...COORDENADAS.lujan,
+    estado: 'Encontrado',
+    diasAtras: 0,
+  },
+  {
+    reportante: 'nico',
+    // El nombre sale de la chapita: un aviso "Encontrado" también puede tenerlo.
+    nombre: 'Rocky',
+    especie: 'Perro',
+    ubicacion: 'Maipú',
+    descripcion:
+      'Perro grande negro con una chapita que dice Rocky, sin teléfono. Andaba solo por la ' +
+      'ruta 60. Lo tengo en el patio de casa.',
+    imagenes: [foto(FOTOS_PERRO[4]!)],
+    ...COORDENADAS.maipu,
+    estado: 'Encontrado',
+    diasAtras: 4,
+  },
+  {
+    // Un miembro de refugio también puede publicar: el aviso es de la persona.
+    reportante: 'bruno',
+    especie: 'Perro',
+    ubicacion: 'Las Heras',
+    descripcion:
+      'Perrita mestiza blanca con manchas marrones, muy dócil, apareció en la puerta del ' +
+      'refugio. Está sana y la estamos cuidando hasta encontrar a su familia.',
+    imagenes: [foto(FOTOS_PERRO[6]!)],
+    ...COORDENADAS.lasHeras,
+    estado: 'Encontrado',
+    diasAtras: 9,
+  },
+  {
+    reportante: 'carla',
+    nombre: 'Pancho',
+    especie: 'Perro',
+    ubicacion: 'godoy cruz',
+    descripcion:
+      'Caniche toy blanco de 10 años, un poco sordo. Se perdió en el barrio Bombal. Necesita ' +
+      'su medicación para el corazón, cualquier dato sirve.',
+    imagenes: [foto(FOTOS_PERRO[8]!)],
+    ...COORDENADAS.godoyCruz,
+    estado: 'Perdido',
+    diasAtras: 12,
+  },
+  {
+    reportante: 'ana',
+    nombre: 'Nina',
+    especie: 'Gato',
+    ubicacion: 'Guaymallén',
+    descripcion:
+      'Gata negra de ojos verdes, se escapó por la ventana. ¡Ya volvió a casa, gracias por compartir!',
+    imagenes: [foto(FOTOS_GATO[1]!)],
+    ...COORDENADAS.guaymallen,
+    estado: 'Resuelto',
+    diasAtras: 35,
+  },
+  {
+    reportante: 'elena',
+    nombre: 'Toby',
+    especie: 'Perro',
+    ubicacion: 'Luján de Cuyo',
+    descripcion:
+      'Toby es un mestizo marrón de pelo corto, 5 años, con la oreja izquierda caída. Se ' +
+      'perdió en Vistalba el domingo a la tarde.',
+    imagenes: [foto(FOTOS_PERRO[9]!)],
+    ...COORDENADAS.lujan,
+    estado: 'Perdido',
+    diasAtras: 18,
+  },
+  {
+    reportante: 'martin',
+    especie: 'Gato',
+    ubicacion: 'Ciudad de Mendoza',
+    descripcion:
+      'Gato gris y blanco adulto, muy cariñoso, entró a mi departamento en la Quinta Sección. ' +
+      'Parece que tiene dueño porque está castrado.',
+    imagenes: [foto(FOTOS_GATO[4]!)],
+    ...COORDENADAS.capital,
+    estado: 'Encontrado',
+    diasAtras: 22,
+  },
+  {
+    reportante: 'lucia',
+    especie: 'Perro',
+    ubicacion: 'Maipú',
+    descripcion: 'Encontramos un cachorro marrón en Coquimbito y ya apareció su familia. ¡Gracias!',
+    imagenes: [foto(FOTOS_PERRO[3]!)],
+    ...COORDENADAS.maipu,
+    estado: 'Resuelto',
+    diasAtras: 40,
+  },
 ];
 
+/**
+ * Día en que se perdió o se encontró: el anterior a la publicación, como pasa casi siempre.
+ * Sólo el día, a medianoche local, igual que una fecha elegida en el formulario.
+ */
+function fechaSucesoDe(def: DefAnimalPerdido): Date {
+  const fecha = haceDias(def.diasAtras + 1);
+  return new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+}
+
 async function seedAnimalesPerdidos(catalogos: Catalogos, actores: Actores, mascotas: Mascotas) {
+  const especies = new Map(
+    (await prisma.especie.findMany({ select: { id: true, nombre: true } })).map((especie) => [
+      especie.nombre,
+      especie.id,
+    ]),
+  );
+
   let nuevos = 0;
+  let completados = 0;
 
   for (const def of ANIMALES_PERDIDOS) {
     const reportante = actores[def.reportante];
+    const especieId = id(especies, def.especie);
 
     const existente = await prisma.animalPerdido.findFirst({
       where: { usuarioReportanteId: reportante.id, descripcion: def.descripcion },
+      select: {
+        id: true,
+        nombre: true,
+        ubicacion: true,
+        especieId: true,
+        fechaSuceso: true,
+        imagenes: true,
+      },
     });
-    if (existente) continue;
+
+    if (existente) {
+      // Los avisos sembrados antes de HU-13.1 no tienen nombre, ubicación, especie, fecha del
+      // suceso ni galería (la migración sólo les copió la portada): se completan sin pisar lo
+      // que ya tenga valor.
+      const faltanFotos = existente.imagenes.length < def.imagenes.length;
+
+      if (
+        existente.ubicacion === null ||
+        existente.especieId === null ||
+        existente.fechaSuceso === null ||
+        faltanFotos
+      ) {
+        await prisma.animalPerdido.update({
+          where: { id: existente.id },
+          data: {
+            nombre: existente.nombre ?? def.nombre ?? null,
+            ubicacion: existente.ubicacion ?? def.ubicacion,
+            especieId: existente.especieId ?? especieId,
+            fechaSuceso: existente.fechaSuceso ?? fechaSucesoDe(def),
+            ...(faltanFotos ? { imagenes: def.imagenes, imagenUrl: def.imagenes[0]! } : {}),
+          },
+        });
+        completados += 1;
+      }
+      continue;
+    }
 
     await prisma.animalPerdido.create({
       data: {
+        nombre: def.nombre ?? null,
         descripcion: def.descripcion,
-        imagenUrl: def.imagen,
+        imagenUrl: def.imagenes[0]!,
+        imagenes: def.imagenes,
+        ubicacion: def.ubicacion,
+        fechaSuceso: fechaSucesoDe(def),
         latitud: def.latitud,
         longitud: def.longitud,
         fechaResuelto: def.estado === 'Resuelto' ? haceDias(def.diasAtras - 3) : null,
         usuarioReportanteId: reportante.id,
         mascotaId: def.mascota ? mascotas.get(def.mascota)!.mascota.id : null,
+        especieId,
         estadoAnimalPerdidoId: id(catalogos.estadosAnimalPerdido, def.estado),
         usuarioAlta: reportante.id,
         fechaAlta: haceDias(def.diasAtras),
@@ -359,7 +585,9 @@ async function seedAnimalesPerdidos(catalogos: Catalogos, actores: Actores, masc
     nuevos += 1;
   }
 
-  log(`🔍 Animales perdidos: ${ANIMALES_PERDIDOS.length} (${nuevos} nuevos)`);
+  log(
+    `🔍 Animales perdidos: ${ANIMALES_PERDIDOS.length} (${nuevos} nuevos, ${completados} completados)`,
+  );
 }
 
 export async function seedComunidad(catalogos: Catalogos, actores: Actores, mascotas: Mascotas) {

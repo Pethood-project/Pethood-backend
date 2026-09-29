@@ -86,7 +86,8 @@ model Especie {
   usuarioBaja         Int?      @map("especie_usuario_baja")
   fechaBaja           DateTime? @map("especie_fecha_baja")
 
-  razas Raza[]
+  razas            Raza[]
+  animalesPerdidos AnimalPerdido[]
 
   @@map("especie")
 }
@@ -925,15 +926,47 @@ model Donacion {
 
 // ─────────────── MASCOTAS PERDIDAS Y ENCONTRADAS ───────────────
 
+// Aviso de un animal perdido o encontrado (spec 020, HU-13.1).
+//
+// `nombre`, `ubicacion` y `especieId` no vienen del diagrama de clases: los pide la HU (el
+// nombre de hasta 30 caracteres y los filtros por localidad y especie). Son nullables en base,
+// igual que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la impone el DTO y el
+// servicio: así no invalidan los avisos cargados antes y no bloquean otros flujos.
+//
+// - `nombre`: obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar, porque
+//   quien encuentra un animal no sabe cómo se llama.
+// - `ubicacion`: dónde se perdió o se encontró, en texto libre como `usuario_ubicacion`. Es
+//   PROVISORIO hasta que exista el catálogo de Provincia/Localidad (ver DEUDA_TECNICA.md).
+// - `especieId`: FK directa y no derivada de `mascotaId` → raza → especie, porque un animal
+//   encontrado no tiene Mascota asociada.
+// - `fechaSuceso`: el día en que se perdió o se encontró, que no tiene por qué ser el día en
+//   que se publicó el aviso (`fechaAlta`). Lo pide el campo "Fecha" del formulario (pantalla
+//   26 del diseño). Sólo el día, sin hora, igual que `mascota_fecha_nacimiento`.
+// - `imagenes`: hasta 5 fotos, y el orden del array ES el de la galería del detalle. Mismo par
+//   que `publicacion_imagenes`: `imagenUrl` se mantiene con la PRIMERA, que es la portada de
+//   la tarjeta del portal.
+//
+// `latitud`/`longitud` NO son la ubicación del animal: son las coordenadas del dispositivo al
+// momento de reportar (MODELO_DATOS.md). No se exponen en el listado.
+//
+// Además del índice de abajo, la tabla tiene un índice PARCIAL que Prisma no sabe expresar y
+// vive en `migrations/20260929120000_hu131_animal_perdido_nombre_ubicacion_especie`:
+// `animal_perdido_listado_idx` — (fecha_alta DESC, animal_perdido_id DESC) WHERE fecha_baja
+// IS NULL, que sostiene el orden y el cursor del portal.
 model AnimalPerdido {
   id                    Int       @id @default(autoincrement()) @map("animal_perdido_id")
+  nombre                String?   @map("animal_perdido_nombre")
   descripcion           String    @map("animal_perdido_descripcion")
   imagenUrl             String    @map("animal_perdido_imagen_url")
+  imagenes              String[]  @map("animal_perdido_imagenes")
+  ubicacion             String?   @map("animal_perdido_ubicacion")
+  fechaSuceso           DateTime? @map("animal_perdido_fecha_suceso")
   latitud               Float     @map("animal_perdido_latitud")
   longitud              Float     @map("animal_perdido_longitud")
   fechaResuelto         DateTime? @map("animal_perdido_fecha_resuelto")
   usuarioReportanteId   Int       @map("usuario_reportante_id")
   mascotaId             Int?      @map("mascota_id")
+  especieId             Int?      @map("especie_id")
   estadoAnimalPerdidoId Int       @map("estado_animal_perdido_id")
 
   usuarioAlta         Int       @map("animal_perdido_usuario_alta")
@@ -945,8 +978,10 @@ model AnimalPerdido {
 
   usuarioReportante   Usuario             @relation(fields: [usuarioReportanteId], references: [id])
   mascota             Mascota?            @relation(fields: [mascotaId], references: [id])
+  especie             Especie?            @relation(fields: [especieId], references: [id])
   estadoAnimalPerdido EstadoAnimalPerdido @relation(fields: [estadoAnimalPerdidoId], references: [id])
 
+  @@index([especieId])
   @@map("animal_perdido")
 }
 

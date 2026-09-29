@@ -41,6 +41,41 @@ export function parsearDecimal(
   return { valido: true, valor: numero };
 }
 
+/**
+ * Latitud o longitud: un número con signo dentro del rango del eje, que llega como texto
+ * desde un form multipart.
+ *
+ * No sirve `parsearDecimal` por dos motivos: no acepta negativos (y en Argentina las dos
+ * coordenadas lo son) y rechaza el exceso de decimales, mientras que el GPS del teléfono
+ * entrega 10 o más. Acá no se redondea ni se trunca: se guarda el número tal cual llegó.
+ */
+export function parsearCoordenada(
+  valor: string | number | null | undefined,
+  opciones: { min: number; max: number; etiqueta: string },
+): ResultadoDecimal {
+  const { min, max, etiqueta } = opciones;
+
+  if (valor === null || valor === undefined || valor === '') {
+    return { valido: false, error: `${etiqueta} es obligatoria` };
+  }
+
+  const texto = String(valor).trim();
+
+  // Signo opcional, parte entera y decimales con punto o coma. Nada de exponentes ni de
+  // `Infinity`, que `Number()` aceptaría.
+  if (!/^[-+]?\d{1,3}([.,]\d+)?$/.test(texto)) {
+    return { valido: false, error: `${etiqueta} no es válida` };
+  }
+
+  const numero = Number(texto.replace(',', '.'));
+
+  if (numero < min || numero > max) {
+    return { valido: false, error: `${etiqueta} debe estar entre ${min} y ${max}` };
+  }
+
+  return { valido: true, valor: numero };
+}
+
 /** Id de una FK que llega como string desde un form multipart. */
 export function parsearId(valor: unknown): number | null {
   const numero = Number(valor);

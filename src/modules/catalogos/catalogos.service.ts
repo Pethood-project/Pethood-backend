@@ -12,6 +12,12 @@ const ESTADOS_SELECCIONABLES_EN_ALTA = ['Disponible', 'En_Tratamiento', 'En_Tran
 /** Estados con los que se puede ofrecer la mascota en adopción. */
 const ESTADOS_QUE_HABILITAN_PUBLICACION = ['Disponible', 'En_Transito'];
 
+/**
+ * Estados con los que nace un aviso de animal perdido (spec 020). "Resuelto" existe en el
+ * catálogo pero es el cierre del caso (HU-13.3), nunca un alta.
+ */
+const ESTADOS_ANIMAL_PERDIDO_EN_ALTA = ['Perdido', 'Encontrado'];
+
 export function listarEspecies() {
   return repo.listarEspecies();
 }
@@ -57,4 +63,21 @@ export async function listarEstadosMascota() {
   }));
 }
 
-export { ESTADOS_SELECCIONABLES_EN_ALTA, ESTADOS_QUE_HABILITAN_PUBLICACION };
+/**
+ * Estados del aviso de animal perdido: alimentan el filtro del portal (todos) y el selector del
+ * alta (sólo los que tienen `seleccionableEnAlta`).
+ */
+export async function listarEstadosAnimalPerdido() {
+  const estados = await repo.listarEstadosAnimalPerdido();
+
+  return estados.map((estado) => ({
+    ...estado,
+    seleccionableEnAlta: ESTADOS_ANIMAL_PERDIDO_EN_ALTA.includes(estado.nombre),
+  }));
+}
+
+export {
+  ESTADOS_SELECCIONABLES_EN_ALTA,
+  ESTADOS_QUE_HABILITAN_PUBLICACION,
+  ESTADOS_ANIMAL_PERDIDO_EN_ALTA,
+};

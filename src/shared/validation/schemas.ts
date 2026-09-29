@@ -5,9 +5,17 @@
  * coerciona en vez de confiar en el tipo que mande el cliente.
  */
 import { z } from 'zod';
-import { validarFechaFutura, validarFechaPasada } from './dates';
-import { parsearDecimal, parsearListaDeIds } from './numbers';
-import { parsearListaDeValores, parsearListaJson, validarTexto, type OpcionesTexto } from './text';
+import { parsearFecha, validarFechaFutura, validarFechaPasada } from './dates';
+import { parsearCoordenada, parsearDecimal, parsearId, parsearListaDeIds } from './numbers';
+import {
+  mensajeInvalido,
+  mensajeObligatorio,
+  parsearListaDeTextos,
+  parsearListaDeValores,
+  parsearListaJson,
+  validarTexto,
+  type OpcionesTexto,
+} from './text';
 
 export function textoSchema(opciones: Omit<OpcionesTexto, 'obligatorio'>) {
   return z.unknown().transform((valor, ctx) => {
@@ -117,6 +125,61 @@ export function fechaFuturaOpcionalSchema(etiqueta: string) {
   });
 }
 
+/**
+ * Punta de un rango de fechas de un filtro (`?fechaDesde=2026-09-01`). Vacía o ausente queda
+ * `undefined` —"sin esa punta"—, no es un error. A diferencia de las fechas de un formulario,
+ * no se exige pasada ni futura: filtrar hacia adelante sólo trae una lista vacía.
+ */
+export function fechaFiltroSchema(etiqueta: string) {
+  return z.unknown().transform((valor, ctx) => {
+    if (valor === undefined || valor === null || valor === '') return undefined;
+
+    const fecha = parsearFecha(valor as string | Date);
+
+    if (!fecha) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${etiqueta} no es válida` });
+      return z.NEVER;
+    }
+
+    return fecha;
+  });
+}
+
+/** Latitud o longitud con signo (ver `parsearCoordenada`). */
+export function coordenadaSchema(opciones: { min: number; max: number; etiqueta: string }) {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = parsearCoordenada(valor as string | number, opciones);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
+  });
+}
+
+/**
+ * Textos libres de un filtro de selección múltiple, un parámetro por valor
+ * (`?ubicaciones=Maipú&ubicaciones=Godoy%20Cruz`). Ausente → `[]`, "sin filtro".
+ */
+export function listaDeTextosSchema(opciones: {
+  max: number;
+  maximoElementos: number;
+  etiqueta: string;
+}) {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = parsearListaDeTextos(valor, opciones);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
+  });
+}
+
 export function decimalSchema(opciones: {
   min: number;
   max: number;
@@ -158,11 +221,53 @@ export function booleanoOpcionalSchema() {
     .transform((valor) => (valor === undefined ? undefined : valor === true || valor === 'true'));
 }
 
+/**
+ * Id de una FK, que puede llegar como número (JSON) o como texto (multipart, query).
+ *
+ * No usa `z.coerce.number`: la coerción convierte un campo ausente en `NaN` y Zod lo reporta
+ * con su mensaje en inglés ("Expected number, received nan"), que llegaba tal cual al cliente.
+ * Los mensajes concuerdan en género con la etiqueta ("La especie es obligatoria").
+ */
 export function idSchema(etiqueta: string) {
-  return z.coerce
-    .number({ required_error: `${etiqueta} es obligatorio` })
-    .int(`${etiqueta} no es válido`)
-    .positive(`${etiqueta} no es válido`);
+  return z.unknown().transform((valor, ctx) => {
+    if (valor === undefined || valor === null || valor === '') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: mensajeObligatorio(etiqueta) });
+      return z.NEVER;
+    }
+
+    const id = parsearId(valor);
+
+    if (id === null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: mensajeInvalido(etiqueta) });
+      return z.NEVER;
+    }
+
+    return id;
+  });
+}
+
+/**
+ * Tamaño de página de un listado paginado (`?limite=20`). Ausente toma el valor por defecto;
+ * fuera de rango es un error en español, no el mensaje en inglés de Zod.
+ */
+export function limitePaginaSchema(opciones: { porDefecto: number; maximo: number }) {
+  const { porDefecto, maximo } = opciones;
+
+  return z.unknown().transform((valor, ctx) => {
+    if (valor === undefined || valor === null || valor === '') return porDefecto;
+
+    const limite = parsearId(valor);
+
+    if (limite === null || limite > maximo) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `El límite tiene que ser un número entre 1 y ${maximo}`,
+      });
+      return z.NEVER;
+    }
+
+    return limite;
+  });
 }
 
 /**
