@@ -170,7 +170,10 @@ describe('crearAviso', () => {
   it('rechaza un estado que no existe', async () => {
     expect(
       await codigoDeError(
-        service.crearAviso({ ...DATOS, estadoId: 999 }, { usuarioId: USUARIO, archivos: [ARCHIVO] }),
+        service.crearAviso(
+          { ...DATOS, estadoId: 999 },
+          { usuarioId: USUARIO, archivos: [ARCHIVO] },
+        ),
       ),
     ).toBe('NO_ENCONTRADO');
   });

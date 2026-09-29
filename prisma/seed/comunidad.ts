@@ -341,11 +341,7 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
       'Thor, labrador dorado de 6 años, se escapó del patio en Godoy Cruz. Tiene collar azul ' +
       'con chapita. Es muy manso, se deja agarrar.',
     // Varias fotos, para probar la galería del detalle.
-    imagenes: [
-      foto('photo-1552053831-71594a27632d'),
-      foto(FOTOS_PERRO[1]!),
-      foto(FOTOS_PERRO[5]!),
-    ],
+    imagenes: [foto('photo-1552053831-71594a27632d'), foto(FOTOS_PERRO[1]!), foto(FOTOS_PERRO[5]!)],
     ...COORDENADAS.godoyCruz,
     estado: 'Perdido',
     diasAtras: 6,
