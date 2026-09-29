@@ -31,6 +31,11 @@ export interface MascotaFavoritaDto {
   /** Estado ACTUAL de la mascota, no el que tenía al guardarla (HU-6.6). */
   estado: { id: number; nombre: string };
   /**
+   * Refugio dueño de la mascota, o `null` si es de un adoptante particular. Lo muestra la
+   * tarjeta de favoritos de Inicio ("1 año · Refugio Esperanza").
+   */
+  refugio: { id: number; nombre: string } | null;
+  /**
    * Publicación activa de la mascota, o `null` si ya no está publicada. Es lo que habilita
    * el botón "Solicitar" de la tarjeta (HU-7.1): sin publicación no hay qué solicitar.
    */
