@@ -48,8 +48,12 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 18 | Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones | Media | backend |
 | 19 | Pausar o finalizar una publicación no toca sus solicitudes abiertas | Media | backend |
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
+<<<<<<< HEAD
 | 21 | La ubicación es texto libre: no hay catálogo de Provincia/Localidad | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
+=======
+| 21 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
+>>>>>>> origin/dev
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -467,6 +471,7 @@ correr el seed sobre una base vacía.
 
 ---
 
+<<<<<<< HEAD
 ## 21. La ubicación es texto libre: no hay catálogo de Provincia/Localidad — Media
 
 **Qué pasa.** `REQUISITOS.md` y `MODELO_DATOS.md` piden filtrar por ubicación administrativa
@@ -496,3 +501,22 @@ que arma el cliente, no el usuario, así que en la práctica no se ve.
 **Cómo se arregla.** Usar `limitePaginaSchema` de `shared/validation/schemas.ts` (creado en la
 spec 020), que ya da el error en español. `idSchema` tenía el mismo problema cuando faltaba un
 id y quedó corregido para todos los módulos en esa misma spec.
+=======
+## 21. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
+
+**Qué pasa.** El rediseño de Inicio (adoptante y refugio) trae secciones de Campañas y de
+Mascotas perdidas con datos reales (montos, donantes, reportes cerca). Esos módulos son las
+fases 10 y 11 del roadmap y todavía no tienen backend, así que en
+`apps/mobile/components/home/SeccionesProximamente.tsx` se muestran con el color y la forma
+del diseño pero con un texto genérico y la pastilla «Muy pronto», sin números inventados.
+Además, el panel de solicitudes del refugio saca sus contadores (pendientes, en revisión,
+aprobadas del mes, llegadas hoy) del `total` de cuatro `GET /solicitudes/recibidas` con
+distinto filtro, porque no hay un endpoint de resumen.
+
+**Cómo se arregla.** Cuando se implemente cada módulo, reemplazar su tarjeta de
+`SeccionesProximamente.tsx` por una con datos (el diseño de referencia está en el proyecto
+«Pethood - Ideas de inicio» de Claude Design). El «Ver mapa» del prototipo no se implementa:
+el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se notan lentos,
+sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
+consulta.
+>>>>>>> origin/dev

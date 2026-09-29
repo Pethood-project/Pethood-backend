@@ -34,6 +34,8 @@ function favoritoConMascota(opciones: {
   publicacionId?: number | null;
   /** Solicitud viva del usuario sobre esa publicación, si la tiene. */
   solicitudId?: number | null;
+  /** Refugio dueño; `null` es la mascota de un adoptante particular. */
+  refugio?: { id: number; nombre: string } | null;
 }) {
   const {
     id,
@@ -43,6 +45,7 @@ function favoritoConMascota(opciones: {
     fechaNacimiento = new Date(2022, 2, 15),
     publicacionId = 5,
     solicitudId = null,
+    refugio = null,
   } = opciones;
 
   return {
@@ -56,6 +59,7 @@ function favoritoConMascota(opciones: {
       fechaNacimiento,
       imagenUrl: '/api/v1/archivos/mascotas/x.jpg',
       raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
+      refugio,
       historicoEstados: estado ? [{ estadoMascota: estado }] : [],
       publicaciones:
         publicacionId === null
@@ -253,6 +257,30 @@ describe('listarFavoritos', () => {
     const { favoritos } = await service.listarFavoritos(USUARIO);
 
     expect(favoritos[0]).toMatchObject({ publicacionId: 88, solicitudAbiertaId: 1042 });
+  });
+
+  // La tarjeta de favoritos de Inicio muestra de qué refugio es la mascota.
+  it('expone el refugio dueño, o null si es de un particular', async () => {
+    vi.mocked(repo.listarVisiblesDeUsuario).mockResolvedValue([
+      favoritoConMascota({
+        id: 1,
+        mascotaId: 42,
+        fechaAlta: FECHA_AGREGADO,
+        estado: { id: 1, nombre: 'Disponible' },
+        refugio: { id: 7, nombre: 'Refugio Esperanza' },
+      }),
+      favoritoConMascota({
+        id: 2,
+        mascotaId: 43,
+        fechaAlta: FECHA_AGREGADO,
+        estado: { id: 1, nombre: 'Disponible' },
+      }),
+    ] as never);
+
+    const { favoritos } = await service.listarFavoritos(USUARIO);
+
+    expect(favoritos[0]!.refugio).toEqual({ id: 7, nombre: 'Refugio Esperanza' });
+    expect(favoritos[1]!.refugio).toBeNull();
   });
 
   it('sin publicación viva no hay nada que solicitar', async () => {
