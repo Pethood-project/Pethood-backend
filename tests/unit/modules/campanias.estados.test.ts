@@ -86,6 +86,10 @@ describe('calcularPorcentaje', () => {
     expect(calcularPorcentaje(1430000, 2500000)).toBe(57);
   });
 
+  it('no pierde un punto por el error de punto flotante (57000 / 100000 * 100 = 56.99…)', () => {
+    expect(calcularPorcentaje(57000, 100000)).toBe(57);
+  });
+
   it('se topea en 100 aunque el recaudado supere el objetivo', () => {
     expect(calcularPorcentaje(150000, 100000)).toBe(100);
   });

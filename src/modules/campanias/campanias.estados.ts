@@ -89,5 +89,6 @@ export function siguienteEstadoAutomatico(
 /** Para la barra: hacia abajo y topeado en 100 (el recaudado real puede superar el objetivo). */
 export function calcularPorcentaje(recaudado: number, objetivo: number): number {
   if (objetivo <= 0) return 0;
-  return Math.min(100, Math.floor((recaudado / objetivo) * 100));
+  // Multiplicar antes de dividir: `57000 / 100000 * 100` da 56.99… y el floor perdía un punto.
+  return Math.min(100, Math.floor((recaudado * 100) / objetivo));
 }
