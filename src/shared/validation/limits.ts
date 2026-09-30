@@ -55,6 +55,13 @@ export const LIMITES = {
     orden: { min: 1, max: 999 },
   },
 
+  /** Solo web-admin (ABM de catálogos) — no hay contraparte en la app mobile, no se mirrorea. */
+  catalogo: {
+    nombre: { min: 2, max: 50 },
+    descripcion: { max: 200 },
+    secuenciaDias: { min: 1, max: 365 },
+  },
+
   faqCategoria: {
     nombre: { min: 2, max: 50 },
     descripcion: { max: 200 },
