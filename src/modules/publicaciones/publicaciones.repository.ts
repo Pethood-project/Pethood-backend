@@ -1,7 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
-import { restarAnios } from '../../shared/validation/dates';
+import { distanciaKm, resolverCoordenadasDeMapsUrl } from '../../shared/geo';
+import { restarAnios, finDelDia } from '../../shared/validation/dates';
 import {
   ESTADO_PUBLICACION,
   RASGO_COMPATIBLE_NINIOS,
@@ -13,6 +14,9 @@ export interface DatosNuevaPublicacion {
   titulo: string;
   descripcion: string;
   ubicacion: string;
+  /** Coordenadas opcionales del lugar (Módulo 11). */
+  latitud: number | null;
+  longitud: number | null;
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
@@ -171,6 +175,9 @@ export function buscarUltimaDeMascota(mascotaId: number) {
 export interface DatosEdicionPublicacion {
   descripcion: string;
   ubicacion: string;
+  /** Coordenadas opcionales del lugar (Módulo 11). */
+  latitud: number | null;
+  longitud: number | null;
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
@@ -213,7 +220,16 @@ const RELACIONES_FEED = {
   mascota: {
     include: {
       raza: { include: { especie: true } },
-      refugio: { select: { id: true, nombre: true, direccion: true } },
+      refugio: {
+        select: {
+          id: true,
+          nombre: true,
+          provincia: true,
+          localidad: true,
+          calleAltura: true,
+          mapaUrl: true,
+        },
+      },
       historicoEstados: {
         where: { fechaBaja: null },
         include: { estadoMascota: true },
@@ -246,6 +262,113 @@ const RELACIONES_FEED = {
  * mantenga la invariante de una sola fila activa por mascota, que es como escribe el
  * resto del backend.
  */
+/**
+ * Ids de publicaciones vivas cuyo texto libre (HU-11.4) matchea parcialmente el título, la
+ * descripción, el nombre de la mascota o algún rasgo de personalidad. Se resuelve con SQL
+ * crudo porque el match parcial sobre un `text[]` (`unnest` + `ILIKE`) no se puede expresar
+ * con el query builder de Prisma.
+ */
+async function idsPorTexto(texto: string): Promise<number[]> {
+  const patron = `%${texto}%`;
+  const filas = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT p.publicacion_id AS id
+    FROM publicacion p
+    JOIN mascota m ON m.mascota_id = p.mascota_id
+    WHERE p.publicacion_fecha_baja IS NULL
+      AND (
+        p.publicacion_titulo ILIKE ${patron}
+        OR COALESCE(p.publicacion_descripcion, '') ILIKE ${patron}
+        OR COALESCE(m.mascota_nombre, '') ILIKE ${patron}
+        OR EXISTS (
+          SELECT 1 FROM unnest(p.publicacion_personalidad) AS rasgo WHERE rasgo ILIKE ${patron}
+        )
+      )
+  `;
+  return filas.map((fila) => fila.id);
+}
+
+/**
+ * Ids de publicaciones cuya coordenada capturada al publicar cae dentro del radio (km),
+ * con la fórmula del semiverseno (Haversine). El `LEAST/GREATEST` evita que un error de
+ * punto flotante saque al `acos` de su dominio.
+ */
+async function idsPublicacionCerca(lat: number, lng: number, radioKm: number): Promise<number[]> {
+  const filas = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT publicacion_id AS id
+    FROM publicacion
+    WHERE publicacion_fecha_baja IS NULL
+      AND publicacion_ubicacion_latitud IS NOT NULL
+      AND publicacion_ubicacion_longitud IS NOT NULL
+      AND (
+        6371 * acos(
+          LEAST(1, GREATEST(-1,
+            cos(radians(${lat})) * cos(radians(publicacion_ubicacion_latitud)) *
+            cos(radians(publicacion_ubicacion_longitud) - radians(${lng})) +
+            sin(radians(${lat})) * sin(radians(publicacion_ubicacion_latitud))
+          ))
+        )
+      ) <= ${radioKm}
+  `;
+  return filas.map((fila) => fila.id);
+}
+
+/**
+ * Ids de refugios dentro del radio, según las coordenadas extraídas de su enlace de Google
+ * Maps (`refugio_mapa_url`). Se resuelve en memoria a propósito: la cantidad de refugios es
+ * chica y así el parseo del link queda en una función pura testeable, no en SQL. Los links
+ * cortos (`maps.app.goo.gl`) se resuelven siguiendo la redirección, con caché.
+ *
+ * Un refugio sin link, o con un link que no permite obtener coordenadas, simplemente no
+ * entra en el filtro por distancia.
+ */
+async function refugiosEnRadio(lat: number, lng: number, radioKm: number): Promise<number[]> {
+  const refugios = await prisma.refugio.findMany({
+    where: { fechaBaja: null, mapaUrl: { not: null } },
+    select: { id: true, mapaUrl: true },
+  });
+
+  const usuario = { latitud: lat, longitud: lng };
+
+  const resultados = await Promise.all(
+    refugios.map(async (refugio) => {
+      const coordenadas = await resolverCoordenadasDeMapsUrl(refugio.mapaUrl);
+      if (!coordenadas) return null;
+      return distanciaKm(usuario, coordenadas) <= radioKm ? refugio.id : null;
+    }),
+  );
+
+  return resultados.filter((id): id is number => id !== null);
+}
+
+/**
+ * Publicaciones dentro del radio (HU-11.3): las que capturaron su propia coordenada cerca,
+ * más las de refugios cuyo link de Maps apunta a una coordenada cercana.
+ */
+async function idsEnRadio(lat: number, lng: number, radioKm: number): Promise<number[]> {
+  const porPublicacion = await idsPublicacionCerca(lat, lng, radioKm);
+  const refugios = await refugiosEnRadio(lat, lng, radioKm);
+
+  const porRefugio =
+    refugios.length > 0
+      ? (
+          await prisma.publicacion.findMany({
+            where: { fechaBaja: null, mascota: { refugioId: { in: refugios } } },
+            select: { id: true },
+          })
+        ).map((fila) => fila.id)
+      : [];
+
+  return [...new Set([...porPublicacion, ...porRefugio])];
+}
+
+/** Intersección de varios conjuntos de ids: la fila tiene que estar en todos. */
+function interseccionDe(listas: number[][]): number[] {
+  return listas.reduce((acumuladas, lista) => {
+    const conjunto = new Set(lista);
+    return acumuladas.filter((id) => conjunto.has(id));
+  });
+}
+
 function condicionesFeed(
   usuarioId: number,
   filtros: FiltrosFeedDto,
@@ -300,6 +423,43 @@ function condicionesFeed(
   if (filtros.compatibleOtrasMascotas) rasgos.push(RASGO_COMPATIBLE_OTRAS_MASCOTAS);
   if (rasgos.length > 0) where.personalidad = { hasEvery: rasgos };
 
+  // Rango de fecha de alta (HU-11.2), las dos puntas inclusive.
+  if (filtros.fechaDesde || filtros.fechaHasta) {
+    const rango: Prisma.DateTimeFilter = {};
+    if (filtros.fechaDesde) rango.gte = filtros.fechaDesde;
+    if (filtros.fechaHasta) rango.lte = finDelDia(filtros.fechaHasta);
+    where.fechaAlta = rango;
+  }
+
+  return where;
+}
+
+/**
+ * `condicionesFeed` + los filtros que necesitan SQL crudo (texto libre y cercanía). Los ids
+ * de esos dos se calculan aparte y se intersecan, porque `where.id` es un único `in`.
+ */
+async function condicionesFeedCompletas(
+  usuarioId: number,
+  filtros: FiltrosFeedDto,
+  actorRefugioId: number | null,
+): Promise<Prisma.PublicacionWhereInput> {
+  const where = condicionesFeed(usuarioId, filtros, actorRefugioId);
+  const conjuntos: number[][] = [];
+
+  if (filtros.texto) conjuntos.push(await idsPorTexto(filtros.texto));
+
+  if (
+    filtros.latitud !== undefined &&
+    filtros.longitud !== undefined &&
+    filtros.radioKm !== undefined
+  ) {
+    conjuntos.push(await idsEnRadio(filtros.latitud, filtros.longitud, filtros.radioKm));
+  }
+
+  if (conjuntos.length > 0) {
+    where.id = { in: interseccionDe(conjuntos) };
+  }
+
   return where;
 }
 
@@ -308,27 +468,34 @@ function condicionesFeed(
  * de recomendación definido todavía, y lo más nuevo primero es determinístico, así que la
  * paginación no repite ni saltea tarjetas entre páginas.
  */
-export function listarFeed(
+export async function listarFeed(
   usuarioId: number,
   filtros: FiltrosFeedDto,
   actorRefugioId: number | null,
 ) {
   return prisma.publicacion.findMany({
-    where: condicionesFeed(usuarioId, filtros, actorRefugioId),
+    where: await condicionesFeedCompletas(usuarioId, filtros, actorRefugioId),
     include: RELACIONES_FEED,
-    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    // HU-11.2: por defecto lo más nuevo primero; `antiguas` invierte el orden. El `id` como
+    // desempate mantiene la paginación determinística entre páginas.
+    orderBy:
+      filtros.orden === 'antiguas'
+        ? [{ fechaAlta: 'asc' as const }, { id: 'asc' as const }]
+        : [{ fechaAlta: 'desc' as const }, { id: 'desc' as const }],
     skip: filtros.desplazamiento,
     take: filtros.limite,
   });
 }
 
 /** Total que matchea los filtros, para saber si quedan páginas por traer. */
-export function contarFeed(
+export async function contarFeed(
   usuarioId: number,
   filtros: FiltrosFeedDto,
   actorRefugioId: number | null,
 ) {
-  return prisma.publicacion.count({ where: condicionesFeed(usuarioId, filtros, actorRefugioId) });
+  return prisma.publicacion.count({
+    where: await condicionesFeedCompletas(usuarioId, filtros, actorRefugioId),
+  });
 }
 
 /**

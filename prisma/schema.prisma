@@ -304,8 +304,18 @@ model Usuario {
   googleId        String?   @unique @map("usuario_google_id")
   verificado      Boolean   @default(false) @map("usuario_verificado")
   imagenUrl       String?   @map("usuario_imagen_url")
-  // Barrio / ciudad del perfil (GUI-15). Nullable para cuentas nuevas o de Google.
-  ubicacion       String?   @map("usuario_ubicacion")
+  // Dirección estructurada del perfil, para geocodificar (node-geocoder). El texto que se
+  // muestra es la concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
+  provincia       String?   @map("usuario_provincia")
+  localidad       String?   @map("usuario_localidad")
+  calleAltura     String?   @map("usuario_calle_altura")
+  // URL de Google Maps y coordenadas resultantes de la geocodificación. Las coordenadas se
+  // guardan aparte para calcular distancia (Haversine) sin parsear la URL.
+  mapaUrl         String?   @map("usuario_mapa_url")
+  latitud         Float?    @map("usuario_latitud")
+  longitud        Float?    @map("usuario_longitud")
+  // Si el usuario confirmó que el link de Maps apunta a su dirección real.
+  ubicacionVerificada Boolean @default(false) @map("usuario_ubicacion_verificada")
   refugioId       Int?      @map("refugio_id")
   estadoId        Int       @map("estado_id")
 
@@ -360,7 +370,20 @@ model RolUsuario {
 model Refugio {
   id          Int     @id @default(autoincrement()) @map("refugio_id")
   nombre      String  @map("refugio_nombre")
-  direccion   String  @map("refugio_direccion")
+  // Dirección estructurada, para geocodificar (node-geocoder). El texto que se muestra es la
+  // concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
+  provincia   String? @map("refugio_provincia")
+  localidad   String? @map("refugio_localidad")
+  calleAltura String? @map("refugio_calle_altura")
+  // Enlace a Google Maps del refugio (Módulo 11): se muestra en el detalle de la mascota y
+  // sus coordenadas, cuando el link las incluye, alimentan el filtro por cercanía.
+  mapaUrl     String? @map("refugio_mapa_url")
+  // Coordenadas persistidas al geocodificar la dirección, para no depender de parsear
+  // `mapa_url` en el camino crítico del feed.
+  latitud     Float?  @map("refugio_latitud")
+  longitud    Float?  @map("refugio_longitud")
+  // Si el refugio confirmó que el link de Maps apunta a su dirección real.
+  ubicacionVerificada Boolean @default(false) @map("refugio_ubicacion_verificada")
   telefono    String? @map("refugio_telefono")
   email       String? @map("refugio_email")
   descripcion String? @map("refugio_descripcion")
@@ -456,17 +479,21 @@ model MascotaEstado {
 // primera es la portada. `imagenUrl` se mantiene con esa portada, para no romper lo que ya
 // lee ese campo.
 model Publicacion {
-  id            Int      @id @default(autoincrement()) @map("publicacion_id")
-  titulo        String   @map("publicacion_titulo")
-  descripcion   String?  @map("publicacion_descripcion")
-  ubicacion     String?  @map("publicacion_ubicacion")
-  requisitos    String[] @map("publicacion_requisitos")
-  personalidad  String[] @map("publicacion_personalidad")
-  desparasitado Boolean  @default(false) @map("publicacion_desparasitado")
-  imagenes      String[] @map("publicacion_imagenes")
-  imagenUrl     String?  @map("publicacion_imagen_url")
-  mascotaId     Int      @map("mascota_id")
-  usuarioId     Int      @map("usuario_id")
+  id                Int      @id @default(autoincrement()) @map("publicacion_id")
+  titulo            String   @map("publicacion_titulo")
+  descripcion       String?  @map("publicacion_descripcion")
+  ubicacion         String?  @map("publicacion_ubicacion")
+  // Coordenadas capturadas al publicar (opcional). Habilitan el filtro geoespacial del feed
+  // (Módulo 11, HU-11.3). Nullable: las publicaciones previas a esta HU no las tienen.
+  ubicacionLatitud  Decimal? @map("publicacion_ubicacion_latitud") @db.Decimal(9, 6)
+  ubicacionLongitud Decimal? @map("publicacion_ubicacion_longitud") @db.Decimal(9, 6)
+  requisitos        String[] @map("publicacion_requisitos")
+  personalidad      String[] @map("publicacion_personalidad")
+  desparasitado     Boolean  @default(false) @map("publicacion_desparasitado")
+  imagenes          String[] @map("publicacion_imagenes")
+  imagenUrl         String?  @map("publicacion_imagen_url")
+  mascotaId         Int      @map("mascota_id")
+  usuarioId         Int      @map("usuario_id")
 
   usuarioAlta         Int       @map("publicacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("publicacion_fecha_alta")
@@ -578,6 +605,7 @@ model Solicitud {
   preguntasSeguimiento PreguntaSeguimiento[]
   chats                Chat[]
   mensajes             Mensaje[]
+  resenas              Resena[]
 
   @@map("solicitud")
 }
@@ -603,19 +631,19 @@ model SolicitudEstado {
 // ─────────────── HISTORIA CLÍNICA ───────────────
 
 model HistoriaClinica {
-  id               Int       @id @default(autoincrement()) @map("historia_clinica_id")
-  fechaVisita      DateTime  @map("historia_clinica_fecha_visita")
-  fechaProxima     DateTime? @map("historia_clinica_fecha_proxima")
-  requiereRevision Boolean   @default(false) @map("historia_clinica_requiere_revision")
-  vacunacion       Boolean   @default(false) @map("historia_clinica_vacunacion")
+  id               Int         @id @default(autoincrement()) @map("historia_clinica_id")
+  fechaVisita      DateTime    @map("historia_clinica_fecha_visita")
+  fechaProxima     DateTime?   @map("historia_clinica_fecha_proxima")
+  requiereRevision Boolean     @default(false) @map("historia_clinica_requiere_revision")
+  vacunacion       Boolean     @default(false) @map("historia_clinica_vacunacion")
   // Qué vacuna se aplicó (spec 019). Va junto con `vacunacion = true`; las vacunas de la
   // mascota (sus medallas) salen de los registros vigentes con este campo cargado. Nulo en
   // los registros que no son vacuna y en las vacunas cargadas antes de que existiera.
   tipoVacuna       TipoVacuna? @map("historia_clinica_tipo_vacuna")
-  titulo           String    @map("historia_clinica_titulo")
-  descripcion      String    @map("historia_clinica_descripcion")
-  documentoUrl     String?   @map("historia_clinica_documento_url")
-  mascotaId        Int       @map("mascota_id")
+  titulo           String      @map("historia_clinica_titulo")
+  descripcion      String      @map("historia_clinica_descripcion")
+  documentoUrl     String?     @map("historia_clinica_documento_url")
+  mascotaId        Int         @map("mascota_id")
 
   // Regla crítica: inmutable. No hay UPDATE sobre un registro persistido — "modificar" es
   // baja lógica + alta de uno nuevo. usuarioModificacion/fechaModificacion no deberían
@@ -682,6 +710,20 @@ model Seguimiento {
 
 // ─────────────── REPUTACIÓN ───────────────
 
+// La reseña la habilita una transacción CONCRETADA: por eso `solicitudId`. La puntuación es
+// obligatoria (1-5) y el comentario opcional. Solo alta y baja lógica: nunca se edita el
+// contenido de una reseña ya creada (HU-10.6).
+//
+// El receptor es exactamente uno de los dos FKs: `refugioReportadoId` cuando se reseña a un
+// refugio, `usuarioReportadoId` cuando se reseña a una persona (adoptante o quien ofreció
+// hogar de tránsito). El flujo (adopción vs. tránsito) se deriva del `tipoSolicitud` de la
+// solicitud que habilitó la reseña, así no hay un enum que pueda divergir.
+//
+// Un índice PARCIAL único, que Prisma no sabe expresar y vive en la migración
+// `20260927120000_resena_solicitud`, garantiza UNA reseña activa por autor y solicitud:
+// `resena_solicitud_autor_activo_uq` único (solicitud_id, resena_usuario_autor)
+// WHERE resena_fecha_baja IS NULL. Las filas sembradas sin solicitud quedan con NULL y no
+// chocan entre sí (Postgres trata cada NULL como distinto).
 model Resena {
   id                 Int     @id @default(autoincrement()) @map("resena_id")
   puntuacion         Int     @map("resena_puntuacion")
@@ -689,6 +731,7 @@ model Resena {
   usuarioAutorId     Int     @map("resena_usuario_autor")
   refugioReportadoId Int?    @map("refugio_reportado_id")
   usuarioReportadoId Int?    @map("usuario_reportado_id")
+  solicitudId        Int?    @map("solicitud_id")
 
   usuarioAlta         Int       @map("resena_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("resena_fecha_alta")
@@ -697,10 +740,12 @@ model Resena {
   usuarioBaja         Int?      @map("resena_usuario_baja")
   fechaBaja           DateTime? @map("resena_fecha_baja")
 
-  autor            Usuario  @relation("ResenaAutor", fields: [usuarioAutorId], references: [id])
-  refugioReportado Refugio? @relation("ResenaReportado", fields: [refugioReportadoId], references: [id])
-  usuarioReportado Usuario? @relation("ResenaReportado", fields: [usuarioReportadoId], references: [id])
+  autor            Usuario    @relation("ResenaAutor", fields: [usuarioAutorId], references: [id])
+  refugioReportado Refugio?   @relation("ResenaReportado", fields: [refugioReportadoId], references: [id])
+  usuarioReportado Usuario?   @relation("ResenaReportado", fields: [usuarioReportadoId], references: [id])
+  solicitud        Solicitud? @relation(fields: [solicitudId], references: [id])
 
+  @@index([solicitudId])
   @@map("resena")
 }
 

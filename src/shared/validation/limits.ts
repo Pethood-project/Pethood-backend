@@ -21,18 +21,32 @@ export const LIMITES = {
     ubicacion: { max: 50 },
     personalidad: { max: 25 },
     imagenes: { max: 5 },
+    /** Texto libre de la barra de búsqueda de Adoptar (Módulo 11, HU-11.4). */
+    busqueda: { max: 100 },
+    /** Radio del filtro por cercanía, en kilómetros (HU-11.3). */
+    radioKm: { min: 1, max: 500 },
   },
 
   usuario: {
     nombre: { min: 1, max: 50 },
     apellido: { min: 1, max: 50 },
-    ubicacion: { max: 80 },
+    // Dirección estructurada para geocodificar (node-geocoder). Opcionales.
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    calleAltura: { max: 120 },
+    /** Link de Google Maps que el usuario puede pegar/corregir a mano. */
+    mapaUrl: { max: 500 },
   },
 
   refugio: {
     nombre: { min: 2, max: 100 },
-    direccion: { min: 2, max: 150 },
     descripcion: { max: 1000 },
+    // Dirección estructurada para geocodificar (node-geocoder). Opcionales.
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    calleAltura: { max: 120 },
+    /** Link de Google Maps que el miembro del refugio puede pegar/corregir a mano. */
+    mapaUrl: { max: 500 },
   },
 
   /** Solo web-admin (spec 002) — no hay contraparte en la app mobile, no se mirrorea. */
@@ -53,6 +67,13 @@ export const LIMITES = {
     pregunta: { min: 5, max: 200 },
     respuesta: { min: 5, max: 2000 },
     orden: { min: 1, max: 999 },
+  },
+
+  /** Solo web-admin (ABM de catálogos) — no hay contraparte en la app mobile, no se mirrorea. */
+  catalogo: {
+    nombre: { min: 2, max: 50 },
+    descripcion: { max: 200 },
+    secuenciaDias: { min: 1, max: 365 },
   },
 
   faqCategoria: {
@@ -138,6 +159,16 @@ export const LIMITES = {
     descripcion: { min: 1, max: 1000 },
     /** Pregunta que escribe el refugio a mano (spec 011 §6.11). */
     pregunta: { min: 5, max: 200 },
+  },
+
+  /**
+   * Reseña (Módulo 10, HU-10.1). La puntuación es obligatoria de 1 a 5; el comentario es
+   * opcional y comparte techo con el comentario de solicitud (500), que es el campo de texto
+   * libre comparable más cercano. Espejo en el frontend mobile.
+   */
+  resena: {
+    puntuacion: { min: 1, max: 5 },
+    comentario: { max: 500 },
   },
 
   /**

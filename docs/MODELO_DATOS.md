@@ -40,7 +40,11 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 
 ### Usuario
 
-`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, `usuario_ubicacion` (nullable — barrio/ciudad del perfil, GUI-15), FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+
+**Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de perfil):** `usuario_provincia`, `usuario_localidad`, `usuario_calle_altura` (texto, nullable — dirección estructurada que carga el usuario), `usuario_mapa_url` (texto, nullable — URL de Google Maps generada al geocodificar), `usuario_latitud` / `usuario_longitud` (`Float`, nullable — coordenadas resultantes) y `usuario_ubicacion_verificada` (boolean — si el usuario confirmó que el link apunta a su dirección). El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Las coordenadas se guardan aparte de la URL para calcular la distancia al refugio con Haversine (`distanciaKm`, `src/shared/geo.ts`) sin parsear el link. La geocodificación la hace `src/shared/geocoding.ts` con `node-geocoder` (proveedor `openstreetmap` por defecto o `google`, ver `GEOCODER_PROVIDER`/`GEOCODER_API_KEY`).
+
+> **Campo eliminado (2026-09-29):** `usuario_ubicacion` (barrio/ciudad, GUI-15). Lo reemplaza la dirección estructurada de arriba.
 
 Relaciones: 1 Usuario → N Mascota, N Publicacion, N Solicitud, N Favorito, N Notificacion, N Hogar, N Reseña (como autor), N Donacion, N Campaña, N Usuario_Chat, N Mensaje, N Rol_Usuario, N Animal_Perdido (como reportante).
 
@@ -50,7 +54,13 @@ Tabla intermedia N:N entre Usuario y Rol. `usuario_id FK NOT NULL`, `rol_id FK N
 
 ### Refugio
 
-`refugio_id PK`, `refugio_nombre`, `refugio_direccion`, `refugio_telefono`, `refugio_email`, `refugio_descripcion`, `refugio_verificado`, `refugio_imagen_url`, FK `estado_id` (→ Estado_Refugio).
+`refugio_id PK`, `refugio_nombre`, `refugio_telefono`, `refugio_email`, `refugio_descripcion`, `refugio_verificado`, `refugio_imagen_url`, FK `estado_id` (→ Estado_Refugio).
+
+**Campo agregado fuera del diagrama de clases (2026-09-28, Módulo 11):** `refugio_mapa_url` (texto, nullable) — enlace a Google Maps del refugio. Se muestra como ícono de ubicación en el detalle de la mascota y, cuando el link incluye coordenadas, alimenta el filtro por cercanía del feed. La extracción de coordenadas la hace `src/shared/geo.ts`: `coordenadasDeMapsUrl` para links completos y `resolverCoordenadasDeMapsUrl` para links cortos (`maps.app.goo.gl`), que sigue la redirección con caché y tope de tiempo.
+
+**Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de refugio):** `refugio_provincia`, `refugio_localidad`, `refugio_calle_altura` (texto, nullable — dirección estructurada), `refugio_latitud` / `refugio_longitud` (`Float`, nullable — coordenadas geocodificadas) y `refugio_ubicacion_verificada` (boolean — si el refugio confirmó que el link apunta a su dirección). `refugio_mapa_url` se genera al geocodificar (`https://www.google.com/maps?q=<lat>,<lng>`) y las coordenadas se persisten para no depender de parsear el link en el camino crítico del feed. El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Misma utilidad que el usuario: `src/shared/geocoding.ts`.
+
+> **Campo eliminado (2026-09-29):** `refugio_direccion` (texto libre). Lo reemplaza la dirección estructurada de arriba.
 
 Relaciones: 1 Refugio → N Campaña, 1 Refugio → N Reseña (como reportado/ `refugio_reportado_id` en Reseña).
 
@@ -89,6 +99,15 @@ Ver catálogos arriba.
 | `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
 
 **Vacunas (2026-09-27, spec 019):** `publicacion_vacunas` (texto libre) se eliminó. Las vacunas son de la mascota y viven en `Historia_Clinica` (`historia_clinica_tipo_vacuna`); la publicación las muestra leyéndolas de ahí.
+
+**Campos agregados por el Módulo 11 (2026-09-27, HU-11.3):**
+
+| Campo | Tipo | Para qué |
+| --- | --- | --- |
+| `publicacion_ubicacion_latitud` | `Decimal(9,6)` nullable | Coordenada capturada con el GPS al publicar. Habilita el filtro por cercanía del feed. |
+| `publicacion_ubicacion_longitud` | `Decimal(9,6)` nullable | Ídem. |
+
+Ambos son nullable: las publicaciones anteriores no las tienen. Cuando faltan, la publicación se sigue pudiendo ubicar por `publicacion_ubicacion` (texto libre), pero no entra en el filtro por distancia. Se agregaron fuera del diagrama de clases; pendiente reflejarlos. La decisión de solicitar GPS (contra el criterio original de "no GPS") es del equipo — ver `DEUDA_TECNICA.md`.
 
 **A revisar con el equipo:** `publicacion_desparasitado` sigue en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`, como pasó con las vacunas.
 
@@ -167,9 +186,11 @@ Con `solicitud_id` null la fila es del **catálogo** que se sortea. Con valor, e
 
 ### Reseña
 
-`reseña_id PK`, `reseña_puntuacion` (1-5), `reseña_comentario`, FK `reseña_usuario_autor FK NOT NULL` (autor), FK `refugio_reportado_id` (nullable), FK `usuario_reportado_id` (nullable).
+`reseña_id PK`, `reseña_puntuacion` (1-5), `reseña_comentario`, FK `reseña_usuario_autor FK NOT NULL` (autor), FK `refugio_reportado_id` (nullable), FK `usuario_reportado_id` (nullable), FK `solicitud_id` (nullable — la transacción que la habilita).
 
-**Nota sobre auditoría:** en el diagrama, Reseña tiene alta y modificación pero **no tiene campos de baja separados visibles como el resto** — sin embargo HU-10.6 ("Dar de baja reseñas") indica que sí soporta baja lógica. Tratarla igual que el resto de entidades con baja lógica estándar. Nunca se edita el contenido de una reseña ya creada (solo alta y baja, sin endpoint de update de contenido).
+**Campo agregado fuera del diagrama de clases (2026-09-27, Módulo 10):** `solicitud_id`. El diagrama solo tenía emisor/receptor, pero HU-10.1 exige que la reseña la habilite una transacción finalizada; sin ese vínculo no hay forma de validar la precondición (que las dos partes hayan cerrado una adopción/tránsito) ni de impedir reseñas entre desconocidos. Es nullable en base por compatibilidad con las reseñas ya sembradas, pero **obligatorio en el DTO** de alta. El flujo reseñado (adoptante→refugio, refugio→adoptante, refugio→hogar de tránsito) se deriva del `tipoSolicitud` de esa solicitud, y el receptor de cuál de los dos FKs (`refugio_reportado_id` o `usuario_reportado_id`) está poblado. Pendiente: reflejarlo en el diagrama de clases del grupo.
+
+**Nota sobre auditoría:** en el diagrama, Reseña tiene alta y modificación pero **no tiene campos de baja separados visibles como el resto** — sin embargo HU-10.6 ("Dar de baja reseñas") indica que sí soporta baja lógica. Tratarla igual que el resto de entidades con baja lógica estándar. Nunca se edita el contenido de una reseña ya creada (solo alta y baja, sin endpoint de update de contenido). Un índice único **parcial** (`resena_solicitud_autor_activo_uq`, solo en la migración) garantiza una sola reseña activa por autor y solicitud.
 
 ### Chat
 
@@ -347,6 +368,7 @@ Ver catálogos.
   -> Usuario (autor, vía `reseña_usuario_autor`)
   -> Refugio (reportado, opcional)
   -> Usuario (reportado, opcional)
+  -> Solicitud (transacción que la habilita)
 
 - Chat
   -> Refugio (opcional)

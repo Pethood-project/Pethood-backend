@@ -324,6 +324,15 @@ const ESTADO_SOLICITABLE = 'Disponible';
 /** Solo un aviso activo recibe solicitudes: uno pausado o finalizado está fuera del feed. */
 const ESTADO_PUBLICACION_SOLICITABLE = 'Activa';
 
+/** Tipo de solicitud que, al aprobarse, transfiere la mascota al adoptante (HU-7.4). */
+const TIPO_SOLICITUD_ADOPCION = 'Adopcion';
+
+/**
+ * Comentario que queda en las demás solicitudes "Pendiente" de la publicación cuando una
+ * adopción se aprueba: se rechazan solas porque la mascota ya tiene un hogar.
+ */
+const COMENTARIO_RECHAZO_POR_ADOPCION = 'La mascota fue adoptada por otra persona';
+
 export async function crearSolicitud(
   datos: CrearSolicitudDto,
   usuarioId: number,
@@ -488,6 +497,13 @@ export async function resolverSolicitud(
     throw new AppError('ERROR_INTERNO', `Falta el estado "${datos.estado}" en el catálogo`, 500);
   }
 
+  // Aprobar una solicitud de ADOPCIÓN no es sólo cambiar el estado: hay que darle la mascota
+  // al adoptante. El tránsito es temporal (la mascota vuelve al refugio), así que sólo se
+  // resuelve. Ver `aprobarAdopcion`.
+  if (datos.estado === 'Aprobada' && solicitud.tipoSolicitud.nombre === TIPO_SOLICITUD_ADOPCION) {
+    return aprobarAdopcion(solicitud, nuevoEstado.id, datos.comentario, usuarioId);
+  }
+
   // Revalida "Pendiente" atómicamente al escribir: si otro PATCH concurrente ya la
   // resolvió entre la lectura de arriba y este punto, `resolverSiPendiente` devuelve
   // `null` en vez de pisar su resultado.
@@ -511,4 +527,103 @@ export async function resolverSolicitud(
   });
 
   return aDetalleDto(actualizada);
+}
+
+/**
+ * Aprobación de una adopción (HU-7.4): resuelve la solicitud, crea la mascota propia del
+ * adoptante, pasa la mascota publicada a "Adoptado", finaliza la publicación y rechaza las
+ * demás solicitudes pendientes — todo en una transacción (`repo.aprobarAdopcion`).
+ */
+async function aprobarAdopcion(
+  solicitud: SolicitudConDetalle,
+  estadoAprobadaId: number,
+  comentario: string | null,
+  usuarioId: number,
+): Promise<SolicitudDetalleDto> {
+  const [estadoRechazada, estadoMascotaAdoptado, estadoPublicacionFinalizada] = await Promise.all([
+    repo.buscarEstadoSolicitudPorNombre('Rechazada'),
+    repo.buscarEstadoMascotaPorNombre('Adoptado'),
+    repo.buscarEstadoPublicacionPorNombre('Finalizada'),
+  ]);
+
+  if (!estadoRechazada || !estadoMascotaAdoptado || !estadoPublicacionFinalizada) {
+    throw new AppError(
+      'ERROR_INTERNO',
+      'Faltan estados en el catálogo para aprobar la adopción',
+      500,
+    );
+  }
+
+  const mascota = solicitud.publicacion.mascota;
+
+  const resultado = await repo.aprobarAdopcion(solicitud.id, usuarioId, {
+    estadoAprobadaId,
+    estadoRechazadaId: estadoRechazada.id,
+    estadoMascotaAdoptadoId: estadoMascotaAdoptado.id,
+    estadoPublicacionFinalizadaId: estadoPublicacionFinalizada.id,
+    comentario,
+    comentarioRechazo: COMENTARIO_RECHAZO_POR_ADOPCION,
+    publicacionId: solicitud.publicacionId,
+    mascotaOrigenId: mascota.id,
+    mascotaOrigen: {
+      nombre: mascota.nombre,
+      fechaNacimiento: mascota.fechaNacimiento,
+      genero: mascota.genero,
+      peso: mascota.peso,
+      tamanio: mascota.tamanio,
+      castrado: mascota.castrado,
+      descripcion: mascota.descripcion,
+      imagenUrl: mascota.imagenUrl,
+      razaId: mascota.razaId,
+    },
+    adoptanteId: solicitud.usuarioId,
+  });
+
+  if (!resultado) {
+    throw new AppError('SOLICITUD_YA_RESUELTA', 'Esta solicitud ya fue resuelta', 409);
+  }
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'APROBAR',
+    entidad: 'Solicitud',
+    entidadId: solicitud.id,
+    detalle: `Pendiente -> Aprobada (adopción, mascota ${mascota.id} -> usuario ${solicitud.usuarioId})`,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CREAR',
+    entidad: 'Mascota',
+    entidadId: resultado.mascotaAdoptadaId,
+    detalle: `adoptada por usuario ${solicitud.usuarioId} (solicitud ${solicitud.id})`,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Mascota',
+    entidadId: mascota.id,
+    detalle: 'Adoptado (adopción aprobada)',
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Publicacion',
+    entidadId: solicitud.publicacionId,
+    detalle: 'Finalizada (adopción aprobada)',
+  });
+
+  for (const rechazadaId of resultado.solicitudesRechazadas) {
+    await registrarAuditoria({
+      usuarioId,
+      accion: 'RECHAZAR',
+      entidad: 'Solicitud',
+      entidadId: rechazadaId,
+      detalle: 'Rechazada al aprobarse otra solicitud de la misma publicación',
+    });
+  }
+
+  return aDetalleDto(resultado.solicitud);
 }
