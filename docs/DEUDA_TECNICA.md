@@ -48,12 +48,11 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 18 | Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones | Media | backend |
 | 19 | Pausar o finalizar una publicación no toca sus solicitudes abiertas | Media | backend |
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
-<<<<<<< HEAD
 | 21 | La ubicación es texto libre: no hay catálogo de Provincia/Localidad | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
-=======
-| 21 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
->>>>>>> origin/dev
+| 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
+| 24 | Sin tope de donaciones pendientes por adoptante | Baja | backend |
+| 25 | La quota de campañas no es atómica | Baja | backend |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -471,7 +470,6 @@ correr el seed sobre una base vacía.
 
 ---
 
-<<<<<<< HEAD
 ## 21. La ubicación es texto libre: no hay catálogo de Provincia/Localidad — Media
 
 **Qué pasa.** `REQUISITOS.md` y `MODELO_DATOS.md` piden filtrar por ubicación administrativa
@@ -501,8 +499,12 @@ que arma el cliente, no el usuario, así que en la práctica no se ve.
 **Cómo se arregla.** Usar `limitePaginaSchema` de `shared/validation/schemas.ts` (creado en la
 spec 020), que ya da el error en español. `idSchema` tenía el mismo problema cuando faltaba un
 id y quedó corregido para todos los módulos en esa misma spec.
-=======
-## 21. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
+
+## 23. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
+
+> Numerado 21 en `origin/dev`, que chocó con el 21 y el 22 de otra rama en el merge de la
+> spec 020: se renumeró a 23 al resolver el conflicto (los números no se reciclan).
+
 
 **Qué pasa.** El rediseño de Inicio (adoptante y refugio) trae secciones de Campañas y de
 Mascotas perdidas con datos reales (montos, donantes, reportes cerca). Esos módulos son las
@@ -519,4 +521,22 @@ distinto filtro, porque no hay un endpoint de resumen.
 el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se notan lentos,
 sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
 consulta.
->>>>>>> origin/dev
+
+## 24. Sin tope de donaciones pendientes por adoptante — Baja
+
+**Qué pasa.** Un adoptante puede declarar donaciones sin límite (spec 021, HU-12.3): cada
+«Terminar donación» crea una donación Pendiente que el refugio tiene que revisar a mano.
+Alguien malintencionado podría llenar la bandeja de un refugio con donaciones falsas.
+
+**Cómo se arregla.** Si molesta en la práctica, un tope de pendientes por adoptante y por
+campaña, con el mismo criterio que el de solicitudes (regla transversal 7). Ningún requisito
+lo pide todavía.
+
+## 25. La quota de campañas no es atómica — Baja
+
+**Qué pasa.** El alta de campaña cuenta las Inactiva + Activa del refugio y después crea
+(spec 021 §6.3). Dos altas simultáneas del mismo refugio pueden pasar las dos el conteo y
+dejar 6 campañas vigentes. Es el mismo criterio que el resto de las quotas del proyecto.
+
+**Cómo se arregla.** Contar y crear dentro de una transacción serializable, o con un lock
+por refugio, si alguna vez se ve en la práctica.

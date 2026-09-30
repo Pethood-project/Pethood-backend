@@ -75,57 +75,11 @@ por monto alcanzado.
 | GET | `/api/v1/estados-campania` | cualquier usuario | 12.1 | Catálogo para el filtro por estado |
 
 Los listados que consume la app paginan por cursor (`cursor`, `limite`, respuesta con
-`hayMas` y `proximoCursor`), como el resto de la API mobile. El contrato detallado de cada
-endpoint (headers, bodies, respuestas, errores) se escribe al implementar en
-`docs/api-campanias.md`, como hizo la spec 020, y esta sección queda sólo con la tabla.
+`hayMas` y `proximoCursor`), como el resto de la API mobile.
 
-### Forma de una campaña en las respuestas
-
-```json
-{
-  "id": 12,
-  "titulo": "Nuevo espacio para cachorros",
-  "descripcion": "Fondos para ampliar el área de recuperación.",
-  "imagenUrl": "/api/v1/archivos/campanias/abc.webp",
-  "objetivo": 2500000,
-  "recaudado": 1430000,
-  "porcentaje": 57,
-  "donantes": 23,
-  "fechaInicio": "2026-10-01",
-  "fechaFin": "2026-12-31",
-  "estado": { "id": 2, "nombre": "Activa" },
-  "alias": "refugio.esperanza.mp",
-  "cbu": "0000003100012345678901",
-  "refugio": { "id": 3, "nombre": "Refugio Esperanza" }
-}
-```
-
-- `recaudado` = suma de las donaciones «Realizada»; `donantes` = usuarios distintos con al
-  menos una donación «Realizada». `porcentaje` se redondea hacia abajo y se topea en 100 para
-  la barra (el `recaudado` real puede superar el objetivo).
-- En «Mis Campañas» cada campaña suma `pendientes`: cantidad de donaciones «Pendiente», para el
-  aviso «Tenés N donaciones para revisar».
-
-### Bodies
-
-- **Alta de campaña** (multipart): `titulo`, `descripcion`, `objetivo`, `fechaInicio`,
-  `fechaFin`, `alias`, `cbu`, archivo `imagen`.
-- **Donar:** `{ "monto": "5000" }` (acepta coma o punto decimal).
-- **Estado de campaña:** `{ "estado": "Finalizada" | "Cancelada" }`.
-- **Estado de donación:** `{ "estado": "Realizada" }` o
-  `{ "estado": "Cancelada", "motivo": "NO_RECIBIDA" | "MONTO_NO_COINCIDE" }`.
-
-### Errores propios del módulo (`{ error: { codigo, mensaje } }`)
-
-| Código | HTTP | Cuándo |
-| --- | --- | --- |
-| `LIMITE_CAMPANIAS` | 409 | El refugio ya tiene 5 campañas Inactiva/Activa |
-| `REFUGIO_NO_HABILITADO` | 403 | El refugio no está verificado o no está «Activo» |
-| `CAMPANIA_NO_ENCONTRADA` | 404 | No existe, está dada de baja o es de otro refugio (en rutas de refugio) |
-| `CAMPANIA_NO_ACTIVA` | 409 | Se intenta donar a una campaña que no está «Activa» |
-| `DONACION_PROPIA` | 403 | Un miembro intenta donar a una campaña de su propio refugio |
-| `TRANSICION_INVALIDA` | 409 | Cambio de estado de campaña o donación que la máquina de estados no permite |
-| `DONACION_NO_ENCONTRADA` | 404 | No existe o es de otro refugio |
+**Contrato completo:** [`docs/api-campanias.md`](../api-campanias.md) — headers, query params,
+bodies, forma de la campaña y de la donación, respuestas y errores con su código HTTP y su
+mensaje literal. Esta spec no lo repite para que no haya dos versiones que se desincronicen.
 
 ## 5. Pantallas (frontend mobile)
 

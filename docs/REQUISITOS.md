@@ -277,7 +277,7 @@ Ver tabla completa en el PDF original (sección 20.2). Resumen de mapeo HU → e
 - Módulo 9 (seguimiento): `Seguimiento`, `Mascota`.
 - Módulo 10 (reputación): `Usuario`, `Refugio`, `Reseña`.
 - Módulo 11 (navegación): `Publicacion`.
-- Módulo 12 (campañas): `Campaña`, `Usuario`, `Estado_Mascota` (¿posible referencia cruzada rara en la matriz original entre Campaña y Estado_Mascota — revisar si es error del documento fuente o si hay una relación real no evidente en el diagrama de clases).
+- Módulo 12 (campañas): `Campaña`, `Estado_Campaña`, `Donacion`, `Estado_Donacion`, `Usuario` (la `Estado_Mascota` de la matriz original era un error, ver sección 10 punto 3).
 - Módulo 13 (perdidas y encontradas): `Usuario`, `Animal_Perdido`, `Estado_Animal_Perdido`.
 - Módulo 14 (dashboards): agregaciones sobre todo lo anterior.
 - Módulo 15 (soporte): `Consulta_Soporte`, `Faq_Categoria`, `Faq` (sin relación con las demás entidades). No usa `Reporte_Problema`, que es de moderación (módulo 3).
@@ -288,7 +288,7 @@ El propio documento de Etapa 5 incluye, en la sección 20.3, una nota donde se d
 
 1. **Resuelto:** el diagrama de clases tiene `animal_perdido_latitud` / `animal_perdido_longitud` — esos campos SÍ se guardan (se captura la coordenada al reportar un animal perdido/encontrado), pero **no hay mapa interactivo en la UI**. La búsqueda/visualización para el usuario es por ubicación administrativa (Provincia/Localidad), no por mapa con pines. No implementar ningún SDK de mapas; sí persistir lat/long si el flujo de reporte las captura (ej. desde el GPS del dispositivo al momento de reportar), como dato adicional no explotado visualmente por ahora.
 2. La entidad `Reporte_Problema` se menciona en texto pero no se ve dibujada en las capturas de diagrama revisadas.
-3. La matriz de trazabilidad asocia HU-12.7 (Gestión de Estados de Campaña) con `Estado_Mascota`, lo cual no tiene relación obvia de negocio (¿error de tipeo en el documento por `Estado_Campaña`?). **Confirmar con el equipo.**
+3. **Resuelto (2026-09-30, spec 021):** HU-12.7 es la gestión de estados de **campaña** (Inactiva, Activa, Finalizada, Cancelada); la referencia a `Estado_Mascota` de la matriz de trazabilidad era un error del documento fuente.
 4. **HU-7.1 pide datos que el diagrama de clases no tiene.** Los criterios de aceptación hablan del "tiempo de inicio y el tiempo de fin" del tránsito, y `Solicitud` no tiene dónde guardarlos; el formulario aprobado (GUI-7.1.1) además pregunta por niños en la casa, experiencia previa con mascotas, horas que el animal quedaría solo y qué espacio al aire libre hay, y `Hogar` solo tenía un booleano de patio. Se agregaron dos columnas a `Solicitud` y cinco a `Hogar` (detalle en `MODELO_DATOS.md`), conservando `hogar_tiene_patio` como derivado para no romper el diagrama. **Decisión tomada con el equipo el 2026-09-09; falta reflejarla en el diagrama de clases de la entrega.**
 5. **HU-7.1 referencia GUI-0.1.4 para dos mensajes que no son de campo vacío.** "No podés solicitar otra mascota" (tope de 5 pendientes) y "Tenés que verificarte antes de solicitar una adopción" son bloqueos de precondición, pero la HU los etiqueta como GUI-0.1.4, que según la sección 5 de este documento es el componente de *campo obligatorio vacío*. Por el tono corresponderían a GUI-0.1.2 (Advertencia). Se implementaron con los textos literales de la HU, en un cartel modal con la salida del bloqueo. **Confirmar la referencia de GUI con el equipo antes de la entrega.**
 
