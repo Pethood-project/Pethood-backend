@@ -3,7 +3,16 @@
 export type ResultadoDecimal = { valido: true; valor: number } | { valido: false; error: string };
 
 function patronDecimal(enteros: number, decimales: number): RegExp {
-  return new RegExp(`^\\d{1,${enteros}}([.,]\\d{1,${decimales}})?$`);
+  // Sin decimales no hay parte decimal: `\d{1,0}` ni siquiera es una regex válida.
+  const parteDecimal = decimales > 0 ? `([.,]\\d{1,${decimales}})?` : '';
+  return new RegExp(`^\\d{1,${enteros}}${parteDecimal}$`);
+}
+
+/** Qué se esperaba, para el mensaje de formato inválido. */
+function mensajeFormato(etiqueta: string, decimales: number): string {
+  if (decimales === 0) return `${etiqueta} debe ser un número entero, sin puntos ni comas`;
+  const ejemplo = ' (ej. 12,5)';
+  return `${etiqueta} debe ser un número con hasta ${decimales} decimal${decimales === 1 ? '' : 'es'}${ejemplo}`;
 }
 
 /**
@@ -25,11 +34,7 @@ export function parsearDecimal(
   const enteros = String(Math.trunc(max)).length;
 
   if (!patronDecimal(enteros, decimales).test(texto)) {
-    const ejemplo = decimales > 0 ? ' (ej. 12,5)' : '';
-    return {
-      valido: false,
-      error: `${etiqueta} debe ser un número con hasta ${decimales} decimal${decimales === 1 ? '' : 'es'}${ejemplo}`,
-    };
+    return { valido: false, error: mensajeFormato(etiqueta, decimales) };
   }
 
   const numero = Number(texto.replace(',', '.'));

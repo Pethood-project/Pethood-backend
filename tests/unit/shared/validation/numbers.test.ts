@@ -133,3 +133,23 @@ describe('parsearListaDeIds', () => {
     expect(parsearListaDeIds(['1', '2'], 'El estado').valido).toBe(false);
   });
 });
+
+describe('parsearDecimal sin decimales', () => {
+  const OBJETIVO = { min: 10000, max: 2500000, decimales: 0, etiqueta: 'El objetivo' };
+
+  it('acepta un entero dentro del rango', () => {
+    expect(parsearDecimal('150000', OBJETIVO)).toEqual({ valido: true, valor: 150000 });
+  });
+
+  it('rechaza decimales y separador de miles con un mensaje claro, sin tirar', () => {
+    expect(parsearDecimal('10.000', OBJETIVO)).toEqual({
+      valido: false,
+      error: 'El objetivo debe ser un número entero, sin puntos ni comas',
+    });
+    expect(parsearDecimal('15000,5', OBJETIVO)).toMatchObject({ valido: false });
+  });
+
+  it('respeta el rango', () => {
+    expect(parsearDecimal('9999', OBJETIVO)).toMatchObject({ valido: false });
+  });
+});

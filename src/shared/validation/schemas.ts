@@ -5,7 +5,13 @@
  * coerciona en vez de confiar en el tipo que mande el cliente.
  */
 import { z } from 'zod';
-import { parsearFecha, validarFechaFutura, validarFechaPasada } from './dates';
+import { validarAliasOpcional, validarCbuOpcional } from './bancario';
+import {
+  parsearFecha,
+  validarFechaFutura,
+  validarFechaNoPasada,
+  validarFechaPasada,
+} from './dates';
 import { parsearCoordenada, parsearDecimal, parsearId, parsearListaDeIds } from './numbers';
 import {
   mensajeInvalido,
@@ -122,6 +128,48 @@ export function fechaFuturaOpcionalSchema(etiqueta: string) {
     }
 
     return resultado.fecha;
+  });
+}
+
+/** Fecha de hoy en adelante y obligatoria (ej. inicio de una campaña). */
+export function fechaNoPasadaSchema(etiqueta: string) {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = validarFechaNoPasada(valor as string | Date, etiqueta);
+
+    if (!resultado.valida) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.fecha;
+  });
+}
+
+/** Alias para transferir. Vacío o ausente → `null`. */
+export function aliasOpcionalSchema() {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = validarAliasOpcional(valor);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
+  });
+}
+
+/** CBU o CVU. Vacío o ausente → `null`. */
+export function cbuOpcionalSchema() {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = validarCbuOpcional(valor);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
   });
 }
 
