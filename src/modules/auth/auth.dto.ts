@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { LIMITES } from '../../shared/validation/limits';
+import { textoOpcionalSchema } from '../../shared/validation/schemas';
 import { ROL_API } from '../../shared/roles';
 
 export const nombrePersonaSchema = z
@@ -45,6 +47,19 @@ export const registroBodySchema = z.object({
     .trim()
     .regex(/^\d{7,8}$/, 'El DNI debe tener 7 u 8 dígitos numéricos.')
     .optional(),
+  // Dirección estructurada opcional que se geocodifica al crear la cuenta (node-geocoder).
+  provincia: textoOpcionalSchema({
+    max: LIMITES.usuario.provincia.max,
+    etiqueta: 'La provincia',
+  }),
+  localidad: textoOpcionalSchema({
+    max: LIMITES.usuario.localidad.max,
+    etiqueta: 'La localidad',
+  }),
+  calleAltura: textoOpcionalSchema({
+    max: LIMITES.usuario.calleAltura.max,
+    etiqueta: 'La calle y altura',
+  }),
   rol: z.enum([ROL_API.ADOPTANTE, ROL_API.MIEMBRO_REFUGIO]).default(ROL_API.ADOPTANTE),
 });
 
@@ -106,7 +121,6 @@ export const usuarioPublicoSchema = z.object({
   roles: z.array(z.string()),
   imagenUrl: z.string().nullable(),
   telefono: z.string().nullable().optional(),
-  ubicacion: z.string().nullable().optional(),
   refugio: refugioDeSesionSchema.nullable(),
 });
 

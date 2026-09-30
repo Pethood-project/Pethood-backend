@@ -44,7 +44,9 @@ interface DatosUsuario {
   fechaNacimiento?: Date;
   verificado?: boolean;
   imagenUrl?: string;
-  ubicacion?: string;
+  provincia?: string;
+  localidad?: string;
+  calleAltura?: string;
   refugioId?: number;
   estado?: string;
   roles: string[];
@@ -68,7 +70,9 @@ async function crearUsuario(catalogos: Catalogos, datos: DatosUsuario): Promise<
       fechaNacimiento: datos.fechaNacimiento ?? null,
       verificado: datos.verificado ?? true,
       imagenUrl: datos.imagenUrl ?? null,
-      ubicacion: datos.ubicacion ?? null,
+      provincia: datos.provincia ?? null,
+      localidad: datos.localidad ?? null,
+      calleAltura: datos.calleAltura ?? null,
       refugioId: datos.refugioId ?? null,
       estadoId: id(catalogos.estadosUsuario, datos.estado ?? 'Activo'),
       usuarioAlta: sistemaId,
@@ -85,7 +89,11 @@ async function crearUsuario(catalogos: Catalogos, datos: DatosUsuario): Promise<
 
 interface DatosRefugio {
   nombre: string;
-  direccion: string;
+  provincia: string;
+  localidad: string;
+  calleAltura: string;
+  /** Enlace a Google Maps. Si trae coordenadas, alimenta el filtro por cercanía. */
+  mapaUrl?: string;
   telefono?: string;
   email?: string;
   descripcion?: string;
@@ -104,7 +112,10 @@ async function crearRefugio(catalogos: Catalogos, datos: DatosRefugio): Promise<
   return prisma.refugio.create({
     data: {
       nombre: datos.nombre,
-      direccion: datos.direccion,
+      provincia: datos.provincia,
+      localidad: datos.localidad,
+      calleAltura: datos.calleAltura,
+      mapaUrl: datos.mapaUrl ?? null,
       telefono: datos.telefono ?? null,
       email: datos.email ?? null,
       descripcion: datos.descripcion ?? null,
@@ -129,7 +140,12 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
   // ── Refugios ──
   const patitas = await crearRefugio(catalogos, {
     nombre: 'Refugio Patitas',
-    direccion: 'Av. San Martín 1234, Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Ciudad de Mendoza',
+    calleAltura: 'Av. San Martín 1234',
+    // Link corto real: el backend lo resuelve siguiendo la redirección y extrae las
+    // coordenadas de la URL final (ver `src/shared/geo.ts`).
+    mapaUrl: 'https://maps.app.goo.gl/HpdJo4NGsPVy3Zc8A',
     telefono: '2612222222',
     email: 'contacto@patitas.test',
     descripcion:
@@ -141,7 +157,10 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
   // Nombre largo a propósito: prueba el truncado con elipsis en los listados.
   const huellitas = await crearRefugio(catalogos, {
     nombre: 'Asociación Civil Huellitas del Sur de Mendoza',
-    direccion: 'Av. Las Heras 500, Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Ciudad de Mendoza',
+    calleAltura: 'Av. Las Heras 500',
+    mapaUrl: 'https://www.google.com/maps/@-32.905,-68.830,15z',
     telefono: '2614444444',
     email: 'hola@huellitasdelsur.test',
     descripcion: 'Rescate y rehabilitación de animales en situación de calle en el sur provincial.',
@@ -150,7 +169,10 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
 
   const cuatroPatas = await crearRefugio(catalogos, {
     nombre: 'Refugio Cuatro Patas',
-    direccion: 'Ruta 60 km 12, Maipú',
+    provincia: 'Mendoza',
+    localidad: 'Maipú',
+    calleAltura: 'Ruta 60 km 12',
+    mapaUrl: 'https://www.google.com/maps/@-32.980,-68.790,15z',
     telefono: '2615555555',
     email: 'info@cuatropatas.test',
     descripcion: 'Refugio rural con espacio para perros grandes.',
@@ -165,7 +187,9 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     dni: '30111222',
     fechaNacimiento: nacioHace(31),
     imagenUrl: foto(FOTOS_PERSONA[0]!),
-    ubicacion: 'Godoy Cruz, Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Godoy Cruz',
+    calleAltura: 'Tiburcio Benegas 850',
     roles: ['Adoptante'],
   });
 
@@ -177,7 +201,9 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     dni: '31222333',
     fechaNacimiento: nacioHace(27),
     imagenUrl: foto(FOTOS_PERSONA[2]!),
-    ubicacion: 'Guaymallén, Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Guaymallén',
+    calleAltura: 'Bandera de los Andes 2300',
     roles: ['Adoptante'],
   });
 
@@ -189,7 +215,9 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     dni: '33444555',
     fechaNacimiento: nacioHace(35),
     imagenUrl: foto(FOTOS_PERSONA[3]!),
-    ubicacion: 'Luján de Cuyo, Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Luján de Cuyo',
+    calleAltura: 'Roque Sáenz Peña 480',
     roles: ['Adoptante'],
   });
 
@@ -200,7 +228,9 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     telefono: '2617000003',
     dni: '31444555',
     fechaNacimiento: nacioHace(42),
-    ubicacion: 'Las Heras, Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Las Heras',
+    calleAltura: 'Independencia 1200',
     roles: ['Adoptante'],
   });
 
@@ -211,7 +241,9 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     telefono: '2617000004',
     dni: '38555666',
     fechaNacimiento: nacioHace(24),
-    ubicacion: 'Maipú, Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Maipú',
+    calleAltura: 'Ozamis 300',
     roles: ['Adoptante'],
   });
 
@@ -235,7 +267,9 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     dni: '28444555',
     fechaNacimiento: nacioHace(38),
     imagenUrl: foto(FOTOS_PERSONA[1]!),
-    ubicacion: 'Ciudad de Mendoza',
+    provincia: 'Mendoza',
+    localidad: 'Ciudad de Mendoza',
+    calleAltura: 'Av. San Martín 1234',
     refugioId: patitas.id,
     roles: ['Refugio'],
   });
@@ -378,7 +412,9 @@ async function seedLoteAdmin(catalogos: Catalogos) {
 
     const refugio = await crearRefugio(catalogos, {
       nombre: `${prefijo} de ${localidad}`,
-      direccion: `Calle ${i * 37} ${100 + i}, ${localidad}`,
+      provincia: 'Mendoza',
+      localidad,
+      calleAltura: `Calle ${i * 37} ${100 + i}`,
       telefono: `2614${String(500000 + i * 137).slice(0, 6)}`,
       email: `contacto${i}@refugios.test`,
       descripcion: `Refugio barrial de ${localidad}.`,

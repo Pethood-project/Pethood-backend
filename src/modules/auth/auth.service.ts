@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/errorHandler';
 import { parsearFechaNacimiento } from '../../shared/fechas';
+import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocoding';
 import { firmarToken } from '../../shared/jwt';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { estaBloqueado, limpiarIntentos, registrarFallo } from '../../shared/rateLimit';
@@ -40,7 +41,6 @@ function aRespuesta(usuario: UsuarioConRoles): RespuestaAuth {
       roles: rolesApi,
       imagenUrl: usuario.imagenUrl,
       telefono: usuario.telefono,
-      ubicacion: usuario.ubicacion,
       // `null` en un adoptante. El token no lo lleva: la pertenencia se resuelve contra la
       // base en cada request, para que sacar a alguien de un refugio tenga efecto sin
       // esperar a que le venza la sesión.
@@ -148,6 +148,28 @@ export async function registrar(
   const hash = await bcrypt.hash(body.password, BCRYPT_COST);
   const imagenUrl = archivo && r2Habilitado() ? await subirImagenPerfil(archivo) : undefined;
 
+  // Dirección opcional: con los tres campos completos se geocodifica y se guardan
+  // coordenadas + URL de Maps. Sin dirección, la cuenta se crea igual, sin ubicación.
+  const direccion = direccionDesdeCampos(body);
+  const ubicacion = direccion ? await geocodificarDireccion(direccion) : null;
+
+  if (direccion && !ubicacion) {
+    throw new AppError(
+      'DIRECCION_NO_GEOCODIFICADA',
+      'No pudimos ubicar esa dirección. Revisá la localidad y la provincia.',
+      422,
+    );
+  }
+
+  const datosUbicacion = {
+    provincia: body.provincia ?? undefined,
+    localidad: body.localidad ?? undefined,
+    calleAltura: body.calleAltura ?? undefined,
+    mapaUrl: ubicacion?.mapaUrl,
+    latitud: ubicacion?.latitud,
+    longitud: ubicacion?.longitud,
+  };
+
   if (existente) {
     const usuario = await reactivarCuentaPropia(existente, {
       nombre: body.nombre,
@@ -157,6 +179,7 @@ export async function registrar(
       dni: body.dni,
       fechaNacimiento,
       imagenUrl,
+      ...datosUbicacion,
     });
     return aRespuesta(usuario);
   }
@@ -174,6 +197,7 @@ export async function registrar(
       imagenUrl,
       verificado: false,
       estadoId: estado.id,
+      ...datosUbicacion,
     },
     rol.id,
   );

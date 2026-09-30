@@ -54,7 +54,9 @@ beforeEach(() => {
   mockedRepo.buscarRefugio.mockResolvedValue({
     id: 1,
     nombre: 'Refugio Patitas',
-    direccion: 'Av. Siempre Viva 123',
+    provincia: 'Mendoza',
+    localidad: 'Godoy Cruz',
+    calleAltura: 'Av. Siempre Viva 123',
   } as never);
   mockedRepo.contarMascotasEnRefugio.mockResolvedValue(0);
   mockedRepo.listarEstadosSolicitud.mockResolvedValue(ESTADOS_SOLICITUD as never);
@@ -85,12 +87,12 @@ describe('obtenerDashboard', () => {
     } satisfies Partial<AppError>);
   });
 
-  it('usa direccion del refugio como localidad y arma kpis en 0 sin datos', async () => {
+  it('usa la dirección estructurada del refugio como localidad y arma kpis en 0 sin datos', async () => {
     const dashboard = await obtenerDashboard(10, PERIODO);
 
     expect(dashboard.refugio).toEqual({
       nombre: 'Refugio Patitas',
-      localidad: 'Av. Siempre Viva 123',
+      localidad: 'Av. Siempre Viva 123, Godoy Cruz - Mendoza',
     });
     expect(dashboard.kpis).toEqual({
       animalesAdoptados: 0,

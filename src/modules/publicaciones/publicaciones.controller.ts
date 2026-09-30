@@ -5,6 +5,7 @@ import {
   cambiarEstadoPublicacionSchema,
   crearPublicacionSchema,
   editarPublicacionSchema,
+  filtrosDetallePublicacionSchema,
   filtrosFeedSchema,
   filtrosMisPublicacionesSchema,
 } from './publicaciones.dto';
@@ -72,13 +73,23 @@ export async function listarMias(req: Request, res: Response, next: NextFunction
   }
 }
 
-/** Ficha completa de una publicación. */
+/** Ficha completa de una publicación. Con `?latitud=&longitud=` devuelve además la distancia. */
 export async function obtener(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = parsearId(req.params.id);
     if (id === null) throw new AppError('VALIDACION', 'La publicación no es válida', 400);
 
-    res.json(await service.obtenerPublicacion(id, req.usuario!.usuarioId, req.ambito!));
+    const resultado = filtrosDetallePublicacionSchema.safeParse(req.query);
+    if (!resultado.success) {
+      const primero = resultado.error.issues[0];
+      throw new AppError('VALIDACION', primero?.message ?? 'Filtros inválidos', 400);
+    }
+
+    const { latitud, longitud } = resultado.data;
+    const coordenadas =
+      latitud !== undefined && longitud !== undefined ? { latitud, longitud } : undefined;
+
+    res.json(await service.obtenerPublicacion(id, req.usuario!.usuarioId, req.ambito!, coordenadas));
   } catch (err) {
     next(err);
   }

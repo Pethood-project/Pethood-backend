@@ -1,4 +1,4 @@
-import { Prisma, type Hogar } from '@prisma/client';
+import { Prisma, type Hogar, type Mascota } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import type { Ambito } from '../../shared/ambito';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
@@ -37,6 +37,14 @@ export function buscarUsuarioConRefugio(usuarioId: number) {
 
 export function buscarEstadoSolicitudPorNombre(nombre: string) {
   return prisma.estadoSolicitud.findFirst({ where: { nombre, fechaBaja: null } });
+}
+
+export function buscarEstadoMascotaPorNombre(nombre: string) {
+  return prisma.estadoMascota.findFirst({ where: { nombre, fechaBaja: null } });
+}
+
+export function buscarEstadoPublicacionPorNombre(nombre: string) {
+  return prisma.estadoPublicacion.findFirst({ where: { nombre, fechaBaja: null } });
 }
 
 export function buscarTipoSolicitudPorNombre(nombre: string) {
@@ -365,6 +373,196 @@ export async function cancelarSiPendiente(
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034') {
       return false;
+    }
+    throw err;
+  }
+}
+
+/** Datos de la mascota publicada que se copian a la mascota propia del adoptante. */
+export type MascotaAdoptada = Pick<
+  Mascota,
+  | 'nombre'
+  | 'fechaNacimiento'
+  | 'genero'
+  | 'peso'
+  | 'tamanio'
+  | 'castrado'
+  | 'descripcion'
+  | 'imagenUrl'
+  | 'razaId'
+>;
+
+export interface DatosAprobacionAdopcion {
+  estadoAprobadaId: number;
+  estadoRechazadaId: number;
+  estadoMascotaAdoptadoId: number;
+  estadoPublicacionFinalizadaId: number;
+  comentario: string | null;
+  /** Comentario que se deja en las solicitudes que se rechazan solas por esta aprobación. */
+  comentarioRechazo: string;
+  publicacionId: number;
+  mascotaOrigenId: number;
+  mascotaOrigen: MascotaAdoptada;
+  adoptanteId: number;
+}
+
+export interface ResultadoAprobacionAdopcion {
+  solicitud: NonNullable<Awaited<ReturnType<typeof buscarConDetalle>>>;
+  mascotaAdoptadaId: number;
+  solicitudesRechazadas: number[];
+}
+
+/**
+ * Aprobación de una adopción (HU-7.4), en una sola transacción Serializable. Además de
+ * resolver la solicitud, todo lo que tiene que pasar junta para no dejar el sistema a
+ * medias:
+ *
+ * 1. resuelve la solicitud (mismo chequeo "sigue Pendiente" que `resolverSiPendiente`);
+ * 2. crea para el adoptante una mascota propia (sin refugio) con estado "Adoptado",
+ *    copiando los datos de la mascota publicada;
+ * 3. pasa la mascota ORIGINAL a "Adoptado" (baja de su estado vigente + alta del nuevo);
+ * 4. finaliza la publicación del aviso (baja del estado vigente + alta de "Finalizada");
+ * 5. rechaza las demás solicitudes que sigan "Pendiente" para esa publicación.
+ *
+ * Devuelve `null` si la solicitud ya no está "Pendiente" al escribir (otro PATCH ganó la
+ * carrera), igual que `resolverSiPendiente`. Los ids de catálogo los resuelve el servicio.
+ */
+export async function aprobarAdopcion(
+  solicitudId: number,
+  usuarioId: number,
+  datos: DatosAprobacionAdopcion,
+): Promise<ResultadoAprobacionAdopcion | null> {
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        const vigente = await tx.solicitudEstado.findFirst({
+          where: { solicitudId, fechaBaja: null },
+          orderBy: { fechaAlta: 'desc' },
+          include: { estadoSolicitud: true },
+        });
+
+        if (vigente?.estadoSolicitud.nombre !== 'Pendiente') {
+          return null;
+        }
+
+        // 1. Resolver la solicitud aprobada.
+        await tx.solicitud.update({
+          where: { id: solicitudId },
+          data: {
+            comentario: datos.comentario,
+            fechaRespuesta: new Date(),
+            ...datosModificacion(usuarioId),
+          },
+        });
+
+        await tx.solicitudEstado.create({
+          data: { solicitudId, estadoSolicitudId: datos.estadoAprobadaId, ...datosAlta(usuarioId) },
+        });
+
+        // 2. Mascota nueva del adoptante: propia (sin refugio) y "Adoptado".
+        const adoptada = await tx.mascota.create({
+          data: {
+            ...datos.mascotaOrigen,
+            usuarioId: datos.adoptanteId,
+            refugioId: null,
+            ...datosAlta(usuarioId),
+            historicoEstados: {
+              create: { estadoMascotaId: datos.estadoMascotaAdoptadoId, ...datosAlta(usuarioId) },
+            },
+          },
+        });
+
+        // 3. Mascota original -> "Adoptado". Mismo patrón baja+alta que PublicacionEstado,
+        //    para mantener una sola fila vigente.
+        await tx.mascotaEstado.updateMany({
+          where: { mascotaId: datos.mascotaOrigenId, fechaBaja: null },
+          data: datosBaja(usuarioId),
+        });
+
+        await tx.mascotaEstado.create({
+          data: {
+            mascotaId: datos.mascotaOrigenId,
+            estadoMascotaId: datos.estadoMascotaAdoptadoId,
+            ...datosAlta(usuarioId),
+          },
+        });
+
+        // 4. Publicación -> "Finalizada", salvo que ya lo esté (idempotente).
+        const publicacionVigente = await tx.publicacionEstado.findFirst({
+          where: { publicacionId: datos.publicacionId, fechaBaja: null },
+          orderBy: { fechaAlta: 'desc' },
+          include: { estadoPublicacion: true },
+        });
+
+        if (publicacionVigente?.estadoPublicacion.nombre !== 'Finalizada') {
+          await tx.publicacionEstado.updateMany({
+            where: { publicacionId: datos.publicacionId, fechaBaja: null },
+            data: datosBaja(usuarioId),
+          });
+
+          await tx.publicacionEstado.create({
+            data: {
+              publicacionId: datos.publicacionId,
+              estadoPublicacionId: datos.estadoPublicacionFinalizadaId,
+              ...datosAlta(usuarioId),
+            },
+          });
+        }
+
+        // 5. Rechazar las otras solicitudes de la publicación que sigan "Pendiente". El
+        //    estado vigente es el de la fila activa más nueva, como en todo el módulo.
+        const candidatas = await tx.solicitud.findMany({
+          where: { publicacionId: datos.publicacionId, fechaBaja: null, id: { not: solicitudId } },
+          select: {
+            id: true,
+            historicoEstados: {
+              where: { fechaBaja: null },
+              orderBy: { fechaAlta: 'desc' },
+              take: 1,
+              select: { estadoSolicitud: { select: { nombre: true } } },
+            },
+          },
+        });
+
+        const pendientes = candidatas.filter(
+          (s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente',
+        );
+
+        for (const pendiente of pendientes) {
+          await tx.solicitud.update({
+            where: { id: pendiente.id },
+            data: {
+              comentario: datos.comentarioRechazo,
+              fechaRespuesta: new Date(),
+              ...datosModificacion(usuarioId),
+            },
+          });
+
+          await tx.solicitudEstado.create({
+            data: {
+              solicitudId: pendiente.id,
+              estadoSolicitudId: datos.estadoRechazadaId,
+              ...datosAlta(usuarioId),
+            },
+          });
+        }
+
+        const solicitud = await tx.solicitud.findFirstOrThrow({
+          where: { id: solicitudId },
+          include: { ...RELACIONES_SOLICITUD, historicoEstados: historicoCompleto() },
+        });
+
+        return {
+          solicitud,
+          mascotaAdoptadaId: adoptada.id,
+          solicitudesRechazadas: pendientes.map((p) => p.id),
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034') {
+      return null;
     }
     throw err;
   }

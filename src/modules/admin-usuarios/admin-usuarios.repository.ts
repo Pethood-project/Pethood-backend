@@ -240,7 +240,9 @@ export async function resumenRefugio(refugioId: number) {
 export function crearRefugio(
   datos: {
     nombre: string;
-    direccion: string;
+    provincia: string;
+    localidad: string;
+    calleAltura: string;
     telefono?: string;
     email?: string;
     descripcion: string | null;
@@ -251,7 +253,9 @@ export function crearRefugio(
   return prisma.refugio.create({
     data: {
       nombre: datos.nombre,
-      direccion: datos.direccion,
+      provincia: datos.provincia,
+      localidad: datos.localidad,
+      calleAltura: datos.calleAltura,
       telefono: datos.telefono,
       email: datos.email,
       descripcion: datos.descripcion,

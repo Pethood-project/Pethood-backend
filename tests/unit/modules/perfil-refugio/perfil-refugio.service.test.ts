@@ -10,6 +10,7 @@ vi.mock('../../../../src/modules/perfil-refugio/perfil-refugio.repository', () =
   listarEstadosVigentesDeSolicitudes: vi.fn(),
   valoracionDelRefugio: vi.fn(),
   actualizarRefugio: vi.fn(),
+  actualizarUbicacion: vi.fn(),
 }));
 
 vi.mock('../../../../src/shared/logAuditoria', () => ({
@@ -20,11 +21,19 @@ vi.mock('../../../../src/shared/imagenPerfil', () => ({
   persistirImagenPerfil: vi.fn(),
 }));
 
+vi.mock('../../../../src/shared/geocoding', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../../src/shared/geocoding')>();
+  return { ...actual, geocodificarDireccion: vi.fn() };
+});
+
 import * as repo from '../../../../src/modules/perfil-refugio/perfil-refugio.repository';
 import {
   actualizarPerfil,
+  actualizarUbicacion,
   obtenerPerfil,
 } from '../../../../src/modules/perfil-refugio/perfil-refugio.service';
+import { geocodificarDireccion } from '../../../../src/shared/geocoding';
 import * as imagenPerfil from '../../../../src/shared/imagenPerfil';
 import { registrarAuditoria } from '../../../../src/shared/logAuditoria';
 
@@ -34,7 +43,13 @@ function refugioFake(overrides: Partial<RefugioConEstado> = {}): RefugioConEstad
   return {
     id: 7,
     nombre: 'Refugio Esperanza',
-    direccion: 'Av. Santa Fe 1234, Palermo, CABA',
+    provincia: null,
+    localidad: null,
+    calleAltura: null,
+    mapaUrl: null,
+    latitud: null,
+    longitud: null,
+    ubicacionVerificada: false,
     telefono: '+541144445678',
     email: 'esperanza@refugio.com',
     descripcion: 'Rescate y adopción responsable.',
@@ -64,7 +79,6 @@ function refugioFake(overrides: Partial<RefugioConEstado> = {}): RefugioConEstad
 
 const BODY = {
   nombre: 'Refugio Esperanza Norte',
-  direccion: 'Av. Santa Fe 4321, Palermo, CABA',
   telefono: null,
   email: 'norte@refugio.com',
   descripcion: null,
@@ -94,7 +108,6 @@ describe('obtenerPerfil', () => {
     expect(perfil).toMatchObject({
       id: 7,
       nombre: 'Refugio Esperanza',
-      direccion: 'Av. Santa Fe 1234, Palermo, CABA',
       estado: 'Activo',
       puedeEditar: true,
     });
@@ -143,6 +156,9 @@ describe('actualizarPerfil', () => {
     expect(mockedRepo.actualizarRefugio).toHaveBeenCalledWith(7, 10, {
       ...BODY,
       imagenUrl: undefined,
+      mapaUrl: undefined,
+      latitud: undefined,
+      longitud: undefined,
     });
     expect(registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -177,5 +193,73 @@ describe('actualizarPerfil', () => {
 
     await expect(actualizarPerfil(10, BODY)).rejects.toMatchObject({ codigo: 'SIN_REFUGIO' });
     expect(mockedRepo.actualizarRefugio).not.toHaveBeenCalled();
+  });
+
+  it('geocodifica la dirección y persiste coordenadas + URL de Maps', async () => {
+    const conDireccion = {
+      ...BODY,
+      provincia: 'Mendoza',
+      localidad: 'Godoy Cruz',
+      calleAltura: 'San Martín 123',
+    };
+    vi.mocked(geocodificarDireccion).mockResolvedValue({
+      latitud: -32.889,
+      longitud: -68.845,
+      mapaUrl: 'https://www.google.com/maps?q=-32.889,-68.845',
+    });
+    mockedRepo.actualizarRefugio.mockResolvedValue(refugioFake());
+
+    await actualizarPerfil(10, conDireccion);
+
+    expect(geocodificarDireccion).toHaveBeenCalledWith({
+      calleAltura: 'San Martín 123',
+      localidad: 'Godoy Cruz',
+      provincia: 'Mendoza',
+    });
+    expect(mockedRepo.actualizarRefugio).toHaveBeenCalledWith(
+      7,
+      10,
+      expect.objectContaining({
+        mapaUrl: 'https://www.google.com/maps?q=-32.889,-68.845',
+        latitud: -32.889,
+        longitud: -68.845,
+      }),
+    );
+  });
+
+  it('422 DIRECCION_NO_GEOCODIFICADA si la dirección completa no se pudo ubicar', async () => {
+    const conDireccion = {
+      ...BODY,
+      provincia: 'Mendoza',
+      localidad: 'Godoy Cruz',
+      calleAltura: 'San Martín 123',
+    };
+    vi.mocked(geocodificarDireccion).mockResolvedValue(null);
+
+    await expect(actualizarPerfil(10, conDireccion)).rejects.toMatchObject({
+      codigo: 'DIRECCION_NO_GEOCODIFICADA',
+      httpStatus: 422,
+    });
+    expect(mockedRepo.actualizarRefugio).not.toHaveBeenCalled();
+  });
+
+  it('actualiza la ubicación desde un link de Maps y recalcula las coordenadas', async () => {
+    mockedRepo.actualizarUbicacion.mockResolvedValue(refugioFake());
+
+    await actualizarUbicacion(10, 'https://www.google.com/maps?q=-32.889,-68.845');
+
+    expect(mockedRepo.actualizarUbicacion).toHaveBeenCalledWith(7, 10, {
+      mapaUrl: 'https://www.google.com/maps?q=-32.889,-68.845',
+      latitud: -32.889,
+      longitud: -68.845,
+    });
+  });
+
+  it('rechaza un link de mapa sin coordenadas', async () => {
+    await expect(actualizarUbicacion(10, 'https://www.google.com/')).rejects.toMatchObject({
+      codigo: 'LINK_MAPA_INVALIDO',
+      httpStatus: 422,
+    });
+    expect(mockedRepo.actualizarUbicacion).not.toHaveBeenCalled();
   });
 });
