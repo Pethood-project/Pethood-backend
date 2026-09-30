@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authRouter } from '../modules/auth/auth.routes';
 import { adminUsuariosRouter } from '../modules/admin-usuarios/admin-usuarios.routes';
 import { animalesPerdidosRouter } from '../modules/animales-perdidos/animales-perdidos.routes';
+import { campaniasRefugioRouter, campaniasRouter } from '../modules/campanias/campanias.routes';
 import { usuariosRouter } from '../modules/usuarios/usuarios.routes';
 import { catalogosRouter } from '../modules/catalogos/catalogos.routes';
 import { chatsRouter } from '../modules/chats/chats.routes';
@@ -38,6 +39,8 @@ apiRouter.use('/favoritos', favoritosRouter);
 apiRouter.use('/solicitudes', solicitudesRouter); // spec 003 — HU-7.4/7.5
 apiRouter.use('/chats', chatsRouter);
 apiRouter.use('/animales-perdidos', animalesPerdidosRouter); // spec 020 — HU-13.1
+apiRouter.use('/campanias', campaniasRouter); // spec 021 — HU-12.1 a HU-12.7
+apiRouter.use('/refugio', campaniasRefugioRouter); // spec 021
 apiRouter.use('/', catalogosRouter);
 apiRouter.use('/', historiaClinicaRouter); // spec 005
 apiRouter.use('/', seguimientoRouter); // spec 011

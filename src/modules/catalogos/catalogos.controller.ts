@@ -71,6 +71,18 @@ export async function listarEstadosMascota(
   }
 }
 
+export async function listarEstadosCampania(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    res.json(await service.listarEstadosCampania());
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function listarEstadosAnimalPerdido(
   _req: Request,
   res: Response,
