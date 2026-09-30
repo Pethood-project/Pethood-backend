@@ -99,7 +99,12 @@ export type RolesBody = z.infer<typeof rolesBodySchema>;
 
 export const altaRefugioBodySchema = z.object({
   nombre: textoSchema({ ...LIMITES.refugio.nombre, etiqueta: 'El nombre' }),
-  direccion: textoSchema({ ...LIMITES.refugio.direccion, etiqueta: 'La dirección' }),
+  provincia: textoSchema({ max: LIMITES.refugio.provincia.max, etiqueta: 'La provincia' }),
+  localidad: textoSchema({ max: LIMITES.refugio.localidad.max, etiqueta: 'La localidad' }),
+  calleAltura: textoSchema({
+    max: LIMITES.refugio.calleAltura.max,
+    etiqueta: 'La calle y altura',
+  }),
   telefono: telefonoSchema.optional(),
   email: emailSchema.optional(),
   descripcion: textoOpcionalSchema({

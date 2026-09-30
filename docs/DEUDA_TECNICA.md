@@ -51,7 +51,9 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 21 | La ubicación es texto libre: no hay catálogo de Provincia/Localidad | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
 | 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
-| 24 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
+| 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
+| 25 | Reseña quedó sin flujo de reporte ni notificaciones | Baja | ambos |
+| 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -521,7 +523,68 @@ consulta.
 
 ---
 
-## 24. Las vacunas son un enum: el admin no puede agregarlas desde el panel — Baja
+## 24. Módulo 11 usa GPS, contra el criterio original de "no GPS" — Decisión de equipo
+
+**Qué pasa.** El anteproyecto excluía el GPS y proponía filtrar solo por ubicación
+administrativa (Provincia/Localidad). El Módulo 11 (HU-11.3, "filtrar por cercanía") se
+implementó **con geolocalización nativa** (`expo-location`), agregando
+`publicacion_ubicacion_latitud`/`_longitud` a `Publicacion` y un filtro por distancia
+(Haversine) en el backend. Cuando el permiso de GPS se deniega, la app cae a la localidad
+parametrizada en el perfil (antes `usuario_ubicacion`; hoy la dirección estructurada del
+perfil), que era el mecanismo previsto.
+
+**Por qué.** Decisión explícita del equipo (2026-09-27) al priorizar la HU-11.3 sobre la nota
+de alcance del anteproyecto. Sigue **sin haber mapa interactivo** ni SDK de mapas: solo se
+capturan coordenadas para calcular distancia.
+
+**Qué falta.** Reflejarlo en la documentación fuente y decidir si las publicaciones creadas
+sin permiso de GPS (coordenadas nulas) deben geocodificarse a partir de `publicacion_ubicacion`
+—hoy no hay geocodificación— o quedar solo en el filtro por localidad. También actualizar el
+diagrama de clases con los dos campos nuevos.
+
+**Actualización (2026-09-28):** el filtro por cercanía ahora toma las coordenadas de dos
+fuentes: la capturada al publicar y la extraída del enlace de Google Maps del refugio
+(`refugio_mapa_url`). Los links **cortos** (`maps.app.goo.gl`) se resuelven siguiendo la
+redirección (`resolverCoordenadasDeMapsUrl`, con caché por URL y tope de 4 s) y se parsean de
+la URL final (`@lat,lng`, `!3d..!4d..` o `?q=lat,lng`). El filtro por `localidad` de texto
+libre se eliminó.
+
+**Riesgo pendiente.** La resolución del link corto depende de la red y de que Google devuelva
+la URL final con coordenadas (algunos links pasan por una pantalla de consentimiento que no
+las incluye). Si falla, el refugio no entra en el filtro por distancia pero el feed sigue
+funcionando. Para eliminarlo del camino crítico conviene resolver y **persistir** las
+coordenadas al guardar el `mapa_url` (no hay UI para cargarlo todavía), o moverlo a un job.
+
+**Actualización (2026-09-29): geocodificación de direcciones.** Se agregó `node-geocoder`
+(`src/shared/geocoding.ts`) para que el perfil del usuario y el del refugio carguen una
+dirección estructurada (`provincia` + `localidad` + `calle_altura`) y se persistan
+`latitud`/`longitud` + `mapa_url` (`https://www.google.com/maps?q=<lat>,<lng>`). Sigue **sin
+haber mapa interactivo ni SDK de mapas**. La geocodificación corre al guardar el perfil, en el
+camino crítico: si el proveedor no ubica la dirección completa, el endpoint responde
+`422 DIRECCION_NO_GEOCODIFICADA`. Proveedor configurable por `GEOCODER_PROVIDER`
+(`openstreetmap`, gratis y por defecto, o `google` con `GEOCODER_API_KEY`). El vínculo se puede
+**verificar**: el cliente pide un preview (`POST /usuarios/me/ubicacion/preview` y
+`/refugio/perfil/ubicacion/preview`) para mostrar el link antes de guardar, y el usuario lo
+confirma (queda `usuario_ubicacion_verificada`/`refugio_ubicacion_verificada`) o lo corrige a
+mano (`PATCH .../ubicacion`). Se eliminaron `usuario_ubicacion` (barrio/ciudad) y
+`refugio_direccion`: el texto de la dirección es la concatenación «calle_altura, localidad -
+provincia» (`src/shared/ubicacion.ts`). **Deuda que queda:** no hay caché persistente ni
+reintentos para la geocodificación, y las publicaciones creadas sin GPS siguen sin
+geocodificarse (el feed usa la dirección del perfil).
+
+---
+
+## 25. Reseña quedó sin flujo de reporte ni notificaciones — Baja
+
+**Qué pasa.** El Módulo 10 (spec 022) cubre alta, historial y baja lógica por el admin, pero
+no conecta con Moderación (reportar una reseña, HU-3.3) ni con Notificaciones (avisar al
+recibir una reseña). Esas HUs son de los módulos 3 y 4 y todavía no están implementadas.
+
+**Cómo se arregla.** Cuando se haga el Módulo 3, agregar la FK polimórfica o `resena_id` a
+`Reporte_Problema`; cuando se haga el Módulo 4, enganchar el evento de alta de reseña al motor
+ de notificaciones.
+
+## 26. Las vacunas son un enum: el admin no puede agregarlas desde el panel — Baja
 
 **Qué pasa.** `TipoVacuna` es un enum de `schema.prisma` y el plan de vacunación vive en
 `src/shared/vacunas.ts` (spec 019). Es a propósito: el código ramifica por el valor (qué

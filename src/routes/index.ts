@@ -16,6 +16,7 @@ import { historiaClinicaRouter } from '../modules/historia-clinica/historia-clin
 import { mascotasRouter } from '../modules/mascotas/mascotas.routes';
 import { perfilRefugioRouter } from '../modules/perfil-refugio/perfil-refugio.routes';
 import { publicacionesRouter } from '../modules/publicaciones/publicaciones.routes';
+import { resenasRouter } from '../modules/resenas/resenas.routes';
 import { solicitudesRouter } from '../modules/solicitudes/solicitudes.routes';
 import { seguimientoRouter } from '../modules/seguimiento/seguimiento.routes';
 import { soporteRouter } from '../modules/soporte/soporte.routes';
@@ -44,6 +45,7 @@ apiRouter.use('/mascotas', mascotasRouter);
 apiRouter.use('/publicaciones', publicacionesRouter);
 apiRouter.use('/favoritos', favoritosRouter);
 apiRouter.use('/solicitudes', solicitudesRouter); // spec 003 — HU-7.4/7.5
+apiRouter.use('/resenas', resenasRouter); // Módulo 10 — Sistema de Reputación
 apiRouter.use('/chats', chatsRouter);
 apiRouter.use('/animales-perdidos', animalesPerdidosRouter); // spec 020 — HU-13.1
 apiRouter.use('/', catalogosRouter);

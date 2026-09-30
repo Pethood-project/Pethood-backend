@@ -1,5 +1,6 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
+import { distanciaKm, resolverCoordenadasDeMapsUrl, type Coordenadas } from '../../shared/geo';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { vacunasAplicadas } from '../../shared/vacunas';
@@ -115,6 +116,8 @@ export async function crearPublicacion(
         titulo: mascota.nombre ?? 'Mascota en adopción',
         descripcion: datos.descripcion,
         ubicacion: datos.ubicacion,
+        latitud: datos.latitud ?? null,
+        longitud: datos.longitud ?? null,
         requisitos: datos.requisitos,
         personalidad: datos.personalidad,
         desparasitado: datos.desparasitado,
@@ -321,6 +324,8 @@ export async function editarPublicacion(
       {
         descripcion: datos.descripcion,
         ubicacion: datos.ubicacion,
+        latitud: datos.latitud ?? null,
+        longitud: datos.longitud ?? null,
         requisitos: datos.requisitos,
         personalidad: datos.personalidad,
         desparasitado: datos.desparasitado,
@@ -473,6 +478,7 @@ function aFeedDto(
   enFavoritos: boolean,
   esPropia: boolean,
   puedeEditar: boolean,
+  distancia: number | null = null,
 ): PublicacionFeedDto {
   const { mascota } = publicacion;
   const estado = mascota.historicoEstados[0]!.estadoMascota;
@@ -508,6 +514,7 @@ function aFeedDto(
     },
     refugio: mascota.refugio,
     publicadoPor: mascota.refugio ? null : publicacion.usuario,
+    distanciaKm: distancia,
     enFavoritos,
     esPropia,
     puedeEditar,
@@ -545,11 +552,37 @@ export async function listarFeed(
   };
 }
 
+/**
+ * Distancia en km entre las coordenadas del usuario y la ubicación de quien publicó: la
+ * coordenada capturada en la publicación o, si no la tiene, el link de Maps del refugio
+ * (resolviendo el link corto). Redondeada a un decimal. `null` si no hay ninguna ubicable.
+ */
+async function distanciaHastaPublicacion(
+  publicacion: PublicacionConRelaciones,
+  usuario: Coordenadas,
+): Promise<number | null> {
+  const { ubicacionLatitud, ubicacionLongitud } = publicacion;
+  const coordsPublicacion =
+    ubicacionLatitud !== null && ubicacionLongitud !== null
+      ? { latitud: Number(ubicacionLatitud), longitud: Number(ubicacionLongitud) }
+      : null;
+
+  const coordsRefugio = publicacion.mascota.refugio
+    ? await resolverCoordenadasDeMapsUrl(publicacion.mascota.refugio.mapaUrl)
+    : null;
+
+  const objetivo = coordsPublicacion ?? coordsRefugio;
+  if (!objetivo) return null;
+
+  return Math.round(distanciaKm(usuario, objetivo) * 10) / 10;
+}
+
 /** Ficha completa de una publicación, con el estado de favorito y de propiedad ya resueltos. */
 export async function obtenerPublicacion(
   publicacionId: number,
   usuarioId: number,
   ambito: Ambito,
+  coordenadas?: Coordenadas,
 ): Promise<PublicacionFeedDto> {
   const publicacion = await repo.buscarActivaPorId(publicacionId);
 
@@ -570,12 +603,14 @@ export async function obtenerPublicacion(
 
   const favoritas = await repo.filtrarFavoritas(usuarioId, [publicacion.mascotaId]);
   const actor = { id: usuario.id, refugioId: usuario.refugioId };
+  const distancia = coordenadas ? await distanciaHastaPublicacion(publicacion, coordenadas) : null;
 
   return aFeedDto(
     publicacion,
     favoritas.has(publicacion.mascotaId),
     esMascotaPropia(publicacion.mascota, actor),
     puedeEditarPublicacion(publicacion, actor, ambito),
+    distancia,
   );
 }
 

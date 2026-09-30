@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import type { VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
-import { idSchema, listaDeIdsSchema, textoSchema } from '../../shared/validation/schemas';
+import {
+  coordenadaOpcionalSchema,
+  fechaOpcionalSchema,
+  idSchema,
+  listaDeIdsSchema,
+  textoSchema,
+} from '../../shared/validation/schemas';
 import { validarTexto } from '../../shared/validation/text';
 
 /** Hasta 5 fotos por publicación; el orden recibido es el orden de la galería. */
@@ -54,6 +60,11 @@ const camposEditables = {
     max: LIMITES.publicacion.ubicacion.max,
     etiqueta: 'La ubicación',
   }),
+  // Coordenadas del lugar donde se ofrece la mascota (Módulo 11, HU-11.3). Opcionales: si no
+  // llegan, la publicación se puede ubicar por `ubicacion` pero no entra en el filtro por
+  // distancia. Se envían desde el GPS del dispositivo al publicar.
+  latitud: coordenadaOpcionalSchema('La latitud', -90, 90),
+  longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
   requisitos: listaSchema(LIMITES.publicacion.requisito.max, 'Cada requisito'),
   personalidad: listaSchema(LIMITES.publicacion.personalidad.max, 'Cada rasgo'),
   desparasitado: booleanoSchema,
@@ -135,28 +146,59 @@ const banderaSchema = z
 const enteroOpcionalSchema = (etiqueta: string) =>
   z.coerce.number().int(`${etiqueta} no es válido`).min(0, `${etiqueta} no es válido`).optional();
 
-export const filtrosFeedSchema = z.object({
-  especieId: z.coerce.number().int().positive('La especie no es válida').optional(),
-  tamanio: z.enum(['PEQUENO', 'MEDIANO', 'GRANDE']).optional(),
-  genero: z.enum(['MACHO', 'HEMBRA']).optional(),
-  /** Años cumplidos, inclusivo. */
-  edadMin: enteroOpcionalSchema('La edad mínima'),
-  /** Años cumplidos, exclusivo: el rango "1–3 años" es `edadMin=1&edadMax=3`. */
-  edadMax: enteroOpcionalSchema('La edad máxima'),
-  castrado: banderaSchema,
-  compatibleNinios: banderaSchema,
-  compatibleOtrasMascotas: banderaSchema,
-  limite: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(FEED_LIMITE_MAXIMO)
-    .optional()
-    .default(FEED_LIMITE_POR_DEFECTO),
-  desplazamiento: z.coerce.number().int().min(0).optional().default(0),
-});
+export const filtrosFeedSchema = z
+  .object({
+    /** Texto libre (HU-11.4): matchea parcialmente título, descripción, nombre de mascota y personalidad. */
+    texto: z.string().trim().max(LIMITES.publicacion.busqueda.max).optional(),
+    /** Orden por fecha de alta (HU-11.2): `recientes` (default) o `antiguas`. */
+    orden: z.enum(['recientes', 'antiguas']).optional().default('recientes'),
+    /** Rango por `fechaAlta`, dos puntas inclusive (HU-11.2). */
+    fechaDesde: fechaOpcionalSchema('fechaDesde'),
+    fechaHasta: fechaOpcionalSchema('fechaHasta'),
+    /** Filtro por cercanía (HU-11.3): coordenadas del usuario y radio en km. */
+    latitud: coordenadaOpcionalSchema('La latitud', -90, 90),
+    longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
+    radioKm: z.coerce
+      .number()
+      .positive('El radio no es válido')
+      .max(LIMITES.publicacion.radioKm.max, 'El radio no es válido')
+      .optional(),
+    especieId: z.coerce.number().int().positive('La especie no es válida').optional(),
+    tamanio: z.enum(['PEQUENO', 'MEDIANO', 'GRANDE']).optional(),
+    genero: z.enum(['MACHO', 'HEMBRA']).optional(),
+    /** Años cumplidos, inclusivo. */
+    edadMin: enteroOpcionalSchema('La edad mínima'),
+    /** Años cumplidos, exclusivo: el rango "1–3 años" es `edadMin=1&edadMax=3`. */
+    edadMax: enteroOpcionalSchema('La edad máxima'),
+    castrado: banderaSchema,
+    compatibleNinios: banderaSchema,
+    compatibleOtrasMascotas: banderaSchema,
+    limite: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(FEED_LIMITE_MAXIMO)
+      .optional()
+      .default(FEED_LIMITE_POR_DEFECTO),
+    desplazamiento: z.coerce.number().int().min(0).optional().default(0),
+  })
+  .refine(
+    (datos) => !datos.fechaDesde || !datos.fechaHasta || datos.fechaDesde <= datos.fechaHasta,
+    { message: 'La fecha "desde" no puede ser posterior a "hasta"', path: ['fechaHasta'] },
+  );
 
 export type FiltrosFeedDto = z.infer<typeof filtrosFeedSchema>;
+
+/**
+ * Coordenadas opcionales del usuario para la ficha de una publicación (`GET /:id`). Con las
+ * dos, el backend calcula y devuelve la distancia a la ubicación de quien publicó.
+ */
+export const filtrosDetallePublicacionSchema = z.object({
+  latitud: coordenadaOpcionalSchema('La latitud', -90, 90),
+  longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
+});
+
+export type FiltrosDetallePublicacionDto = z.infer<typeof filtrosDetallePublicacionSchema>;
 
 /** Mascota tal como la necesitan la tarjeta del feed y la ficha completa. */
 export interface MascotaPublicadaDto {
@@ -195,12 +237,25 @@ export interface PublicacionFeedDto {
   estado: EstadoPublicacionDto;
   mascota: MascotaPublicadaDto;
   /** Null cuando publica un adoptante particular y no un refugio. */
-  refugio: { id: number; nombre: string; direccion: string } | null;
+  refugio: {
+    id: number;
+    nombre: string;
+    provincia: string | null;
+    localidad: string | null;
+    calleAltura: string | null;
+    mapaUrl: string | null;
+  } | null;
   /**
    * La persona que la publicó, solo cuando no es de un refugio (`refugio` null): la ficha la
    * muestra en «Publicado por». En una de refugio es null, para no exponer a su personal.
    */
   publicadoPor: { nombre: string; apellido: string } | null;
+  /**
+   * Distancia en km entre la ubicación de quien publicó y las coordenadas del usuario que
+   * consulta, cuando las manda (`GET /:id?latitud=&longitud=`). `null` si el usuario no mandó
+   * coordenadas o si la publicación/refugio no tienen ninguna ubicación ubicable.
+   */
+  distanciaKm: number | null;
   /** Si el usuario que consulta ya la tiene guardada. */
   enFavoritos: boolean;
   /**

@@ -89,7 +89,14 @@ function solicitudConDetalle(opciones: {
       mascota: {
         id: 8,
         nombre: 'Toby',
+        fechaNacimiento: new Date('2023-04-01T00:00:00.000Z'),
+        genero: 'MACHO',
+        peso: 12.5,
+        tamanio: 'MEDIANO',
+        castrado: true,
+        descripcion: 'Muy jugueton',
         imagenUrl: '/img/toby.jpg',
+        razaId: 4,
         refugioId: mascotaRefugioId,
         usuarioId: mascotaUsuarioId,
       },
@@ -352,14 +359,39 @@ describe('obtenerDetalle', () => {
 });
 
 describe('resolverSolicitud', () => {
+  const ESTADO_APROBADA = estado(3, 'Aprobada');
+  const ESTADO_RECHAZADA = estado(4, 'Rechazada');
+  const ESTADO_MASCOTA_ADOPTADO = estado(3, 'Adoptado');
+  const ESTADO_PUBLICACION_FINALIZADA = estado(3, 'Finalizada');
+
+  function resultadoAprobacion(solicitud: unknown) {
+    return {
+      solicitud,
+      mascotaAdoptadaId: 99,
+      solicitudesRechazadas: [13, 14],
+    };
+  }
+
   beforeEach(() => {
     vi.mocked(repo.buscarConDetalle).mockResolvedValue(
       solicitudConDetalle({
         historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
       }) as never,
     );
-    vi.mocked(repo.buscarEstadoSolicitudPorNombre).mockResolvedValue(
-      estado(3, 'Aprobada') as never,
+    vi.mocked(repo.buscarEstadoSolicitudPorNombre).mockImplementation((nombre: string) =>
+      Promise.resolve(
+        (nombre === 'Aprobada'
+          ? ESTADO_APROBADA
+          : nombre === 'Rechazada'
+            ? ESTADO_RECHAZADA
+            : undefined) as never,
+      ),
+    );
+    vi.mocked(repo.buscarEstadoMascotaPorNombre).mockResolvedValue(
+      ESTADO_MASCOTA_ADOPTADO as never,
+    );
+    vi.mocked(repo.buscarEstadoPublicacionPorNombre).mockResolvedValue(
+      ESTADO_PUBLICACION_FINALIZADA as never,
     );
     vi.mocked(repo.resolverSiPendiente).mockResolvedValue(
       solicitudConDetalle({
@@ -371,9 +403,23 @@ describe('resolverSolicitud', () => {
         ],
       }) as never,
     );
+    vi.mocked(repo.aprobarAdopcion).mockImplementation((solicitudId: number) =>
+      Promise.resolve(
+        resultadoAprobacion(
+          solicitudConDetalle({
+            comentario: 'Bienvenido a la familia',
+            fechaRespuesta: FECHA_RESPUESTA,
+            historial: [
+              { estado: estado(3, 'Aprobada'), fecha: FECHA_RESPUESTA },
+              { estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA },
+            ],
+          }),
+        ) as never,
+      ),
+    );
   });
 
-  it('acepta una solicitud pendiente', async () => {
+  it('acepta una solicitud de adopción y le crea la mascota al adoptante', async () => {
     const resultado = await service.resolverSolicitud(
       SOLICITUD,
       { estado: 'Aprobada', comentario: 'Bienvenido a la familia' },
@@ -382,12 +428,57 @@ describe('resolverSolicitud', () => {
     );
 
     expect(resultado.estado.nombre).toBe('Aprobada');
-    expect(repo.resolverSiPendiente).toHaveBeenCalledWith(
+    expect(repo.aprobarAdopcion).toHaveBeenCalledWith(
       SOLICITUD,
-      3,
-      'Bienvenido a la familia',
       MIEMBRO_REFUGIO,
+      expect.objectContaining({
+        estadoAprobadaId: ESTADO_APROBADA.id,
+        estadoRechazadaId: ESTADO_RECHAZADA.id,
+        estadoMascotaAdoptadoId: ESTADO_MASCOTA_ADOPTADO.id,
+        estadoPublicacionFinalizadaId: ESTADO_PUBLICACION_FINALIZADA.id,
+        adoptanteId: SOLICITANTE,
+        mascotaOrigenId: 8,
+        publicacionId: 40,
+        mascotaOrigen: expect.objectContaining({ nombre: 'Toby', razaId: 4 }),
+      }),
     );
+  });
+
+  it('rechazar una solicitud no crea mascota (va por el camino simple)', async () => {
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
+
+    await service.resolverSolicitud(
+      SOLICITUD,
+      { estado: 'Rechazada', comentario: null },
+      MIEMBRO_REFUGIO,
+      'REFUGIO',
+    );
+
+    expect(repo.resolverSiPendiente).toHaveBeenCalledWith(SOLICITUD, 4, null, MIEMBRO_REFUGIO);
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
+  });
+
+  it('aprobar una solicitud de TRÁNSITO no crea mascota ni finaliza la publicación', async () => {
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        transito: { inicio: FECHA_ALTA, fin: FECHA_RESPUESTA },
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
+
+    await service.resolverSolicitud(
+      SOLICITUD,
+      { estado: 'Aprobada', comentario: null },
+      MIEMBRO_REFUGIO,
+      'REFUGIO',
+    );
+
+    expect(repo.resolverSiPendiente).toHaveBeenCalledWith(SOLICITUD, 3, null, MIEMBRO_REFUGIO);
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('un adoptante particular puede resolver la solicitud de su propia mascota publicada', async () => {
@@ -428,12 +519,13 @@ describe('resolverSolicitud', () => {
       ),
     ).rejects.toMatchObject({ codigo: 'SOLICITUD_YA_RESUELTA', httpStatus: 409 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('dos PATCH concurrentes: el que pierde la carrera atómica recibe 409, no pisa el histórico', async () => {
     // El chequeo previo la ve "Pendiente", pero para cuando la transacción Serializable
-    // corre, el otro PATCH ya ganó — resolverSiPendiente devuelve null.
-    vi.mocked(repo.resolverSiPendiente).mockResolvedValue(null as never);
+    // corre, el otro PATCH ya ganó — aprobarAdopcion devuelve null.
+    vi.mocked(repo.aprobarAdopcion).mockResolvedValue(null as never);
 
     await expect(
       service.resolverSolicitud(
@@ -462,6 +554,7 @@ describe('resolverSolicitud', () => {
       ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('un adoptante no puede resolver la solicitud de la mascota de OTRO adoptante (404)', async () => {
@@ -485,6 +578,7 @@ describe('resolverSolicitud', () => {
       ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('revienta con un error interno si el catálogo no tiene el estado destino', async () => {
@@ -513,12 +607,43 @@ describe('resolverSolicitud', () => {
       accion: 'APROBAR',
       entidad: 'Solicitud',
       entidadId: SOLICITUD,
-      detalle: 'Pendiente -> Aprobada',
+      detalle: 'Pendiente -> Aprobada (adopción, mascota 8 -> usuario 7)',
+    });
+  });
+
+  it('audita la mascota creada, los cambios de estado y los rechazos automáticos', async () => {
+    await service.resolverSolicitud(
+      SOLICITUD,
+      { estado: 'Aprobada', comentario: null },
+      MIEMBRO_REFUGIO,
+      'REFUGIO',
+    );
+
+    expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
+      usuarioId: MIEMBRO_REFUGIO,
+      accion: 'CREAR',
+      entidad: 'Mascota',
+      entidadId: 99,
+      detalle: `adoptada por usuario ${SOLICITANTE} (solicitud ${SOLICITUD})`,
+    });
+    expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
+      usuarioId: MIEMBRO_REFUGIO,
+      accion: 'CAMBIAR_ESTADO',
+      entidad: 'Publicacion',
+      entidadId: 40,
+      detalle: 'Finalizada (adopción aprobada)',
+    });
+    expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
+      usuarioId: MIEMBRO_REFUGIO,
+      accion: 'RECHAZAR',
+      entidad: 'Solicitud',
+      entidadId: 13,
+      detalle: 'Rechazada al aprobarse otra solicitud de la misma publicación',
     });
   });
 
   it('no registra auditoría si pierde la carrera atómica', async () => {
-    vi.mocked(repo.resolverSiPendiente).mockResolvedValue(null as never);
+    vi.mocked(repo.aprobarAdopcion).mockResolvedValue(null as never);
 
     await expect(
       service.resolverSolicitud(

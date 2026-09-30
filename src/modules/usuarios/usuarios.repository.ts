@@ -31,7 +31,15 @@ export interface DatosActualizarPerfil {
   apellido: string;
   email: string;
   telefono: string;
-  ubicacion: string;
+  provincia: string | null;
+  localidad: string | null;
+  calleAltura: string | null;
+  // Opcionales: si no se geocodificó una dirección nueva, no se tocan (así no se borra un
+  // link de Maps cargado a mano).
+  mapaUrl?: string;
+  latitud?: number;
+  longitud?: number;
+  ubicacionVerificada?: boolean;
   imagenUrl?: string;
 }
 
@@ -96,7 +104,19 @@ export async function actualizarPerfil(
         apellido: datos.apellido,
         email: datos.email,
         telefono: datos.telefono,
-        ubicacion: datos.ubicacion,
+        provincia: datos.provincia,
+        localidad: datos.localidad,
+        calleAltura: datos.calleAltura,
+        ...(datos.mapaUrl !== undefined
+          ? {
+              mapaUrl: datos.mapaUrl,
+              latitud: datos.latitud ?? null,
+              longitud: datos.longitud ?? null,
+            }
+          : {}),
+        ...(datos.ubicacionVerificada !== undefined
+          ? { ubicacionVerificada: datos.ubicacionVerificada }
+          : {}),
         ...(datos.imagenUrl ? { imagenUrl: datos.imagenUrl } : {}),
         ...datosModificacion(usuarioId),
       },
@@ -105,6 +125,29 @@ export async function actualizarPerfil(
   } catch (error) {
     mapearErrorUnico(error);
   }
+}
+
+export interface DatosUbicacion {
+  mapaUrl: string;
+  latitud: number;
+  longitud: number;
+}
+
+/** Actualiza solo el link del mapa y sus coordenadas, sin tocar el resto del perfil. */
+export async function actualizarUbicacion(
+  usuarioId: number,
+  datos: DatosUbicacion,
+): Promise<UsuarioPerfil> {
+  return prisma.usuario.update({
+    where: { id: usuarioId },
+    data: {
+      ...datos,
+      // El link cargado a mano lo eligió el usuario: queda verificado.
+      ubicacionVerificada: true,
+      ...datosModificacion(usuarioId),
+    },
+    include: includePerfil,
+  });
 }
 
 export async function actualizarContrasena(usuarioId: number, hash: string): Promise<void> {

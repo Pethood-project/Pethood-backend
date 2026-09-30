@@ -341,3 +341,80 @@ export function listaJsonSchema<T extends z.ZodTypeAny>(
     })
     .pipe(z.array(item).max(max, `${etiqueta}: como máximo ${max}`));
 }
+
+/**
+ * Fecha opcional de un filtro por rango. Vacío o ausente devuelve `undefined` (sin filtro);
+ * con valor, tiene que ser una fecha real. Se usa en las dos puntas de un rango.
+ */
+export function fechaOpcionalSchema(campo: string) {
+  return z.unknown().transform((valor, ctx) => {
+    if (valor === undefined || valor === null || valor === '') return undefined;
+
+    const fecha = parsearFecha(valor as string | Date);
+    if (!fecha) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [campo],
+        message: 'La fecha no es válida',
+      });
+      return z.NEVER;
+    }
+
+    return fecha;
+  });
+}
+
+/**
+ * Coordenada geográfica opcional (latitud o longitud), en grados decimales. Acepta coma o
+ * punto, porque en la query llega como texto. Se valida contra el rango real de la esfera.
+ *
+ * A diferencia de `coordenadaSchema`, vacío/ausente devuelve `undefined` ("sin filtro"): es
+ * para coordenadas opcionales (filtros del feed, ficha) donde el cliente puede no mandarlas.
+ */
+export function coordenadaOpcionalSchema(etiqueta: string, min: number, max: number) {
+  return z.unknown().transform((valor, ctx) => {
+    if (valor === undefined || valor === null || valor === '') return undefined;
+
+    const numero = Number(typeof valor === 'string' ? valor.replace(',', '.') : valor);
+
+    if (!Number.isFinite(numero) || numero < min || numero > max) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${etiqueta} no es válida` });
+      return z.NEVER;
+    }
+
+    return numero;
+  });
+}
+
+/**
+ * URL http(s) obligatoria, con un largo máximo. Para links que el usuario pega a mano (ej.
+ * el de Google Maps): valida el protocolo y el largo, no el contenido del sitio.
+ */
+export function urlSchema(etiqueta: string, max: number) {
+  return z.unknown().transform((valor, ctx) => {
+    const texto = typeof valor === 'string' ? valor.trim() : '';
+
+    if (!texto) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${etiqueta} es obligatorio` });
+      return z.NEVER;
+    }
+
+    if (texto.length > max) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${etiqueta} no puede superar los ${max} caracteres`,
+      });
+      return z.NEVER;
+    }
+
+    try {
+      const url = new URL(texto);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('protocolo');
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${etiqueta} no es un link válido` });
+      return z.NEVER;
+    }
+
+    return texto;
+  });
+}

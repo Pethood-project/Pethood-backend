@@ -25,6 +25,12 @@ export interface DatosNuevoUsuario {
   googleId?: string;
   verificado: boolean;
   imagenUrl?: string;
+  provincia?: string;
+  localidad?: string;
+  calleAltura?: string;
+  mapaUrl?: string;
+  latitud?: number;
+  longitud?: number;
   estadoId: number;
 }
 
@@ -92,6 +98,12 @@ export async function crearUsuarioConRol(
           googleId: datos.googleId,
           verificado: datos.verificado,
           imagenUrl: datos.imagenUrl,
+          provincia: datos.provincia,
+          localidad: datos.localidad,
+          calleAltura: datos.calleAltura,
+          mapaUrl: datos.mapaUrl,
+          latitud: datos.latitud,
+          longitud: datos.longitud,
           estadoId: datos.estadoId,
           ...datosAlta(USUARIO_SISTEMA_ID),
         },
@@ -156,6 +168,12 @@ export type DatosReactivarCuenta = Partial<
     | 'googleId'
     | 'imagenUrl'
     | 'verificado'
+    | 'provincia'
+    | 'localidad'
+    | 'calleAltura'
+    | 'mapaUrl'
+    | 'latitud'
+    | 'longitud'
   >
 >;
 

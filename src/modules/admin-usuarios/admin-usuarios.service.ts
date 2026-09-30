@@ -1,6 +1,7 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_API, ROL_DB, rolApiADb, rolesDbAApi } from '../../shared/roles';
+import { etiquetaUbicacion } from '../../shared/ubicacion';
 import type {
   AltaRefugioBody,
   FiltrosRefugios,
@@ -31,7 +32,12 @@ function aRefugioDto(refugio: RefugioAdmin) {
   return {
     id: refugio.id,
     nombre: refugio.nombre,
-    direccion: refugio.direccion,
+    // Texto de la dirección estructurada, para no romper a los consumidores que ya mostraban
+    // `direccion` (spec 002). El refugio ya no guarda un texto libre aparte.
+    direccion: etiquetaUbicacion(refugio),
+    provincia: refugio.provincia,
+    localidad: refugio.localidad,
+    calleAltura: refugio.calleAltura,
     telefono: refugio.telefono,
     email: refugio.email,
     descripcion: refugio.descripcion,
