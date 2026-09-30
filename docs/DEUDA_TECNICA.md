@@ -48,7 +48,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 18 | Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones | Media | backend |
 | 19 | Pausar o finalizar una publicación no toca sus solicitudes abiertas | Media | backend |
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
-| 21 | La ubicación es texto libre: no hay catálogo de Provincia/Localidad | Media | ambos |
+| 21 | El catálogo de Provincia/Localidad vive sólo en el cliente, y la publicación sigue con ubicación en texto libre | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
 | 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
 | 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
@@ -471,22 +471,31 @@ correr el seed sobre una base vacía.
 
 ---
 
-## 21. La ubicación es texto libre: no hay catálogo de Provincia/Localidad — Media
+## 21. El catálogo de Provincia/Localidad vive sólo en el cliente, y la publicación sigue con ubicación en texto libre — Media
+
+> Antes: «La ubicación es texto libre: no hay catálogo de Provincia/Localidad». Se achicó el
+> 2026-09-30.
 
 **Qué pasa.** `REQUISITOS.md` y `MODELO_DATOS.md` piden filtrar por ubicación administrativa
-(Provincia/Localidad), pero no existe ese catálogo. Hoy la ubicación es texto libre en tres
-lugares: el perfil (`usuario_ubicacion`), la publicación (`publicacion_ubicacion`) y el aviso
-de animal perdido (`animal_perdido_ubicacion`, spec 020). En el portal de perdidos el filtro
-de selección múltiple se arma con las ubicaciones ya cargadas
-(`GET /animales-perdidos/ubicaciones`) y compara sin distinguir mayúsculas, pero sí acentos:
-"Maipu" y "Maipú" son dos opciones distintas, y un error de tipeo crea una opción nueva.
+(Provincia/Localidad). Desde el Módulo 11 el perfil del usuario y el del refugio la cargan con
+selectores de provincia y localidad que salen de un catálogo de georef **embebido en el
+cliente** (`apps/mobile/constants/Provincias.ts`), y se guardan como texto. El aviso de animal
+perdido (spec 020) pasó al mismo criterio el 2026-09-30 (`animal_perdido_provincia` /
+`_localidad`, más una referencia libre), con el filtro del portal armado sólo con los lugares
+que tienen avisos. Lo que queda:
 
-**Por qué quedó así.** Decisión de equipo del 2026-09-29: el catálogo se quiere definir una
-sola vez para toda la app (también lo necesita HU-11.3) y aplicarlo después en cada lugar.
+- **El backend no conoce el catálogo:** no valida que la provincia y la localidad existan, así
+  que otro cliente (o un pedido a mano) puede guardar cualquier texto.
+- **La publicación sigue con `publicacion_ubicacion` en texto libre.**
+- Los avisos cargados con el primer corte de HU-13.1 quedaron con su texto libre en
+  `localidad` y sin provincia (ver el contrato de mascotas perdidas).
 
-**Cómo se arregla.** Modelar `Provincia` y `Localidad` (con auditoría, gestionables desde
-web-admin), sembrarlas, reemplazar las tres columnas de texto por una FK a `Localidad` con una
-migración de datos, y sacar el endpoint de ubicaciones del portal de perdidos.
+**Por qué quedó así.** Decisión de equipo: el catálogo se definió en el cliente para no
+depender de la API de georef en cada carga, y se va aplicando en cada lugar que lo necesita.
+
+**Cómo se arregla.** Llevar el catálogo al backend (tablas `Provincia` y `Localidad`
+sembradas desde georef, o al menos el mismo archivo compartido) para validar en los DTO, y
+pasar la publicación a provincia y localidad como el perfil y el aviso.
 
 ---
 

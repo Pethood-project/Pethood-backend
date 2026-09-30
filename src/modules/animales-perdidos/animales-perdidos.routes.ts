@@ -14,8 +14,14 @@ animalesPerdidosRouter.use(autenticar);
 // HU-13.1: el portal (GUI-06), paginado por cursor y con filtros por query.
 animalesPerdidosRouter.get('/', controller.listar);
 
-// Opciones del filtro por ubicación, mientras la ubicación sea texto libre.
+// Opciones del filtro por lugar: provincias con avisos y sus localidades con avisos.
 animalesPerdidosRouter.get('/ubicaciones', controller.listarUbicaciones);
+
+// Ubicar el lugar en el mapa antes de publicar (GUI-25), como la dirección del perfil: el
+// preview geocodifica provincia, localidad y referencia, y `link` lee el punto de un link de
+// Google Maps pegado a mano. Ninguno guarda nada.
+animalesPerdidosRouter.post('/lugar/preview', controller.ubicarLugar);
+animalesPerdidosRouter.post('/lugar/link', controller.leerLinkMapa);
 
 // HU-13.1: alta del aviso (GUI-25). Misma cadena de imágenes que las publicaciones: de 1 a 5
 // fotos en `fotos`, jpg/png/webp, ≤5 MB cada una, en el orden de la galería.

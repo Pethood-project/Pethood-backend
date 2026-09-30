@@ -302,8 +302,12 @@ interface DefAnimalPerdido {
   /** Obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar (HU-13.1). */
   nombre?: string;
   especie: 'Perro' | 'Gato';
-  /** Texto libre, como lo escribiría una persona (spec 020). */
-  ubicacion: string;
+  /** Del catálogo de georef, como la dirección del perfil (spec 020). Por defecto, Mendoza. */
+  provincia?: string;
+  /** Tiene que existir en el catálogo de esa provincia (`constants/Provincias.ts` del front). */
+  localidad: string;
+  /** El aclaratorio libre y opcional del lugar. */
+  referencia?: string;
   descripcion: string;
   /** De 1 a 5, en el orden de la galería: la primera es la portada. */
   imagenes: string[];
@@ -321,14 +325,17 @@ const COORDENADAS = {
   maipu: { latitud: -32.9833, longitud: -68.7833 },
   capital: { latitud: -32.8895, longitud: -68.8458 },
   lujan: { latitud: -33.0333, longitud: -68.8833 },
+  sanJuan: { latitud: -31.5375, longitud: -68.5364 },
 };
 
 /**
- * Avisos del portal de perdidos (GUI-06). Variados a propósito en estado, especie, ubicación,
- * reportante y antigüedad, para poder probar el orden, el cursor y cada filtro de verdad.
+ * Avisos del portal de perdidos (GUI-06). Variados a propósito en estado, especie, provincia,
+ * localidad, reportante y antigüedad, para poder probar el orden, el cursor y cada filtro de
+ * verdad (el de San Juan está para probar el filtro por provincia y la cercanía: queda a unos
+ * 150 km del Gran Mendoza).
  *
- * "godoy cruz" en minúscula es intencional: la ubicación es texto libre y el filtro tiene que
- * encontrarla junto con "Godoy Cruz".
+ * El seed no puede llamar al geocoder (no hay red garantizada), así que el lugar geocodificado
+ * se siembra con las mismas coordenadas aproximadas del departamento.
  */
 const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
   {
@@ -336,7 +343,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     mascota: 'thor',
     nombre: 'Thor',
     especie: 'Perro',
-    ubicacion: 'Godoy Cruz',
+    localidad: 'Godoy Cruz',
+    referencia: 'A dos cuadras de la plaza departamental',
     descripcion:
       'Thor, labrador dorado de 6 años, se escapó del patio en Godoy Cruz. Tiene collar azul ' +
       'con chapita. Es muy manso, se deja agarrar.',
@@ -349,7 +357,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
   {
     reportante: 'carla',
     especie: 'Perro',
-    ubicacion: 'Guaymallén',
+    localidad: 'Guaymallén',
+    referencia: 'Plaza departamental',
     descripcion:
       'Encontré un perro mestizo marrón, mediano, sin collar, en la plaza de Guaymallén. ' +
       'Está bien alimentado, seguro tiene dueño. Lo tengo en casa.',
@@ -362,7 +371,7 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     reportante: 'elena',
     nombre: 'Luna',
     especie: 'Gato',
-    ubicacion: 'Las Heras',
+    localidad: 'Las Heras',
     descripcion: 'Gata gris atigrada perdida en Las Heras. Ya apareció, gracias a todos.',
     imagenes: [foto('photo-1518791841217-8f162f1e1131')],
     ...COORDENADAS.lasHeras,
@@ -373,7 +382,7 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     reportante: 'martin',
     nombre: 'Rocco',
     especie: 'Perro',
-    ubicacion: 'Maipú',
+    localidad: 'Maipú',
     descripcion:
       'Rocco, beagle tricolor de 3 años. Se asustó con la pirotecnia y saltó el paredón. ' +
       'Responde a su nombre y le encanta la pelota.',
@@ -386,7 +395,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     reportante: 'lucia',
     nombre: 'Michi',
     especie: 'Gato',
-    ubicacion: 'Ciudad de Mendoza',
+    localidad: 'Mendoza',
+    referencia: 'Calle Belgrano',
     descripcion:
       'Gato naranja castrado de 4 años, con collar rojo y cascabel. Nunca sale a la calle, ' +
       'debe estar escondido y asustado cerca de calle Belgrano.',
@@ -398,7 +408,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
   {
     reportante: 'sofia',
     especie: 'Gato',
-    ubicacion: 'Luján de Cuyo',
+    localidad: 'Chacras de Coria',
+    referencia: 'Entrada de Chacras',
     descripcion:
       'Encontré una gatita tricolor muy chiquita, de unos 2 meses, en la entrada de Chacras. ' +
       'La tengo en casa con comida y abrigo.',
@@ -412,7 +423,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     // El nombre sale de la chapita: un aviso "Encontrado" también puede tenerlo.
     nombre: 'Rocky',
     especie: 'Perro',
-    ubicacion: 'Maipú',
+    localidad: 'Maipú',
+    referencia: 'Ruta 60',
     descripcion:
       'Perro grande negro con una chapita que dice Rocky, sin teléfono. Andaba solo por la ' +
       'ruta 60. Lo tengo en el patio de casa.',
@@ -425,7 +437,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     // Un miembro de refugio también puede publicar: el aviso es de la persona.
     reportante: 'bruno',
     especie: 'Perro',
-    ubicacion: 'Las Heras',
+    localidad: 'Las Heras',
+    referencia: 'Frente al refugio Patitas',
     descripcion:
       'Perrita mestiza blanca con manchas marrones, muy dócil, apareció en la puerta del ' +
       'refugio. Está sana y la estamos cuidando hasta encontrar a su familia.',
@@ -438,7 +451,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     reportante: 'carla',
     nombre: 'Pancho',
     especie: 'Perro',
-    ubicacion: 'godoy cruz',
+    localidad: 'Godoy Cruz',
+    referencia: 'Barrio Bombal',
     descripcion:
       'Caniche toy blanco de 10 años, un poco sordo. Se perdió en el barrio Bombal. Necesita ' +
       'su medicación para el corazón, cualquier dato sirve.',
@@ -451,7 +465,7 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     reportante: 'ana',
     nombre: 'Nina',
     especie: 'Gato',
-    ubicacion: 'Guaymallén',
+    localidad: 'Guaymallén',
     descripcion:
       'Gata negra de ojos verdes, se escapó por la ventana. ¡Ya volvió a casa, gracias por compartir!',
     imagenes: [foto(FOTOS_GATO[1]!)],
@@ -463,7 +477,7 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
     reportante: 'elena',
     nombre: 'Toby',
     especie: 'Perro',
-    ubicacion: 'Luján de Cuyo',
+    localidad: 'Vistalba',
     descripcion:
       'Toby es un mestizo marrón de pelo corto, 5 años, con la oreja izquierda caída. Se ' +
       'perdió en Vistalba el domingo a la tarde.',
@@ -475,7 +489,8 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
   {
     reportante: 'martin',
     especie: 'Gato',
-    ubicacion: 'Ciudad de Mendoza',
+    localidad: 'Mendoza',
+    referencia: 'Quinta Sección',
     descripcion:
       'Gato gris y blanco adulto, muy cariñoso, entró a mi departamento en la Quinta Sección. ' +
       'Parece que tiene dueño porque está castrado.',
@@ -487,12 +502,28 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
   {
     reportante: 'lucia',
     especie: 'Perro',
-    ubicacion: 'Maipú',
+    localidad: 'Coquimbito',
     descripcion: 'Encontramos un cachorro marrón en Coquimbito y ya apareció su familia. ¡Gracias!',
     imagenes: [foto(FOTOS_PERRO[3]!)],
     ...COORDENADAS.maipu,
     estado: 'Resuelto',
     diasAtras: 40,
+  },
+  {
+    // Fuera de Mendoza, para el filtro por provincia y el de cercanía.
+    reportante: 'sofia',
+    nombre: 'Coco',
+    especie: 'Perro',
+    provincia: 'San Juan',
+    localidad: 'Rivadavia',
+    referencia: 'Cerca del parque de Mayo',
+    descripcion:
+      'Coco es un salchicha negro y fuego de 8 años. Se asustó con una tormenta mientras ' +
+      'estábamos de visita en San Juan y salió corriendo.',
+    imagenes: [foto(FOTOS_PERRO[7]!)],
+    ...COORDENADAS.sanJuan,
+    estado: 'Perdido',
+    diasAtras: 5,
   },
 ];
 
@@ -503,6 +534,20 @@ const ANIMALES_PERDIDOS: DefAnimalPerdido[] = [
 function fechaSucesoDe(def: DefAnimalPerdido): Date {
   const fecha = haceDias(def.diasAtras + 1);
   return new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+}
+
+/**
+ * El lugar del aviso. El "geocodificado" son las coordenadas aproximadas del departamento: el
+ * seed no llama al geocoder.
+ */
+function lugarDe(def: DefAnimalPerdido) {
+  return {
+    provincia: def.provincia ?? 'Mendoza',
+    localidad: def.localidad,
+    referencia: def.referencia ?? null,
+    lugarLatitud: def.latitud,
+    lugarLongitud: def.longitud,
+  };
 }
 
 async function seedAnimalesPerdidos(catalogos: Catalogos, actores: Actores, mascotas: Mascotas) {
@@ -525,7 +570,7 @@ async function seedAnimalesPerdidos(catalogos: Catalogos, actores: Actores, masc
       select: {
         id: true,
         nombre: true,
-        ubicacion: true,
+        provincia: true,
         especieId: true,
         fechaSuceso: true,
         imagenes: true,
@@ -533,13 +578,15 @@ async function seedAnimalesPerdidos(catalogos: Catalogos, actores: Actores, masc
     });
 
     if (existente) {
-      // Los avisos sembrados antes de HU-13.1 no tienen nombre, ubicación, especie, fecha del
-      // suceso ni galería (la migración sólo les copió la portada): se completan sin pisar lo
-      // que ya tenga valor.
+      // Los avisos sembrados antes no tienen nombre, lugar estructurado, especie, fecha del
+      // suceso o galería (según de qué versión vengan): se completan sin pisar lo que ya tenga
+      // valor. El lugar se completa entero cuando falta la provincia: la migración que sacó el
+      // texto libre sólo pudo conservar la localidad, y no siempre coincide con el catálogo.
       const faltanFotos = existente.imagenes.length < def.imagenes.length;
+      const faltaLugar = existente.provincia === null;
 
       if (
-        existente.ubicacion === null ||
+        faltaLugar ||
         existente.especieId === null ||
         existente.fechaSuceso === null ||
         faltanFotos
@@ -548,7 +595,7 @@ async function seedAnimalesPerdidos(catalogos: Catalogos, actores: Actores, masc
           where: { id: existente.id },
           data: {
             nombre: existente.nombre ?? def.nombre ?? null,
-            ubicacion: existente.ubicacion ?? def.ubicacion,
+            ...(faltaLugar ? lugarDe(def) : {}),
             especieId: existente.especieId ?? especieId,
             fechaSuceso: existente.fechaSuceso ?? fechaSucesoDe(def),
             ...(faltanFotos ? { imagenes: def.imagenes, imagenUrl: def.imagenes[0]! } : {}),
@@ -565,7 +612,7 @@ async function seedAnimalesPerdidos(catalogos: Catalogos, actores: Actores, masc
         descripcion: def.descripcion,
         imagenUrl: def.imagenes[0]!,
         imagenes: def.imagenes,
-        ubicacion: def.ubicacion,
+        ...lugarDe(def),
         fechaSuceso: fechaSucesoDe(def),
         latitud: def.latitud,
         longitud: def.longitud,

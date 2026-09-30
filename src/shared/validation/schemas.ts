@@ -161,7 +161,7 @@ export function coordenadaSchema(opciones: { min: number; max: number; etiqueta:
 
 /**
  * Textos libres de un filtro de selección múltiple, un parámetro por valor
- * (`?ubicaciones=Maipú&ubicaciones=Godoy%20Cruz`). Ausente → `[]`, "sin filtro".
+ * (`?localidades=Maipú&localidades=Godoy%20Cruz`). Ausente → `[]`, "sin filtro".
  */
 export function listaDeTextosSchema(opciones: {
   max: number;
