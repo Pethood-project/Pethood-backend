@@ -53,6 +53,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
 | 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
 | 25 | Reseña quedó sin flujo de reporte ni notificaciones | Baja | ambos |
+| 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -499,6 +500,7 @@ que arma el cliente, no el usuario, así que en la práctica no se ve.
 **Cómo se arregla.** Usar `limitePaginaSchema` de `shared/validation/schemas.ts` (creado en la
 spec 020), que ya da el error en español. `idSchema` tenía el mismo problema cuando faltaba un
 id y quedó corregido para todos los módulos en esa misma spec.
+
 ---
 
 ## 23. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
@@ -581,3 +583,21 @@ recibir una reseña). Esas HUs son de los módulos 3 y 4 y todavía no están im
 **Cómo se arregla.** Cuando se haga el Módulo 3, agregar la FK polimórfica o `resena_id` a
 `Reporte_Problema`; cuando se haga el Módulo 4, enganchar el evento de alta de reseña al motor
  de notificaciones.
+
+## 26. Las vacunas son un enum: el admin no puede agregarlas desde el panel — Baja
+
+**Qué pasa.** `TipoVacuna` es un enum de `schema.prisma` y el plan de vacunación vive en
+`src/shared/vacunas.ts` (spec 019). Es a propósito: el código ramifica por el valor (qué
+especie la admite, color de la medalla en la app). Por eso `GET /admin/catalogos/vacunas` es
+solo lectura y `POST`/`PUT`/baja responden `403 OPERACION_NO_PERMITIDA`. Es la única excepción
+del ABM de catálogos (`docs/api-admin-catalogos.md`).
+
+**Cuándo migrar a tabla.** Si aparecen otras especies (conejos, aves), vacunas por región, o
+alguien que no sea del equipo tiene que gestionarlas. Mientras el plan de perros y gatos siga
+igual, agregar una vacuna es una migración y un commit.
+
+**Cómo se arregla.** Tabla `Vacuna` con nombre y descripción, más `VacunaEspecie` (N:M, porque
+`ANTIRRABICA` sirve a perros y gatos). Migrar `historia_clinica.tipoVacuna` a `vacunaId`
+conservando un código estable, para no romper `tipo` en los endpoints ni las medallas de
+mobile (definir color por defecto o campo `color`). Toca historia clínica, alta de mascota,
+publicaciones, catálogos y la app: hacerlo como cambio aparte.

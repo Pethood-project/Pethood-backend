@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { authRouter } from '../modules/auth/auth.routes';
 import { adminUsuariosRouter } from '../modules/admin-usuarios/admin-usuarios.routes';
+import { adminCatalogosRouter } from '../modules/admin-catalogos/admin-catalogos.routes';
+import { adminMascotasRouter } from '../modules/admin-mascotas/admin-mascotas.routes';
+import { adminPublicacionesRouter } from '../modules/admin-publicaciones/admin-publicaciones.routes';
+import { adminSolicitudesRouter } from '../modules/admin-solicitudes/admin-solicitudes.routes';
 import { animalesPerdidosRouter } from '../modules/animales-perdidos/animales-perdidos.routes';
 import { usuariosRouter } from '../modules/usuarios/usuarios.routes';
 import { catalogosRouter } from '../modules/catalogos/catalogos.routes';
@@ -26,6 +30,10 @@ apiRouter.get('/health', (_req, res) => {
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/admin', dashboardAdminRouter);
 apiRouter.use('/admin', adminUsuariosRouter);
+apiRouter.use('/admin', adminPublicacionesRouter);
+apiRouter.use('/admin', adminMascotasRouter);
+apiRouter.use('/admin', adminSolicitudesRouter);
+apiRouter.use('/admin', adminCatalogosRouter);
 apiRouter.use('/refugio', dashboardRefugioRouter);
 apiRouter.use('/refugio', perfilRefugioRouter); // spec 017
 apiRouter.use('/usuarios', usuariosRouter);

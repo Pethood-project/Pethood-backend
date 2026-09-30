@@ -12,7 +12,7 @@ import { emailSchema, telefonoSchema } from '../auth/auth.dto';
 export const PAGINA_LIMITE_POR_DEFECTO = 20;
 export const PAGINA_LIMITE_MAXIMO = 50;
 
-const paginacionSchema = {
+export const paginacionSchema = {
   page: z.coerce.number().int().positive('La página no es válida').optional().default(1),
   limit: z.coerce
     .number()
@@ -24,7 +24,7 @@ const paginacionSchema = {
 };
 
 /** `'true'`/`'false'` en query string; ausente = sin filtro. */
-const banderaOpcionalSchema = z
+export const banderaOpcionalSchema = z
   .enum(['true', 'false'])
   .optional()
   .transform((valor) => (valor === undefined ? undefined : valor === 'true'));

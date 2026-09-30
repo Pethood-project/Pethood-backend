@@ -379,7 +379,7 @@ function validarOrdenDeImagenes(
 }
 
 /** De qué estado sale y a cuál va cada acción manual. */
-const TRANSICIONES: Record<
+export const TRANSICIONES: Record<
   AccionEstadoPublicacion,
   { desde: string[]; hacia: NombreEstadoPublicacion; error: string }
 > = {
