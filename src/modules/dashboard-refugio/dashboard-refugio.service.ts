@@ -288,7 +288,7 @@ const FILAS_POR_PAGINA = 500;
 const HEADERS_EXPORT: Record<EntidadExportableRefugio, string[]> = {
   mascotas: ['id', 'nombre', 'especie', 'raza', 'estado', 'fechaAlta'],
   solicitudes: ['id', 'mascota', 'tipoSolicitud', 'estado', 'fechaAlta'],
-  donaciones: ['id', 'donante', 'campania', 'monto', 'fechaAlta'],
+  donaciones: ['id', 'donante', 'campania', 'monto', 'estado', 'fechaAlta'],
 };
 
 /** Snapshot, no depende del período — mismo criterio que mascotasPorEstado en obtenerDashboard. */
@@ -354,6 +354,7 @@ async function* filasDonaciones(refugioId: number, desde: Date, hasta: Date) {
         `${d.usuario.nombre} ${d.usuario.apellido}`,
         d.campania.titulo,
         d.monto.toString(),
+        d.estadoDonacion.nombre,
         d.fechaAlta,
       ];
     }
