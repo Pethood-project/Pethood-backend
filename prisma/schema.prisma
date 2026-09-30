@@ -973,15 +973,20 @@ model Donacion {
 
 // Aviso de un animal perdido o encontrado (spec 020, HU-13.1).
 //
-// `nombre`, `ubicacion` y `especieId` no vienen del diagrama de clases: los pide la HU (el
-// nombre de hasta 30 caracteres y los filtros por localidad y especie). Son nullables en base,
-// igual que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la impone el DTO y el
+// `nombre`, el lugar y `especieId` no vienen del diagrama de clases: los pide la HU (el nombre
+// de hasta 30 caracteres y los filtros por localidad y especie). Son nullables en base, igual
+// que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la impone el DTO y el
 // servicio: así no invalidan los avisos cargados antes y no bloquean otros flujos.
 //
 // - `nombre`: obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar, porque
 //   quien encuentra un animal no sabe cómo se llama.
-// - `ubicacion`: dónde se perdió o se encontró, en texto libre como `usuario_ubicacion`. Es
-//   PROVISORIO hasta que exista el catálogo de Provincia/Localidad (ver DEUDA_TECNICA.md).
+// - `provincia`, `localidad` y `referencia`: dónde se perdió o se encontró, con el mismo
+//   criterio que la dirección del perfil (Módulo 11): provincia y localidad salen del catálogo
+//   de georef del cliente (`constants/Provincias.ts`) y se guardan como texto; `referencia` es
+//   el aclaratorio libre y opcional ("cerca de la plaza Italia").
+// - `lugarLatitud`/`lugarLongitud`: el lugar geocodificado con `node-geocoder` al publicar
+//   (shared/geocoding.ts). Son las que se exponen (distancia, link a Google Maps). Nulas si el
+//   geocoder no encontró nada.
 // - `especieId`: FK directa y no derivada de `mascotaId` → raza → especie, porque un animal
 //   encontrado no tiene Mascota asociada.
 // - `fechaSuceso`: el día en que se perdió o se encontró, que no tiene por qué ser el día en
@@ -992,7 +997,8 @@ model Donacion {
 //   la tarjeta del portal.
 //
 // `latitud`/`longitud` NO son la ubicación del animal: son las coordenadas del dispositivo al
-// momento de reportar (MODELO_DATOS.md). No se exponen en el listado.
+// momento de reportar (MODELO_DATOS.md). NUNCA se exponen: dicen dónde estaba quien reportó.
+// Sólo se usan para el filtro por cercanía de los avisos cuyo lugar no se pudo geocodificar.
 //
 // Además del índice de abajo, la tabla tiene un índice PARCIAL que Prisma no sabe expresar y
 // vive en `migrations/20260929120000_hu131_animal_perdido_nombre_ubicacion_especie`:
@@ -1004,7 +1010,11 @@ model AnimalPerdido {
   descripcion           String    @map("animal_perdido_descripcion")
   imagenUrl             String    @map("animal_perdido_imagen_url")
   imagenes              String[]  @map("animal_perdido_imagenes")
-  ubicacion             String?   @map("animal_perdido_ubicacion")
+  provincia             String?   @map("animal_perdido_provincia")
+  localidad             String?   @map("animal_perdido_localidad")
+  referencia            String?   @map("animal_perdido_referencia")
+  lugarLatitud          Float?    @map("animal_perdido_lugar_latitud")
+  lugarLongitud         Float?    @map("animal_perdido_lugar_longitud")
   fechaSuceso           DateTime? @map("animal_perdido_fecha_suceso")
   latitud               Float     @map("animal_perdido_latitud")
   longitud              Float     @map("animal_perdido_longitud")
@@ -1027,6 +1037,8 @@ model AnimalPerdido {
   estadoAnimalPerdido EstadoAnimalPerdido @relation(fields: [estadoAnimalPerdidoId], references: [id])
 
   @@index([especieId])
+  // Filtro por provincia y localidad del portal.
+  @@index([provincia, localidad])
   @@map("animal_perdido")
 }
 

@@ -108,7 +108,7 @@ export type ResultadoListaTextos =
  *
  * A diferencia de los ids y los valores de catálogo, NO se separan por coma: un texto libre
  * puede tenerla ("Godoy Cruz, Mendoza"). Se manda un parámetro por valor
- * (`?ubicaciones=Maipú&ubicaciones=Godoy%20Cruz`), que Express entrega como arreglo; uno solo
+ * (`?localidades=Maipú&localidades=Godoy%20Cruz`), que Express entrega como arreglo; uno solo
  * llega como string.
  *
  * Ausente o vacía es "sin filtro" (lista vacía). Hace trim, descarta los vacíos y los

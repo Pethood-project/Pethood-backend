@@ -6,12 +6,24 @@ import type {
 } from '../../../src/modules/animales-perdidos/animales-perdidos.dto';
 import * as repo from '../../../src/modules/animales-perdidos/animales-perdidos.repository';
 import * as service from '../../../src/modules/animales-perdidos/animales-perdidos.service';
+import { resolverCoordenadasDeMapsUrl } from '../../../src/shared/geo';
+import { geocodificarLugar } from '../../../src/shared/geocoding';
 import { registrarAuditoria } from '../../../src/shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../../src/shared/storage';
 
 vi.mock('../../../src/modules/animales-perdidos/animales-perdidos.repository');
 vi.mock('../../../src/shared/storage');
 vi.mock('../../../src/shared/logAuditoria');
+// Sólo el geocoder (red): los armadores de links de Maps son puros y se prueban de verdad.
+vi.mock('../../../src/shared/geocoding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/shared/geocoding')>()),
+  geocodificarLugar: vi.fn(),
+}));
+// Ídem con los links cortos de Maps, que se resuelven por red. La distancia sigue siendo real.
+vi.mock('../../../src/shared/geo', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/shared/geo')>()),
+  resolverCoordenadasDeMapsUrl: vi.fn(),
+}));
 
 const USUARIO = 7;
 const OTRO = 99;
@@ -27,22 +39,29 @@ const URL_FOTO = '/api/v1/archivos/perdidos/x.jpg';
 
 const FECHA_SUCESO = new Date(2026, 8, 18);
 
+/** El lugar geocodificado: la plaza de Godoy Cruz. */
+const LUGAR = { latitud: -32.9264, longitud: -68.8447 };
+/** El teléfono de quien reportó, en otro lado: nunca tiene que aparecer en la respuesta. */
+const DISPOSITIVO = { latitud: -32.8, longitud: -68.7 };
+
 const DATOS: CrearAvisoDto = {
   nombre: 'Thor',
   descripcion: 'Labrador dorado con collar azul.',
-  ubicacion: 'Godoy Cruz',
+  provincia: 'Mendoza',
+  localidad: 'Godoy Cruz',
+  referencia: 'Barrio Bombal',
   fechaSuceso: FECHA_SUCESO,
   estadoId: ESTADOS.Perdido.id,
   especieId: 1,
-  latitud: -32.9264,
-  longitud: -68.8447,
+  ...DISPOSITIVO,
 };
 
 const FILTROS: FiltrosAvisosDto = {
   limite: 2,
   estados: [],
   especies: [],
-  ubicaciones: [],
+  provincias: [],
+  localidades: [],
 };
 
 /** Fila tal como la devuelve el repository, con sus relaciones ya resueltas. */
@@ -54,9 +73,12 @@ function aviso(
     nombre?: string | null;
     especie?: { id: number; nombre: string } | null;
     imagenes?: string[];
+    /** `null` = el geocoder no encontró el lugar. */
+    lugar?: { latitud: number; longitud: number } | null;
   } = {},
 ): repo.AvisoConRelaciones {
   const reportanteId = opciones.reportanteId ?? OTRO;
+  const lugar = opciones.lugar === undefined ? LUGAR : opciones.lugar;
 
   return {
     id,
@@ -64,7 +86,11 @@ function aviso(
     descripcion: 'Labrador dorado con collar azul.',
     imagenUrl: URL_FOTO,
     imagenes: opciones.imagenes ?? [URL_FOTO],
-    ubicacion: 'Godoy Cruz',
+    provincia: 'Mendoza',
+    localidad: 'Godoy Cruz',
+    referencia: 'Barrio Bombal',
+    lugarLatitud: lugar?.latitud ?? null,
+    lugarLongitud: lugar?.longitud ?? null,
     fechaSuceso: FECHA_SUCESO,
     fechaAlta: new Date('2026-09-20T15:00:00.000Z'),
     fechaResuelto: null,
@@ -94,6 +120,7 @@ beforeEach(() => {
   vi.mocked(repo.buscarEspecie).mockResolvedValue({ id: 1 });
   vi.mocked(repo.crear).mockResolvedValue(aviso(10, { reportanteId: USUARIO }));
   vi.mocked(guardarImagenes).mockResolvedValue([URL_FOTO]);
+  vi.mocked(geocodificarLugar).mockResolvedValue(LUGAR);
 });
 
 describe('crearAviso', () => {
@@ -106,10 +133,13 @@ describe('crearAviso', () => {
         nombre: 'Thor',
         descripcion: DATOS.descripcion,
         imagenes: [URL_FOTO],
-        ubicacion: 'Godoy Cruz',
+        provincia: 'Mendoza',
+        localidad: 'Godoy Cruz',
+        referencia: 'Barrio Bombal',
+        lugarLatitud: LUGAR.latitud,
+        lugarLongitud: LUGAR.longitud,
         fechaSuceso: FECHA_SUCESO,
-        latitud: -32.9264,
-        longitud: -68.8447,
+        ...DISPOSITIVO,
         especieId: 1,
         estadoAnimalPerdidoId: ESTADOS.Perdido.id,
       },
@@ -119,6 +149,57 @@ describe('crearAviso', () => {
       expect.objectContaining({ accion: 'CREAR', entidad: 'AnimalPerdido', entidadId: 10 }),
     );
     expect(creado).toMatchObject({ id: 10, esPropio: true, estado: ESTADOS.Perdido });
+  });
+
+  it('geocodifica el lugar con provincia, localidad y referencia', async () => {
+    await service.crearAviso(DATOS, { usuarioId: USUARIO, archivos: [ARCHIVO] });
+
+    expect(geocodificarLugar).toHaveBeenCalledWith({
+      provincia: 'Mendoza',
+      localidad: 'Godoy Cruz',
+      referencia: 'Barrio Bombal',
+    });
+  });
+
+  it('con el punto que el usuario vio en el mapa, no vuelve a geocodificar', async () => {
+    const elegido = { lugarLatitud: -32.93, lugarLongitud: -68.85 };
+
+    await service.crearAviso({ ...DATOS, ...elegido }, { usuarioId: USUARIO, archivos: [ARCHIVO] });
+
+    expect(geocodificarLugar).not.toHaveBeenCalled();
+    expect(vi.mocked(repo.crear).mock.calls[0]![0]).toMatchObject(elegido);
+    expect(registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({ detalle: 'estado=Perdido lugar=elegido' }),
+    );
+  });
+
+  it('publica igual si el geocoder no encuentra el lugar', async () => {
+    vi.mocked(geocodificarLugar).mockResolvedValue(null);
+    vi.mocked(repo.crear).mockResolvedValue(aviso(10, { reportanteId: USUARIO, lugar: null }));
+
+    const creado = await service.crearAviso(DATOS, { usuarioId: USUARIO, archivos: [ARCHIVO] });
+
+    expect(vi.mocked(repo.crear).mock.calls[0]![0]).toMatchObject({
+      lugarLatitud: null,
+      lugarLongitud: null,
+    });
+    // Sin coordenadas del lugar, el link busca el texto: nunca usa las del teléfono.
+    expect(creado.mapaUrl).toBe(
+      'https://www.google.com/maps/search/?api=1&query=' +
+        encodeURIComponent('Barrio Bombal, Godoy Cruz, Mendoza, Argentina'),
+    );
+  });
+
+  it('muestra el lugar con el formato de la dirección del perfil', async () => {
+    const creado = await service.crearAviso(DATOS, { usuarioId: USUARIO, archivos: [ARCHIVO] });
+
+    expect(creado).toMatchObject({
+      ubicacion: 'Barrio Bombal, Godoy Cruz - Mendoza',
+      provincia: 'Mendoza',
+      localidad: 'Godoy Cruz',
+      referencia: 'Barrio Bombal',
+      mapaUrl: `https://www.google.com/maps?q=${LUGAR.latitud},${LUGAR.longitud}`,
+    });
   });
 
   it('guarda varias fotos en el orden recibido y devuelve la galería', async () => {
@@ -145,11 +226,28 @@ describe('crearAviso', () => {
     expect(creado.fechaSuceso).toBe('2026-09-18');
   });
 
+  it('devuelve la distancia desde el teléfono de quien publica, como la vería en el portal', async () => {
+    const creado = await service.crearAviso(DATOS, { usuarioId: USUARIO, archivos: [ARCHIVO] });
+
+    // Del DISPOSITIVO a la plaza de Godoy Cruz, redondeado a un decimal.
+    expect(creado.distanciaKm).toBe(19.5);
+  });
+
+  it('sin lugar geocodificado el alta no devuelve distancia', async () => {
+    vi.mocked(geocodificarLugar).mockResolvedValue(null);
+    vi.mocked(repo.crear).mockResolvedValue(aviso(10, { reportanteId: USUARIO, lugar: null }));
+
+    const creado = await service.crearAviso(DATOS, { usuarioId: USUARIO, archivos: [ARCHIVO] });
+
+    expect(creado.distanciaKm).toBeNull();
+  });
+
   it('no expone las coordenadas del reportante', async () => {
     const creado = await service.crearAviso(DATOS, { usuarioId: USUARIO, archivos: [ARCHIVO] });
 
     expect(creado).not.toHaveProperty('latitud');
     expect(creado).not.toHaveProperty('longitud');
+    expect(JSON.stringify(creado)).not.toContain(String(DISPOSITIVO.latitud));
   });
 
   it('exige la foto y no escribe nada sin ella', async () => {
@@ -283,16 +381,62 @@ describe('listarAvisos', () => {
         fechaDesde,
         estados: [1, 2],
         especies: [1],
-        ubicaciones: ['Maipú'],
+        provincias: ['Mendoza', 'San Juan'],
+        localidades: [{ provincia: 'Mendoza', localidad: 'Maipú' }],
       },
       USUARIO,
     );
 
     expect(repo.listar).toHaveBeenCalledWith(
-      { fechaDesde, fechaHasta: undefined, estados: [1, 2], especies: [1], ubicaciones: ['Maipú'] },
+      {
+        fechaDesde,
+        fechaHasta: undefined,
+        estados: [1, 2],
+        especies: [1],
+        provincias: ['Mendoza', 'San Juan'],
+        localidades: [{ provincia: 'Mendoza', localidad: 'Maipú' }],
+        idsCercanos: undefined,
+      },
       2,
       20,
     );
+    expect(repo.idsEnRadio).not.toHaveBeenCalled();
+  });
+
+  it('con radio, restringe el listado a los avisos cercanos', async () => {
+    vi.mocked(repo.idsEnRadio).mockResolvedValue([5, 8]);
+    vi.mocked(repo.listar).mockResolvedValue([]);
+
+    await service.listarAvisos({ ...FILTROS, ...LUGAR, radioKm: 10 }, USUARIO);
+
+    expect(repo.idsEnRadio).toHaveBeenCalledWith(LUGAR.latitud, LUGAR.longitud, 10);
+    expect(vi.mocked(repo.listar).mock.calls[0]![0]).toMatchObject({ idsCercanos: [5, 8] });
+  });
+
+  it('con la ubicación del usuario, calcula la distancia al lugar', async () => {
+    vi.mocked(repo.listar).mockResolvedValue([aviso(1)]);
+    // A unos 3,5 km al norte de la plaza de Godoy Cruz.
+    const usuario = { latitud: -32.895, longitud: -68.8447 };
+
+    const { avisos } = await service.listarAvisos({ ...FILTROS, ...usuario }, USUARIO);
+
+    expect(avisos[0]!.distanciaKm).toBe(3.5);
+  });
+
+  it('sin lugar geocodificado no muestra distancia, aunque el usuario mande su ubicación', async () => {
+    vi.mocked(repo.listar).mockResolvedValue([aviso(1, { lugar: null })]);
+
+    const { avisos } = await service.listarAvisos({ ...FILTROS, ...LUGAR }, USUARIO);
+
+    expect(avisos[0]!.distanciaKm).toBeNull();
+  });
+
+  it('sin la ubicación del usuario no hay distancia', async () => {
+    vi.mocked(repo.listar).mockResolvedValue([aviso(1)]);
+
+    const { avisos } = await service.listarAvisos(FILTROS, USUARIO);
+
+    expect(avisos[0]!.distanciaKm).toBeNull();
   });
 
   it('rechaza un cursor que no existe', async () => {
@@ -321,17 +465,57 @@ describe('listarAvisos', () => {
   });
 });
 
+describe('ubicarLugar', () => {
+  const LUGAR_FORM = { provincia: 'Mendoza', localidad: 'Godoy Cruz', referencia: 'Plaza' };
+
+  it('devuelve el link de Maps y el punto del lugar, sin guardar nada', async () => {
+    expect(await service.ubicarLugar(LUGAR_FORM)).toEqual({
+      mapaUrl: `https://www.google.com/maps?q=${LUGAR.latitud},${LUGAR.longitud}`,
+      ...LUGAR,
+    });
+    expect(geocodificarLugar).toHaveBeenCalledWith(LUGAR_FORM);
+    expect(repo.crear).not.toHaveBeenCalled();
+  });
+
+  it('si no lo encuentra, responde LUGAR_NO_UBICADO para ofrecer el link a mano', async () => {
+    vi.mocked(geocodificarLugar).mockResolvedValue(null);
+
+    expect(await codigoDeError(service.ubicarLugar(LUGAR_FORM))).toBe('LUGAR_NO_UBICADO');
+  });
+});
+
+describe('leerLinkMapa', () => {
+  const LINK = 'https://maps.app.goo.gl/abc123';
+
+  it('lee el punto del link y devuelve el link con ese punto', async () => {
+    vi.mocked(resolverCoordenadasDeMapsUrl).mockResolvedValue(LUGAR);
+
+    expect(await service.leerLinkMapa(LINK)).toEqual({
+      mapaUrl: `https://www.google.com/maps?q=${LUGAR.latitud},${LUGAR.longitud}`,
+      ...LUGAR,
+    });
+    expect(resolverCoordenadasDeMapsUrl).toHaveBeenCalledWith(LINK);
+  });
+
+  it('un link sin ubicación responde LINK_MAPA_INVALIDO', async () => {
+    vi.mocked(resolverCoordenadasDeMapsUrl).mockResolvedValue(null);
+
+    expect(await codigoDeError(service.leerLinkMapa(LINK))).toBe('LINK_MAPA_INVALIDO');
+  });
+});
+
 describe('listarUbicaciones', () => {
-  it('une las variantes de mayúsculas, descarta vacíos y ordena alfabéticamente', async () => {
+  it('agrupa las localidades con avisos por provincia, en orden alfabético', async () => {
     vi.mocked(repo.listarUbicaciones).mockResolvedValue([
-      { ubicacion: 'maipú' },
-      { ubicacion: 'Godoy Cruz' },
-      { ubicacion: 'Maipú' },
-      { ubicacion: '   ' },
-      { ubicacion: null },
-      { ubicacion: 'Ciudad de Mendoza' },
+      { provincia: 'San Juan', localidad: 'Rivadavia' },
+      { provincia: 'Mendoza', localidad: 'Maipú' },
+      { provincia: 'Mendoza', localidad: 'Godoy Cruz' },
+      { provincia: null, localidad: 'Ciudad de Mendoza' },
     ]);
 
-    expect(await service.listarUbicaciones()).toEqual(['Ciudad de Mendoza', 'Godoy Cruz', 'Maipú']);
+    expect(await service.listarUbicaciones()).toEqual([
+      { provincia: 'Mendoza', localidades: ['Godoy Cruz', 'Maipú'] },
+      { provincia: 'San Juan', localidades: ['Rivadavia'] },
+    ]);
   });
 });

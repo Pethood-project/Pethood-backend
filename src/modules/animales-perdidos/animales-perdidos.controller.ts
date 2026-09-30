@@ -1,7 +1,12 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
-import { crearAvisoSchema, filtrosAvisosSchema } from './animales-perdidos.dto';
+import {
+  crearAvisoSchema,
+  filtrosAvisosSchema,
+  leerLinkMapaSchema,
+  ubicarLugarSchema,
+} from './animales-perdidos.dto';
 import * as service from './animales-perdidos.service';
 
 /** Traduce el primer issue de Zod al formato de error de la API. */
@@ -47,7 +52,26 @@ export async function listar(req: Request, res: Response, next: NextFunction): P
   }
 }
 
-/** Opciones del filtro por ubicación (texto libre, provisorio). */
+/** Preview del lugar en el mapa, para verificarlo antes de publicar. */
+export async function ubicarLugar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json({ lugar: await service.ubicarLugar(parsearOFallar(ubicarLugarSchema, req.body)) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** El punto de un link de Google Maps pegado a mano, para corregir el lugar antes de publicar. */
+export async function leerLinkMapa(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { mapaUrl } = parsearOFallar(leerLinkMapaSchema, req.body);
+    res.json({ lugar: await service.leerLinkMapa(mapaUrl) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Opciones del filtro por lugar: provincias con avisos y sus localidades con avisos. */
 export async function listarUbicaciones(
   _req: Request,
   res: Response,

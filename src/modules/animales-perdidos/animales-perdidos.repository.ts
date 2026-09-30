@@ -3,14 +3,21 @@ import { prisma } from '../../shared/prisma';
 import { datosAlta } from '../../shared/auditoria';
 import { finDelDia, inicioDelDia } from '../../shared/validation/dates';
 
-/** Lo que pinta una tarjeta del portal, en una sola query y sin N+1. */
+/**
+ * Lo que pinta una tarjeta del portal, en una sola query y sin N+1. Las coordenadas del
+ * dispositivo NO están: nunca se exponen, y la distancia se calcula con las del lugar.
+ */
 const SELECCION_TARJETA = {
   id: true,
   nombre: true,
   descripcion: true,
   imagenUrl: true,
   imagenes: true,
-  ubicacion: true,
+  provincia: true,
+  localidad: true,
+  referencia: true,
+  lugarLatitud: true,
+  lugarLongitud: true,
   fechaSuceso: true,
   fechaAlta: true,
   fechaResuelto: true,
@@ -29,7 +36,11 @@ export interface FiltrosListado {
   fechaHasta?: Date;
   estados: number[];
   especies: number[];
-  ubicaciones: string[];
+  provincias: string[];
+  /** Pares provincia-localidad: el mismo nombre de localidad existe en varias provincias. */
+  localidades: { provincia: string; localidad: string }[];
+  /** Ids dentro del radio de cercanía, ya calculados (`idsEnRadio`). Ausente = sin radio. */
+  idsCercanos?: number[];
 }
 
 /**
@@ -38,9 +49,14 @@ export interface FiltrosListado {
  *
  * Incluye avisos en CUALQUIER estado, "Resuelto" también: la HU los quiere en el portal.
  * Sólo se excluyen los dados de baja.
+ *
+ * Provincia y localidad se comparan exactas: salen del catálogo de georef del cliente, no se
+ * escriben a mano. Como el resto, van con AND: con provincias y localidades elegidas, sólo
+ * entran esas localidades (el cliente no manda localidades de provincias que no eligió).
  */
 function whereDelListado(filtros: FiltrosListado): Prisma.AnimalPerdidoWhereInput {
-  const { fechaDesde, fechaHasta, estados, especies, ubicaciones } = filtros;
+  const { fechaDesde, fechaHasta, estados, especies, provincias, localidades, idsCercanos } =
+    filtros;
 
   return {
     fechaBaja: null,
@@ -54,15 +70,52 @@ function whereDelListado(filtros: FiltrosListado): Prisma.AnimalPerdidoWhereInpu
       : {}),
     ...(estados.length > 0 ? { estadoAnimalPerdidoId: { in: estados } } : {}),
     ...(especies.length > 0 ? { especieId: { in: especies } } : {}),
-    // Texto libre: igualdad sin distinguir mayúsculas, para que "maipú" encuentre "Maipú".
-    ...(ubicaciones.length > 0
-      ? {
-          OR: ubicaciones.map((ubicacion) => ({
-            ubicacion: { equals: ubicacion, mode: 'insensitive' as const },
-          })),
-        }
+    ...(provincias.length > 0 ? { provincia: { in: provincias } } : {}),
+    ...(localidades.length > 0
+      ? { OR: localidades.map(({ provincia, localidad }) => ({ provincia, localidad })) }
       : {}),
+    ...(idsCercanos ? { id: { in: idsCercanos } } : {}),
   };
+}
+
+/**
+ * Ids de los avisos visibles dentro del radio (km) de un punto, con la fórmula del semiverseno
+ * (Haversine), igual que el filtro por cercanía de publicaciones (HU-11.3).
+ *
+ * Se mide contra el LUGAR geocodificado y, si el geocoder no lo encontró, contra las
+ * coordenadas del dispositivo al publicar: sin ese respaldo, un aviso sin geocodificar nunca
+ * entraría en un filtro por cercanía. El `LEAST/GREATEST` evita que un error de punto flotante
+ * saque al `acos` de su dominio.
+ *
+ * Es SQL a mano porque Prisma no sabe expresar la fórmula, y va como un paso aparte que
+ * devuelve ids para que el listado siga siendo un `findMany` con cursor.
+ */
+export async function idsEnRadio(
+  latitud: number,
+  longitud: number,
+  radioKm: number,
+): Promise<number[]> {
+  const filas = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT animal_perdido_id AS id
+    FROM animal_perdido
+    WHERE animal_perdido_fecha_baja IS NULL
+      AND (
+        6371 * acos(
+          LEAST(1, GREATEST(-1,
+            cos(radians(${latitud})) *
+            cos(radians(COALESCE(animal_perdido_lugar_latitud, animal_perdido_latitud))) *
+            cos(
+              radians(COALESCE(animal_perdido_lugar_longitud, animal_perdido_longitud)) -
+              radians(${longitud})
+            ) +
+            sin(radians(${latitud})) *
+            sin(radians(COALESCE(animal_perdido_lugar_latitud, animal_perdido_latitud)))
+          ))
+        )
+      ) <= ${radioKm}
+  `;
+
+  return filas.map((fila) => fila.id);
 }
 
 /**
@@ -96,15 +149,14 @@ export function existeAviso(id: number) {
 }
 
 /**
- * Ubicaciones distintas de los avisos visibles, para armar las opciones del filtro. El
- * agrupado sin distinguir mayúsculas lo hace el servicio: Prisma no sabe agrupar por
- * `lower(...)` sin SQL a mano, y la cantidad de ubicaciones distintas es chica.
+ * Pares provincia-localidad distintos de los avisos visibles, para las opciones del filtro:
+ * así nunca se ofrece una localidad sin avisos. El agrupado por provincia lo hace el servicio.
  */
 export function listarUbicaciones() {
   return prisma.animalPerdido.findMany({
-    where: { fechaBaja: null, ubicacion: { not: null } },
-    distinct: ['ubicacion'],
-    select: { ubicacion: true },
+    where: { fechaBaja: null, provincia: { not: null }, localidad: { not: null } },
+    distinct: ['provincia', 'localidad'],
+    select: { provincia: true, localidad: true },
   });
 }
 
@@ -135,7 +187,12 @@ export function crear(
     nombre: string | null;
     descripcion: string;
     imagenes: string[];
-    ubicacion: string;
+    provincia: string;
+    localidad: string;
+    referencia: string | null;
+    /** El lugar geocodificado, o `null` si el geocoder no lo encontró. */
+    lugarLatitud: number | null;
+    lugarLongitud: number | null;
     fechaSuceso: Date;
     latitud: number;
     longitud: number;
