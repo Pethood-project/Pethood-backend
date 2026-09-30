@@ -217,6 +217,25 @@ model EstadoCampania {
   @@map("estado_campania")
 }
 
+// Estado de una donación declarada (spec 021, HU-12.3): Pendiente hasta que el refugio la
+// aplica (Realizada, suma al progreso) o la rechaza (Cancelada, no suma).
+model EstadoDonacion {
+  id          Int     @id @default(autoincrement()) @map("estado_donacion_id")
+  nombre      String  @unique @map("estado_donacion_nombre")
+  descripcion String? @map("estado_donacion_descripcion")
+
+  usuarioAlta         Int       @map("estado_donacion_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("estado_donacion_fecha_alta")
+  usuarioModificacion Int?      @map("estado_donacion_usuario_modificacion")
+  fechaModificacion   DateTime? @map("estado_donacion_fecha_modificacion")
+  usuarioBaja         Int?      @map("estado_donacion_usuario_baja")
+  fechaBaja           DateTime? @map("estado_donacion_fecha_baja")
+
+  donaciones Donacion[]
+
+  @@map("estado_donacion")
+}
+
 model EstadoAnimalPerdido {
   id          Int     @id @default(autoincrement()) @map("estado_animal_perdido_id")
   nombre      String  @unique @map("estado_animal_perdido_nombre")
@@ -887,6 +906,9 @@ model Campania {
   fechaInicio      DateTime @map("campania_fecha_inicio")
   fechaFin         DateTime @map("campania_fecha_fin")
   imagenUrl        String?  @map("campania_imagen_url")
+  // Datos para transferir (spec 021): al menos uno de los dos, lo exige el DTO.
+  alias            String?  @map("campania_alias")
+  cbu              String?  @map("campania_cbu")
   refugioId        Int      @map("refugio_id")
   estadoCampaniaId Int      @map("estado_campania_id")
 
@@ -902,6 +924,7 @@ model Campania {
 
   donaciones Donacion[]
 
+  @@index([refugioId, estadoCampaniaId])
   @@map("campania")
 }
 
@@ -910,6 +933,10 @@ model Donacion {
   monto      Decimal @map("donacion_monto") @db.Decimal(12, 2)
   campaniaId Int     @map("campania_id")
   usuarioId  Int     @map("usuario_id")
+
+  estadoDonacionId Int     @map("estado_donacion_id")
+  /// NO_RECIBIDA | MONTO_NO_COINCIDE. Sólo en una donación Cancelada.
+  motivoRechazo    String? @map("donacion_motivo_rechazo")
 
   usuarioAlta         Int       @map("donacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("donacion_fecha_alta")
@@ -921,6 +948,9 @@ model Donacion {
   campania Campania @relation(fields: [campaniaId], references: [id])
   usuario  Usuario  @relation(fields: [usuarioId], references: [id])
 
+  estadoDonacion EstadoDonacion @relation(fields: [estadoDonacionId], references: [id])
+
+  @@index([campaniaId, estadoDonacionId])
   @@map("donacion")
 }
 

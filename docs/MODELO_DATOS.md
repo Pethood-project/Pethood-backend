@@ -29,6 +29,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 - **Estado_Refugio** (`estado_refugio_id PK`).
 - **Estado_Solicitud** (`estado_solicitud_id PK`).
 - **Estado_Campaña** (`estado_campaña_id PK`) — valores: Inactiva, Activa, Finalizada, Cancelada.
+- **Estado_Donacion** (`estado_donacion_id PK`) — valores: Pendiente, Realizada, Cancelada. Agregado fuera del diagrama de clases (spec 021).
 - **Estado_Animal_Perdido** (`estado_animal_perdido_id PK`) — incluye "Encontrado/Perdido/Resuelto".
 - **Tipo_Solicitud** (`tipo_solicitud_id PK`) — incluye `tipo_solicitud_secuencia_dias` (usado para ventanas de tiempo, ej. la cancelación automática a los 6 meses).
 - **Rol** (`rol_id PK`) — Administrador, Refugio, Adoptante.
@@ -222,7 +223,9 @@ Representa el hogar de tránsito de un usuario/adoptante — no es una entidad d
 
 ### Campaña
 
-`campaña_id PK`, `campaña_titulo`, `campaña_descripcion`, `campaña_objetivo`, `campaña_fechaInicio`, `campaña_fechaFin`, `campaña_imagen_url`, FK `refugio_id FK NOT NULL`, FK `estado_campaña_id FK NOT NULL`.
+`campaña_id PK`, `campaña_titulo`, `campaña_descripcion`, `campaña_objetivo`, `campaña_fechaInicio`, `campaña_fechaFin`, `campaña_imagen_url`, `campaña_alias`, `campaña_cbu`, FK `refugio_id FK NOT NULL`, FK `estado_campaña_id FK NOT NULL`.
+
+**Campos agregados fuera del diagrama de clases (2026-09-30, spec 021):** `campaña_alias` y `campaña_cbu`, nullables: los datos para transferir. La campaña exige al menos uno (lo impone el DTO). Índice `(refugio_id, estado_campaña_id)` para la quota y el listado del refugio.
 
 Validaciones (HU-12.1): descripción ≤300 caracteres; objetivo numérico entre $10.000 y $2.500.000; fecha_inicio ≥ hoy; fecha_fin > fecha_inicio; imagen jpg/png/webp; máximo 5 campañas activas por refugio.
 
@@ -232,11 +235,15 @@ Transiciones automáticas (cron, usuario "SISTEMA"): Inactiva→Activa al llegar
 
 Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
 
+### Estado_Donacion
+
+Catálogo nuevo (spec 021). Valores: Pendiente, Realizada, Cancelada.
+
 ### Donacion
 
-`donacion_id PK`, `donacion_monto`, FK `campaña_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (donante).
+`donacion_id PK`, `donacion_monto`, `donacion_motivo_rechazo` (nullable: `NO_RECIBIDA` | `MONTO_NO_COINCIDE`), FK `campaña_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (donante), FK `estado_donacion_id FK NOT NULL`.
 
-**Regla de negocio crítica:** el monto declarado por el adoptante NO impacta automáticamente el progreso acumulado de la campaña. Solo se contabiliza cuando el refugio verifica manualmente el ingreso real en su cuenta y confirma (acción explícita "Aceptar" en el flujo de HU-12.3).
+**Regla de negocio crítica:** el monto declarado nace en «Pendiente» y NO impacta el progreso. Solo suman las «Realizada»: el refugio verifica el ingreso real en su cuenta y la aplica (HU-12.3). Si la rechaza, queda «Cancelada» con motivo. Quién y cuándo la revisó sale de la auditoría (`donacion_usuario_modificacion`, `donacion_fecha_modificacion`). Las donaciones anteriores a la spec 021 quedaron «Realizada». Índice `(campaña_id, estado_donacion_id)`.
 
 ### Animal_Perdido
 
