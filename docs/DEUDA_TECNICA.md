@@ -50,7 +50,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
 | 21 | La ubicación es texto libre: no hay catálogo de Provincia/Localidad | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
-| 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
+| 23 | Las tarjetas de Inicio no muestran datos de campañas, y el refugio arma sus contadores con cuatro pedidos | Baja | frontend |
 | 24 | Sin tope de donaciones pendientes por adoptante | Baja | backend |
 | 25 | La quota de campañas no es atómica | Baja | backend |
 
@@ -500,23 +500,21 @@ que arma el cliente, no el usuario, así que en la práctica no se ve.
 spec 020), que ya da el error en español. `idSchema` tenía el mismo problema cuando faltaba un
 id y quedó corregido para todos los módulos en esa misma spec.
 
-## 23. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
+## 23. Las tarjetas de Inicio no muestran datos de campañas, y el refugio arma sus contadores con cuatro pedidos — Baja
 
 > Numerado 21 en `origin/dev`, que chocó con el 21 y el 22 de otra rama en el merge de la
-> spec 020: se renumeró a 23 al resolver el conflicto (los números no se reciclan).
+> spec 020: se renumeró a 23 al resolver el conflicto (los números no se reciclan). Hasta la
+> spec 021 se llamaba «Inicio muestra Campañas y Mascotas perdidas como «Muy pronto»».
 
+**Qué pasa.** Campañas (spec 021) y Mascotas perdidas (spec 020) ya tienen módulo y sus
+tarjetas de Inicio llevan a sus pantallas (`CampaniasInicio.tsx`, `PerdidasInicio.tsx`), pero
+el rediseño de Inicio las dibujaba con datos reales (montos, donantes, reportes cerca) y hoy
+muestran un texto fijo. Además, el panel de solicitudes del refugio saca sus contadores
+(pendientes, en revisión, aprobadas del mes, llegadas hoy) del `total` de cuatro
+`GET /solicitudes/recibidas` con distinto filtro, porque no hay un endpoint de resumen.
 
-**Qué pasa.** El rediseño de Inicio (adoptante y refugio) trae secciones de Campañas y de
-Mascotas perdidas con datos reales (montos, donantes, reportes cerca). Esos módulos son las
-fases 10 y 11 del roadmap y todavía no tienen backend, así que en
-`apps/mobile/components/home/SeccionesProximamente.tsx` se muestran con el color y la forma
-del diseño pero con un texto genérico y la pastilla «Muy pronto», sin números inventados.
-Además, el panel de solicitudes del refugio saca sus contadores (pendientes, en revisión,
-aprobadas del mes, llegadas hoy) del `total` de cuatro `GET /solicitudes/recibidas` con
-distinto filtro, porque no hay un endpoint de resumen.
-
-**Cómo se arregla.** Cuando se implemente cada módulo, reemplazar su tarjeta de
-`SeccionesProximamente.tsx` por una con datos (el diseño de referencia está en el proyecto
+**Cómo se arregla.** Pedir la primera campaña del portal (o las del refugio) desde
+`useDatosInicio` y pintarla en la tarjeta (el diseño de referencia está en el proyecto
 «Pethood - Ideas de inicio» de Claude Design). El «Ver mapa» del prototipo no se implementa:
 el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se notan lentos,
 sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
