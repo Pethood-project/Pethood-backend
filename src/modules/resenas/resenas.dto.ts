@@ -29,10 +29,7 @@ const TIPOS_SOLICITUD = ['Adopcion', 'Transito'] as const;
  * reseñas históricas sembradas antes de que existiera el vínculo con la transacción.
  */
 export type FlujoResena =
-  | 'ADOPTANTE_A_REFUGIO'
-  | 'ADOPTANTE_A_ADOPTANTE'
-  | 'REFUGIO_A_ADOPTANTE'
-  | 'REFUGIO_A_TRANSITO';
+  'ADOPTANTE_A_REFUGIO' | 'ADOPTANTE_A_ADOPTANTE' | 'REFUGIO_A_ADOPTANTE' | 'REFUGIO_A_TRANSITO';
 
 /** Quién es el receptor de la reseña: un refugio o una persona (adoptante / hogar de tránsito). */
 export type TipoReceptor = 'REFUGIO' | 'PERSONA';

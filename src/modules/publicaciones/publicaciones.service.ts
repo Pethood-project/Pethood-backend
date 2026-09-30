@@ -603,9 +603,7 @@ export async function obtenerPublicacion(
 
   const favoritas = await repo.filtrarFavoritas(usuarioId, [publicacion.mascotaId]);
   const actor = { id: usuario.id, refugioId: usuario.refugioId };
-  const distancia = coordenadas
-    ? await distanciaHastaPublicacion(publicacion, coordenadas)
-    : null;
+  const distancia = coordenadas ? await distanciaHastaPublicacion(publicacion, coordenadas) : null;
 
   return aFeedDto(
     publicacion,

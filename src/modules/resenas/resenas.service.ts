@@ -219,10 +219,7 @@ export async function listarElegibles(usuarioId: number): Promise<TransaccionEle
     .map((transaccion) => aElegibleDto(transaccion, actor.id));
 }
 
-function aElegibleDto(
-  transaccion: TransaccionDelActor,
-  usuarioId: number,
-): TransaccionElegibleDto {
+function aElegibleDto(transaccion: TransaccionDelActor, usuarioId: number): TransaccionElegibleDto {
   const mascota = transaccion.publicacion.mascota;
   const autorEsSolicitante = transaccion.usuarioId === usuarioId;
   const tipoSolicitud = transaccion.tipoSolicitud.nombre;

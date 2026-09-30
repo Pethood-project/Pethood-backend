@@ -33,7 +33,11 @@ describe('direccionParaGeocodificar', () => {
 });
 
 describe('geocodificarDireccion', () => {
-  const DIRECCION = { calleAltura: 'San Martín 123', localidad: 'Godoy Cruz', provincia: 'Mendoza' };
+  const DIRECCION = {
+    calleAltura: 'San Martín 123',
+    localidad: 'Godoy Cruz',
+    provincia: 'Mendoza',
+  };
 
   beforeEach(() => {
     geocode.mockReset();

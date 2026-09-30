@@ -89,7 +89,9 @@ export async function obtener(req: Request, res: Response, next: NextFunction): 
     const coordenadas =
       latitud !== undefined && longitud !== undefined ? { latitud, longitud } : undefined;
 
-    res.json(await service.obtenerPublicacion(id, req.usuario!.usuarioId, req.ambito!, coordenadas));
+    res.json(
+      await service.obtenerPublicacion(id, req.usuario!.usuarioId, req.ambito!, coordenadas),
+    );
   } catch (err) {
     next(err);
   }

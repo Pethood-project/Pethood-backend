@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import type { VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
-import { coordenadaOpcionalSchema, fechaOpcionalSchema, idSchema, listaDeIdsSchema, textoSchema } from '../../shared/validation/schemas';
+import {
+  coordenadaOpcionalSchema,
+  fechaOpcionalSchema,
+  idSchema,
+  listaDeIdsSchema,
+  textoSchema,
+} from '../../shared/validation/schemas';
 import { validarTexto } from '../../shared/validation/text';
 
 /** Hasta 5 fotos por publicación; el orden recibido es el orden de la galería. */

@@ -22,8 +22,7 @@ vi.mock('../../../../src/shared/imagenPerfil', () => ({
 }));
 
 vi.mock('../../../../src/shared/geocoding', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../../src/shared/geocoding')>();
+  const actual = await importOriginal<typeof import('../../../../src/shared/geocoding')>();
   return { ...actual, geocodificarDireccion: vi.fn() };
 });
 

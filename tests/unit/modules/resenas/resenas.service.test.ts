@@ -19,10 +19,7 @@ vi.mock('../../../../src/shared/logAuditoria', () => ({
 }));
 
 import * as repo from '../../../../src/modules/resenas/resenas.repository';
-import {
-  crearResena,
-  listarDeUsuario,
-} from '../../../../src/modules/resenas/resenas.service';
+import { crearResena, listarDeUsuario } from '../../../../src/modules/resenas/resenas.service';
 
 const mockedRepo = vi.mocked(repo);
 
@@ -72,7 +69,10 @@ describe('crearResena', () => {
       },
     } as never);
 
-    const resena = await crearResena({ solicitudId: 42, puntuacion: 5, comentario: 'Muy atentos' }, 5);
+    const resena = await crearResena(
+      { solicitudId: 42, puntuacion: 5, comentario: 'Muy atentos' },
+      5,
+    );
 
     expect(resena.receptor).toBe('REFUGIO');
     expect(resena.flujo).toBe('ADOPTANTE_A_REFUGIO');
