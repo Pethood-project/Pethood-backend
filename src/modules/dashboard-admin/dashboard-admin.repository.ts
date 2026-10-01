@@ -70,9 +70,8 @@ export async function sumarMontoDonadoDeclarado(): Promise<number> {
 
 /**
  * "Pendiente" = sin resolver todavía, no hay noción de prioridad/criticidad en el modelo
- * (Reporte_Problema solo tiene motivo/respuesta/resuelto — ver ambigüedad #2 en REQUISITOS.md
- * §10, la entidad ni siquiera tiene FK a Usuario dibujada). Consulta de solo lectura desde acá,
- * no se crea un módulo de moderación propio (spec 008, futuro).
+ * (Reporte_Problema no tiene prioridad ni criticidad). Consulta de solo lectura desde acá: el
+ * módulo de moderación (spec 008) es el dueño de la entidad.
  */
 export function contarReportesPendientes() {
   return prisma.reporteProblema.count({ where: { fechaBaja: null, resuelto: false } });
