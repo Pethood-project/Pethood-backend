@@ -43,3 +43,6 @@ usuariosRouter.post(
   controller.previewUbicacion,
 );
 usuariosRouter.delete('/me', autenticar, controller.darDeBajaMe);
+
+// Perfil público de otra persona (spec 023). Va al final: `/me/...` ya capturó lo suyo.
+usuariosRouter.get('/:id/perfil', autenticar, controller.obtenerPerfilPublico);

@@ -9,6 +9,7 @@ import { adminPublicacionesRouter } from '../modules/admin-publicaciones/admin-p
 import { adminSolicitudesRouter } from '../modules/admin-solicitudes/admin-solicitudes.routes';
 import { animalesPerdidosRouter } from '../modules/animales-perdidos/animales-perdidos.routes';
 import { usuariosRouter } from '../modules/usuarios/usuarios.routes';
+import { refugiosRouter } from '../modules/refugios/refugios.routes';
 import { catalogosRouter } from '../modules/catalogos/catalogos.routes';
 import { chatsRouter } from '../modules/chats/chats.routes';
 import { dashboardAdminRouter } from '../modules/dashboard-admin/dashboard-admin.routes';
@@ -41,6 +42,7 @@ apiRouter.use('/admin', adminReportesRouter); // spec 008 — HU-3.6/3.7
 apiRouter.use('/refugio', dashboardRefugioRouter);
 apiRouter.use('/refugio', perfilRefugioRouter); // spec 017
 apiRouter.use('/usuarios', usuariosRouter);
+apiRouter.use('/refugios', refugiosRouter); // spec 023 — perfil público de refugio
 
 // Módulos (descomentar a medida que se implementan las specs):
 // apiRouter.use('/mascotas', mascotasRouter);    // spec 002

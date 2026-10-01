@@ -34,3 +34,4 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 020 | Mascotas perdidas y encontradas: registrar y listar avisos (HU-13.1) | 13 | APROBADA |
 | 021 | Navegación y Filtros de Adoptar (HU-11.1 a HU-11.4) | 13 | IMPLEMENTADA |
 | 022 | Sistema de Reputación (HU-10.1 a HU-10.6) | 13 | IMPLEMENTADA |
+| 023 | Perfiles públicos: persona y refugio (GUI-26) | 13 | IMPLEMENTADA |
