@@ -1053,6 +1053,8 @@ enum TipoReporte {
   REFUGIO
   RESENA
   ANIMAL_PERDIDO
+  CAMPANIA
+  MENSAJE
 
   @@map("tipo_reporte")
 }
