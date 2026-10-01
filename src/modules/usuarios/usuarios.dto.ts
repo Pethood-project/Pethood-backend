@@ -95,3 +95,17 @@ export interface PerfilPropio {
   favoritos: number;
   valoracion: number | null;
 }
+
+/** Perfil público de otra persona (spec 023). Nunca expone datos de contacto ni la dirección. */
+export interface PerfilPublicoUsuarioDto {
+  id: number;
+  nombre: string;
+  apellido: string;
+  imagenUrl: string | null;
+  verificado: boolean;
+  provincia: string | null;
+  localidad: string | null;
+  fechaAlta: string;
+  /** Es el perfil de quien consulta: la app oculta «Reportar». */
+  esPropio: boolean;
+}
