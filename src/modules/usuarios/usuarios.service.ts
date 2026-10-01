@@ -15,6 +15,7 @@ import type {
   PreviewUbicacionBody,
   UbicacionGeocodificadaDto,
 } from './usuarios.dto';
+import { aRefugioDeSesion } from '../../shared/refugioSesion';
 import type { UsuarioPerfil } from './usuarios.repository';
 import * as repo from './usuarios.repository';
 
@@ -46,7 +47,7 @@ function aPerfil(
     ubicacionVerificada: usuario.ubicacionVerificada,
     imagenUrl: usuario.imagenUrl,
     roles: rolesDbAApi(nombresDeRol(usuario)),
-    refugio: usuario.refugio,
+    refugio: aRefugioDeSesion(usuario.refugio),
     tienePassword: Boolean(usuario.contrasena),
     mascotas,
     favoritos: usuario._count.favoritos,

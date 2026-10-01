@@ -5,6 +5,7 @@ import { parsearFechaNacimiento } from '../../shared/fechas';
 import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocoding';
 import { firmarToken } from '../../shared/jwt';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import { aRefugioDeSesion } from '../../shared/refugioSesion';
 import { estaBloqueado, limpiarIntentos, registrarFallo } from '../../shared/rateLimit';
 import { ESTADO_USUARIO, ROL_API, rolApiADb, rolesDbAApi } from '../../shared/roles';
 import { r2Habilitado, subirImagenPerfil, type ArchivoSubida } from '../../shared/r2';
@@ -46,7 +47,7 @@ function aRespuesta(usuario: UsuarioConRoles): RespuestaAuth {
       // `null` en un adoptante. El token no lo lleva: la pertenencia se resuelve contra la
       // base en cada request, para que sacar a alguien de un refugio tenga efecto sin
       // esperar a que le venza la sesión.
-      refugio: usuario.refugio,
+      refugio: aRefugioDeSesion(usuario.refugio),
     },
     token: firmarToken({ usuarioId: usuario.id, email: usuario.email, roles: rolesApi }),
   };

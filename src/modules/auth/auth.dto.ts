@@ -145,6 +145,8 @@ export type GoogleIdTokenBody = z.infer<typeof googleIdTokenBodySchema>;
 export const refugioDeSesionSchema = z.object({
   id: z.number(),
   nombre: z.string(),
+  /** Estado del refugio (`Activo`, `Pendiente_Verificacion`, `Suspendido`, `Inactivo`). */
+  estado: z.string(),
 });
 
 export const usuarioPublicoSchema = z.object({

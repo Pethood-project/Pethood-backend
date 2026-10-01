@@ -9,7 +9,9 @@ const includeUsuario = {
   // El refugio al que pertenece la persona, para que la sesión sepa en nombre de quién
   // atiende (GUI-31 muestra "Refugio Esperanza · 4 sin leer"). Sólo nombre e id: el resto
   // del refugio se pide a su propio endpoint.
-  refugio: { select: { id: true, nombre: true } },
+  refugio: {
+    select: { id: true, nombre: true, fechaBaja: true, estado: { select: { nombre: true } } },
+  },
 } as const;
 
 export type UsuarioConRoles = Prisma.UsuarioGetPayload<{ include: typeof includeUsuario }>;

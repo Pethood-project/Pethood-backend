@@ -88,7 +88,7 @@ export interface PerfilPropio {
   imagenUrl: string | null;
   roles: string[];
   /** El refugio al que pertenece, o `null` en un adoptante. Igual que en el login. */
-  refugio: { id: number; nombre: string } | null;
+  refugio: { id: number; nombre: string; estado: string } | null;
   tienePassword: boolean;
   /** Del perfil con el que se consulta: las personales o las del refugio. */
   mascotas: number;
