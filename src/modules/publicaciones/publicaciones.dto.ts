@@ -170,6 +170,9 @@ export const filtrosFeedSchema = z
     edadMin: enteroOpcionalSchema('La edad mínima'),
     /** Años cumplidos, exclusivo: el rango "1–3 años" es `edadMin=1&edadMax=3`. */
     edadMax: enteroOpcionalSchema('La edad máxima'),
+    /** Perfiles públicos (spec 023): publicaciones de un refugio o de una persona a título personal. */
+    refugioId: z.coerce.number().int().positive('El refugio no es válido').optional(),
+    usuarioId: z.coerce.number().int().positive('El usuario no es válido').optional(),
     castrado: banderaSchema,
     compatibleNinios: banderaSchema,
     compatibleOtrasMascotas: banderaSchema,

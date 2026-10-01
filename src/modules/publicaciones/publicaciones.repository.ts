@@ -417,6 +417,15 @@ function condicionesFeed(
     mascota,
     historicoEstados: conEstadoVigente({ nombre: ESTADO_PUBLICACION.ACTIVA }),
   };
+
+  // Perfiles públicos (spec 023). Una persona lista solo lo que publicó a título personal:
+  // lo que publicó para su refugio se ve en el perfil del refugio.
+  if (filtros.refugioId !== undefined) mascota.refugioId = filtros.refugioId;
+  if (filtros.usuarioId !== undefined) {
+    where.usuarioId = filtros.usuarioId;
+    if (filtros.refugioId === undefined) mascota.refugioId = null;
+  }
+
   const rasgos: string[] = [];
 
   if (filtros.compatibleNinios) rasgos.push(RASGO_COMPATIBLE_NINIOS);
