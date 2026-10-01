@@ -10,6 +10,8 @@ vi.mock('../../../../src/modules/auth/auth.repository', () => ({
   buscarEstadoPorNombre: vi.fn(),
   buscarRolPorNombre: vi.fn(),
   crearUsuarioConRol: vi.fn(),
+  buscarEstadoRefugioPorNombre: vi.fn(),
+  crearRefugioConMiembro: vi.fn(),
   vincularGoogleId: vi.fn(),
   actualizarContrasena: vi.fn(),
   reactivarCuenta: vi.fn(),
@@ -29,6 +31,7 @@ import {
   login,
   loginConGoogle,
   registrar,
+  registrarRefugio,
   resetearPassword,
   solicitarRecuperacion,
 } from '../../../../src/modules/auth/auth.service';
@@ -435,5 +438,51 @@ describe('auth.service', () => {
     await expect(
       resetearPassword({ email: 'ana@mail.com', codigo: '000000', password: 'nuevaClave1' }),
     ).rejects.toMatchObject({ codigo: 'CODIGO_INVALIDO', httpStatus: 400 });
+  });
+});
+
+describe('registrarRefugio', () => {
+  const body = {
+    nombre: 'Bruno',
+    apellido: 'Diaz',
+    email: 'bruno@mail.com',
+    password: 'Secreto123',
+    refugioNombre: 'Patitas',
+    provincia: 'Mendoza',
+    localidad: 'Godoy Cruz',
+    calleAltura: 'San Martin 1234',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(r2.r2Habilitado).mockReturnValue(false);
+    mockedRepo.buscarEstadoPorNombre.mockResolvedValue({ id: 2 } as never);
+    mockedRepo.buscarEstadoRefugioPorNombre.mockResolvedValue({ id: 7 } as never);
+    mockedRepo.buscarRolPorNombre.mockImplementation(
+      async (nombre) => ({ id: nombre === ROL_DB.ADOPTANTE ? 3 : 4 }) as never,
+    );
+  });
+
+  it('crea persona y refugio sin verificar, con roles Adoptante y Refugio', async () => {
+    mockedRepo.buscarPorEmail.mockResolvedValue(null);
+    mockedRepo.crearRefugioConMiembro.mockResolvedValue({
+      usuarioId: 10,
+      refugio: { id: 5, nombre: 'Patitas', estado: { nombre: 'Pendiente_Verificacion' } },
+    } as never);
+
+    const r = await registrarRefugio(body);
+
+    expect(r.refugio).toEqual({ id: 5, nombre: 'Patitas', estado: 'Pendiente_Verificacion' });
+    const [persona, refugio, rolIds] = mockedRepo.crearRefugioConMiembro.mock.calls[0]!;
+    expect(persona.contrasena).not.toBe(body.password);
+    expect(refugio).toMatchObject({ nombre: 'Patitas', estadoId: 7 });
+    expect(rolIds).toEqual([3, 4]);
+  });
+
+  it('rechaza email duplicado', async () => {
+    mockedRepo.buscarPorEmail.mockResolvedValue(usuarioFake());
+
+    await expect(registrarRefugio(body)).rejects.toMatchObject({ codigo: 'EMAIL_DUPLICADO' });
+    expect(mockedRepo.crearRefugioConMiembro).not.toHaveBeenCalled();
   });
 });

@@ -12,9 +12,11 @@ import type {
   LoginBody,
   RecuperarBody,
   RegistroBody,
+  RegistroRefugioBody,
   ResetearBody,
   RespuestaAuth,
   RespuestaRecuperar,
+  RespuestaRegistroRefugio,
 } from './auth.dto';
 import type { PerfilGoogle } from './auth.google';
 import type { UsuarioConRoles } from './auth.repository';
@@ -125,6 +127,68 @@ async function exigirCatalogos(rolApi: string) {
   }
 
   return { estado, rol };
+}
+
+export async function registrarRefugio(
+  body: RegistroRefugioBody,
+  archivo?: ArchivoSubida,
+): Promise<RespuestaRegistroRefugio> {
+  if (await authRepo.buscarPorEmail(body.email)) {
+    throw new AppError('EMAIL_DUPLICADO', 'Ya existe una cuenta con ese correo.', 409);
+  }
+
+  const [estadoUsuario, estadoRefugio, rolAdoptante, rolRefugio] = await Promise.all([
+    authRepo.buscarEstadoPorNombre(ESTADO_USUARIO.ACTIVO),
+    authRepo.buscarEstadoRefugioPorNombre('Pendiente_Verificacion'),
+    authRepo.buscarRolPorNombre(rolApiADb(ROL_API.ADOPTANTE)),
+    authRepo.buscarRolPorNombre(rolApiADb(ROL_API.MIEMBRO_REFUGIO)),
+  ]);
+  if (!estadoUsuario || !estadoRefugio || !rolAdoptante || !rolRefugio) {
+    throw new AppError(
+      'ERROR_INTERNO',
+      'Faltan catálogos de roles o estados. Corré el seed de la base.',
+      500,
+    );
+  }
+
+  const hash = await bcrypt.hash(body.password, BCRYPT_COST);
+  const imagenUrl = archivo && r2Habilitado() ? await subirImagenPerfil(archivo) : undefined;
+
+  const { usuarioId, refugio } = await authRepo.crearRefugioConMiembro(
+    {
+      nombre: body.nombre,
+      apellido: body.apellido,
+      email: body.email,
+      contrasena: hash,
+      verificado: false,
+      estadoId: estadoUsuario.id,
+    },
+    {
+      nombre: body.refugioNombre,
+      provincia: body.provincia,
+      localidad: body.localidad,
+      calleAltura: body.calleAltura,
+      telefono: body.refugioTelefono,
+      email: body.refugioEmail,
+      descripcion: body.refugioDescripcion,
+      imagenUrl,
+      estadoId: estadoRefugio.id,
+    },
+    [rolAdoptante.id, rolRefugio.id],
+  );
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'REGISTRO_REFUGIO',
+    entidad: 'Refugio',
+    entidadId: refugio.id,
+  });
+
+  return {
+    mensaje:
+      'Recibimos tu solicitud. Vamos a revisar los datos y te avisamos cuando esté verificado.',
+    refugio: { id: refugio.id, nombre: refugio.nombre, estado: refugio.estado.nombre },
+  };
 }
 
 export async function registrar(
