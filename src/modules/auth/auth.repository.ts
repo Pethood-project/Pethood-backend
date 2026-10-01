@@ -127,6 +127,17 @@ export async function crearUsuarioConRol(
   }
 }
 
+/** Estado del refugio al que pertenece la persona, o `null` si no pertenece a ninguno. */
+export async function buscarEstadoRefugioDeUsuario(usuarioId: number): Promise<string | null> {
+  const usuario = await prisma.usuario.findUnique({
+    where: { id: usuarioId },
+    select: { refugio: { select: { fechaBaja: true, estado: { select: { nombre: true } } } } },
+  });
+  const refugio = usuario?.refugio;
+  if (!refugio) return null;
+  return refugio.fechaBaja ? 'Inactivo' : refugio.estado.nombre;
+}
+
 export async function buscarEstadoRefugioPorNombre(nombre: string) {
   return prisma.estadoRefugio.findUnique({ where: { nombre } });
 }
