@@ -259,3 +259,22 @@ export async function darDeBajaCuenta(
     });
   });
 }
+
+/** Lo mínimo para el perfil público (spec 023): sin email, teléfono, DNI ni dirección exacta. */
+export function buscarPerfilPublico(id: number) {
+  return prisma.usuario.findFirst({
+    where: { id, fechaBaja: null },
+    select: {
+      id: true,
+      nombre: true,
+      apellido: true,
+      email: true,
+      imagenUrl: true,
+      verificado: true,
+      provincia: true,
+      localidad: true,
+      fechaAlta: true,
+      estado: { select: { nombre: true } },
+    },
+  });
+}

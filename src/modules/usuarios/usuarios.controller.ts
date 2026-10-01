@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { AppError } from '../../middlewares/errorHandler';
+import { idDeParametro } from '../../shared/responder';
 import type {
   ActualizarPerfilBody,
   ActualizarUbicacionBody,
@@ -90,6 +91,19 @@ export async function darDeBajaMe(req: Request, res: Response, next: NextFunctio
     }
     await service.darDeBajaCuenta(req.usuario.usuarioId);
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** Perfil público de otra persona (spec 023). */
+export async function obtenerPerfilPublico(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    res.json(await service.obtenerPerfilPublico(idDeParametro(req), req.usuario!.usuarioId));
   } catch (error) {
     next(error);
   }
