@@ -249,7 +249,7 @@ export interface PublicacionFeedDto {
    * La persona que la publicó, solo cuando no es de un refugio (`refugio` null): la ficha la
    * muestra en «Publicado por». En una de refugio es null, para no exponer a su personal.
    */
-  publicadoPor: { nombre: string; apellido: string } | null;
+  publicadoPor: { id: number; nombre: string; apellido: string; imagenUrl: string | null } | null;
   /**
    * Distancia en km entre la ubicación de quien publicó y las coordenadas del usuario que
    * consulta, cuando las manda (`GET /:id?latitud=&longitud=`). `null` si el usuario no mandó
