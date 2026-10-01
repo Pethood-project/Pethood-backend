@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authRouter } from '../modules/auth/auth.routes';
 import { adminUsuariosRouter } from '../modules/admin-usuarios/admin-usuarios.routes';
+import { adminAnimalesPerdidosRouter } from '../modules/animales-perdidos/animales-perdidos.admin.routes';
 import { adminReportesRouter, reportesRouter } from '../modules/reportes/reportes.routes';
 import { adminCatalogosRouter } from '../modules/admin-catalogos/admin-catalogos.routes';
 import { adminMascotasRouter } from '../modules/admin-mascotas/admin-mascotas.routes';
@@ -35,6 +36,7 @@ apiRouter.use('/admin', adminPublicacionesRouter);
 apiRouter.use('/admin', adminMascotasRouter);
 apiRouter.use('/admin', adminSolicitudesRouter);
 apiRouter.use('/admin', adminCatalogosRouter);
+apiRouter.use('/admin', adminAnimalesPerdidosRouter); // spec 008 — baja de aviso reportado
 apiRouter.use('/admin', adminReportesRouter); // spec 008 — HU-3.6/3.7
 apiRouter.use('/refugio', dashboardRefugioRouter);
 apiRouter.use('/refugio', perfilRefugioRouter); // spec 017

@@ -324,3 +324,30 @@ export async function listarUbicaciones(): Promise<ProvinciaConLocalidadesDto[]>
       localidades: [...localidades].sort(alfabetico),
     }));
 }
+
+/** Baja de un aviso por el admin (spec 008, deuda #28): el motivo le llega a quien lo publicó. */
+export async function darDeBajaPorAdmin(adminId: number, id: number, motivo: string) {
+  const aviso = await repo.buscarParaModeracion(id);
+
+  if (!aviso) {
+    throw new AppError('NO_ENCONTRADO', 'No encontramos ese aviso', 404);
+  }
+  if (aviso.fechaBaja) {
+    throw new AppError('AVISO_DE_BAJA', 'El aviso ya está dado de baja', 409);
+  }
+
+  const nombre = aviso.nombre ?? aviso.descripcion.slice(0, 40);
+  await repo.darDeBajaPorModeracion({
+    id,
+    adminId,
+    duenoId: aviso.usuarioReportanteId,
+    mensajeAviso: `Un administrador dio de baja tu aviso «${nombre}». Motivo: ${motivo}`,
+  });
+  await registrarAuditoria({
+    usuarioId: adminId,
+    accion: 'BAJA_MODERACION',
+    entidad: 'AnimalPerdido',
+    entidadId: id,
+    detalle: `motivo=${motivo}`,
+  });
+}
