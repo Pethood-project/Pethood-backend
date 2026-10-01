@@ -1042,16 +1042,34 @@ model AnimalPerdido {
   @@map("animal_perdido")
 }
 
-// ─────────────── MODERACIÓN Y REPORTES ───────────────
-// Sin FKs por ahora (así quedó en MODELO_DATOS.md) — pendiente de confirmar antes de Fase 9
-// del ROADMAP (ver "Entidades cuya existencia formal hay que confirmar" en el doc).
+// ─────────────── MODERACIÓN Y REPORTES (spec 008) ───────────────
+
+// Qué se reporta (HU-3.1 a HU-3.3). Enum de Prisma y no tabla de catálogo: el service ramifica
+// por el valor (cómo se resuelve y valida cada objeto). Agregar un tipo es un valor nuevo acá
+// (`ALTER TYPE ... ADD VALUE`) más su resolver en `reportes.service.ts`.
+enum TipoReporte {
+  PUBLICACION
+  USUARIO
+  REFUGIO
+  RESENA
+  ANIMAL_PERDIDO
+
+  @@map("tipo_reporte")
+}
+
+// `objeto_id` apunta al id de la tabla que indica `tipo`, SIN FK: es polimórfico. No queda
+// colgado porque nada se borra físicamente (regla transversal 1). Reportante = `usuario_alta`.
+// Índice único parcial `reporte_problema_pendiente_uq` (migración): un solo reporte pendiente
+// por (reportante, tipo, objeto).
 
 model ReporteProblema {
-  id             Int     @id @default(autoincrement()) @map("reporte_problema_id")
-  motivo         String  @map("reporte_problema_motivo")
-  respuesta      String? @map("reporte_problema_respuesta")
-  resuelto       Boolean @default(false) @map("reporte_problema_resuelto")
-  mensajeSistema String? @map("reporte_problema_mensaje_sistema")
+  id             Int         @id @default(autoincrement()) @map("reporte_problema_id")
+  motivo         String      @map("reporte_problema_motivo")
+  respuesta      String?     @map("reporte_problema_respuesta")
+  resuelto       Boolean     @default(false) @map("reporte_problema_resuelto")
+  mensajeSistema String?     @map("reporte_problema_mensaje_sistema")
+  tipo           TipoReporte @map("reporte_problema_tipo")
+  objetoId       Int         @map("reporte_problema_objeto_id")
 
   usuarioAlta         Int       @map("reporte_problema_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("reporte_problema_fecha_alta")
@@ -1060,6 +1078,7 @@ model ReporteProblema {
   usuarioBaja         Int?      @map("reporte_problema_usuario_baja")
   fechaBaja           DateTime? @map("reporte_problema_fecha_baja")
 
+  @@index([tipo, objetoId])
   @@map("reporte_problema")
 }
 
