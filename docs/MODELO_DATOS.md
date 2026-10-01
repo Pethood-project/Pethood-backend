@@ -283,7 +283,7 @@ Ver catálogos.
 
 ### Reporte_Problema
 
-`reporte_problema_id`, `reporte_problema_motivo`, `reporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema` y sus datos de auditoría. No hay relación con ninguna tabla.
+`reporte_problema_id`, `reporte_problema_motivo`, `reporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema`, `reporte_problema_tipo` (enum `tipo_reporte`: `PUBLICACION`, `USUARIO`, `REFUGIO`, `RESENA`, `ANIMAL_PERDIDO`, `CAMPANIA`, `MENSAJE`), `reporte_problema_objeto_id` y sus datos de auditoría. Vínculo **polimórfico sin FK**: `objeto_id` es el id de la tabla que indica `tipo` (no queda colgado porque no hay DELETE físico). El reportante es `usuario_alta`. Un solo reporte pendiente por (reportante, tipo, objeto). Ver spec 008.
 
 ### Consulta_Soporte
 
@@ -301,7 +301,7 @@ Ver catálogos.
 
 ## Entidades cuya existencia formal hay que confirmar
 
-- **Reporte_Problema**: aparece nombrada explícitamente en la matriz de trazabilidad del documento de requisitos (HU-3.1 a HU-3.7, "Moderación y Reportes") asociada a Usuario, Publicacion y Reseña, pero **no aparece dibujada como entidad propia en las capturas del diagrama de clases** revisadas. Antes de la Fase 9 del roadmap, confirmar con el equipo si ya existe en una versión más actualizada del diagrama o si hay que modelarla desde cero (sugerencia mínima: `reporte_id PK`, `reporte_motivo`, `reporte_estado`, FK polimórfica o FKs nullable a `publicacion_id` / `usuario_reportado_id` / `reseña_id` + auditoría).
+- **Reporte_Problema**: aparece nombrada explícitamente en la matriz de trazabilidad del documento de requisitos (HU-3.1 a HU-3.7, "Moderación y Reportes") asociada a Usuario, Publicacion y Reseña, pero **no aparece dibujada como entidad propia en las capturas del diagrama de clases** revisadas. Se modeló con `tipo` + `objeto_id` polimórfico (spec 008, 2026-10-01); **a confirmar con el equipo** contra el diagrama.
 
 ## Resumen de cardinalidades clave (para no perderlas al migrar)
 

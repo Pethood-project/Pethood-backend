@@ -1,6 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
+import { idDeParametro } from '../../shared/responder';
+import type { MotivoBody } from '../admin-usuarios/admin-usuarios.dto';
 import {
   crearAvisoSchema,
   filtrosAvisosSchema,
@@ -79,6 +81,21 @@ export async function listarUbicaciones(
 ): Promise<void> {
   try {
     res.json(await service.listarUbicaciones());
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Baja de un aviso por el admin (spec 008, deuda #28). Devuelve 204. */
+export async function darDeBajaPorAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { motivo } = req.body as MotivoBody;
+    await service.darDeBajaPorAdmin(req.usuario!.usuarioId, idDeParametro(req), motivo);
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

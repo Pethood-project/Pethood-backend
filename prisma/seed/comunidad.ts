@@ -1,5 +1,6 @@
 // Campañas y donaciones (dashboards), reseñas (valoración del perfil), reportes de
 // moderación y reportes de animales perdidos.
+import type { TipoReporte } from '@prisma/client';
 import {
   enDias,
   foto,
@@ -14,6 +15,9 @@ import {
 } from './comun';
 import type { Mascotas } from './mascotas';
 import type { Actores } from './usuarios';
+
+/** MENSAJE no está: no tiene baja lógica y el seed no reporta mensajes. */
+type TipoReporteSeed = Exclude<TipoReporte, 'MENSAJE'>;
 
 type Donante = 'ana' | 'carla' | 'martin' | 'elena' | 'lucia';
 
@@ -245,26 +249,62 @@ async function seedResenas(actores: Actores) {
 }
 
 interface DefReporte {
+  tipo: TipoReporteSeed;
+  /** Posición (0-based) del objeto entre los activos de su tipo, ordenados por id. */
+  objeto: number;
   motivo: string;
   respuesta?: string;
   diasAtras: number;
 }
 
 const REPORTES: DefReporte[] = [
-  { motivo: 'Publicación con fotos que no corresponden a la mascota', diasAtras: 1 },
-  { motivo: 'Usuario con lenguaje ofensivo en el chat', diasAtras: 4 },
-  { motivo: 'Refugio pide dinero por adelantado para la adopción', diasAtras: 9 },
   {
+    tipo: 'PUBLICACION',
+    objeto: 0,
+    motivo: 'Publicación con fotos que no corresponden a la mascota',
+    diasAtras: 1,
+  },
+  { tipo: 'USUARIO', objeto: 5, motivo: 'Usuario con lenguaje ofensivo en el chat', diasAtras: 4 },
+  {
+    tipo: 'REFUGIO',
+    objeto: 0,
+    motivo: 'Refugio pide dinero por adelantado para la adopción',
+    diasAtras: 9,
+  },
+  {
+    tipo: 'RESENA',
+    objeto: 0,
     motivo: 'Reseña falsa sobre Refugio Cuatro Patas',
     respuesta: 'Se verificó que la cuenta no tuvo contacto con el refugio. Reseña dada de baja.',
     diasAtras: 30,
   },
   {
+    tipo: 'PUBLICACION',
+    objeto: 1,
     motivo: 'Mascota publicada dos veces por dos usuarios distintos',
     respuesta: 'Era la misma persona con dos cuentas. Se unificaron.',
     diasAtras: 60,
   },
 ];
+
+/** Id del n-ésimo objeto activo del tipo, para que el seed apunte a filas que existen. */
+async function idObjetoReportado(tipo: TipoReporteSeed, posicion: number): Promise<number | null> {
+  const opciones = {
+    where: { fechaBaja: null },
+    orderBy: { id: 'asc' },
+    skip: posicion,
+    select: { id: true },
+  } as const;
+  const fila = await {
+    PUBLICACION: () => prisma.publicacion.findFirst(opciones),
+    USUARIO: () => prisma.usuario.findFirst(opciones),
+    REFUGIO: () => prisma.refugio.findFirst(opciones),
+    RESENA: () => prisma.resena.findFirst(opciones),
+    ANIMAL_PERDIDO: () => prisma.animalPerdido.findFirst(opciones),
+    CAMPANIA: () => prisma.campania.findFirst(opciones),
+  }[tipo]();
+  return fila?.id ?? null;
+}
 
 async function seedReportes(actores: Actores) {
   let nuevos = 0;
@@ -273,11 +313,16 @@ async function seedReportes(actores: Actores) {
     const existente = await prisma.reporteProblema.findFirst({ where: { motivo: def.motivo } });
     if (existente) continue;
 
+    const objetoId = await idObjetoReportado(def.tipo, def.objeto);
+    if (objetoId === null) continue;
+
     const resuelto = def.respuesta !== undefined;
 
     await prisma.reporteProblema.create({
       data: {
         motivo: def.motivo,
+        tipo: def.tipo,
+        objetoId,
         resuelto,
         respuesta: def.respuesta ?? null,
         usuarioAlta: actores.carla.id,

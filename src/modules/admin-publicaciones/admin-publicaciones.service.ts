@@ -2,13 +2,14 @@ import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { aFechaISO } from '../../shared/validation/dates';
 import { TRANSICIONES } from '../publicaciones/publicaciones.service';
+import { deObjeto } from '../reportes/reportes.service';
 import type { EstadoBody, FiltrosPublicaciones } from './admin-publicaciones.dto';
 import * as repo from './admin-publicaciones.repository';
 import type { PublicacionAdmin } from './admin-publicaciones.repository';
 
 const ESTADO_MASCOTA_DISPONIBLE = 'Disponible';
 
-function aItemDto(pub: PublicacionAdmin) {
+function aItemDto(pub: PublicacionAdmin, cantidadReportes: number) {
   const { mascota } = pub;
   const estado = pub.historicoEstados[0]?.estadoPublicacion;
 
@@ -26,8 +27,7 @@ function aItemDto(pub: PublicacionAdmin) {
           nombre: `${pub.usuario.nombre} ${pub.usuario.apellido}`,
         },
     cantidadSolicitudes: pub._count.solicitudes,
-    // ponytail: ReporteProblema no tiene FKs todavía (§5), no hay qué contar. Cablear con el módulo reportes.
-    cantidadReportes: 0,
+    cantidadReportes,
     fechaAlta: pub.fechaAlta,
     fechaBaja: pub.fechaBaja,
   };
@@ -41,15 +41,18 @@ async function buscarOFallar(id: number) {
 
 export async function listar(filtros: FiltrosPublicaciones) {
   const { items, total } = await repo.listar(filtros);
-  return { items: items.map(aItemDto), total, page: filtros.page, limit: filtros.limit };
+  const reportes = await repo.contarReportesPendientes(items.map((p) => p.id));
+  const filas = items.map((p) => aItemDto(p, reportes.get(p.id) ?? 0));
+  return { items: filas, total, page: filtros.page, limit: filtros.limit };
 }
 
 export async function obtener(id: number) {
   const pub = await buscarOFallar(id);
   const { mascota } = pub;
+  const reportes = await deObjeto('PUBLICACION', id);
 
   return {
-    ...aItemDto(pub),
+    ...aItemDto(pub, reportes.filter((r) => !r.resuelto).length),
     descripcion: pub.descripcion,
     ubicacion: pub.ubicacion,
     requisitos: pub.requisitos,
@@ -73,7 +76,7 @@ export async function obtener(id: number) {
       fechaBaja: h.fechaBaja,
       usuarioAlta: h.usuarioAlta,
     })),
-    reportes: [], // ponytail: ver cantidadReportes
+    reportes,
   };
 }
 

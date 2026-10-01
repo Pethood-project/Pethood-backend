@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta } from '../../shared/auditoria';
+import { datosAlta, datosBaja } from '../../shared/auditoria';
 import { finDelDia, inicioDelDia } from '../../shared/validation/dates';
 
 /**
@@ -210,4 +210,38 @@ export function crear(
     },
     select: SELECCION_TARJETA,
   });
+}
+
+/** Baja lógica de un aviso por el admin (spec 008): `null` si no existe. */
+export function buscarParaModeracion(id: number) {
+  return prisma.animalPerdido.findFirst({
+    where: { id },
+    select: {
+      id: true,
+      nombre: true,
+      descripcion: true,
+      usuarioReportanteId: true,
+      fechaBaja: true,
+    },
+  });
+}
+
+/** Da de baja el aviso y avisa a quien lo publicó en la misma transacción. */
+export function darDeBajaPorModeracion(datos: {
+  id: number;
+  adminId: number;
+  duenoId: number;
+  mensajeAviso: string;
+}) {
+  return prisma.$transaction([
+    prisma.animalPerdido.update({ where: { id: datos.id }, data: datosBaja(datos.adminId) }),
+    prisma.notificacion.create({
+      data: {
+        tipo: 'MODERACION',
+        mensaje: datos.mensajeAviso,
+        usuarioId: datos.duenoId,
+        ...datosAlta(datos.adminId),
+      },
+    }),
+  ]);
 }
