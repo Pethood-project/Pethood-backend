@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-09-27**
+> Última revisión: **2026-10-01**
 
 ## Cómo se usa
 
@@ -52,52 +52,13 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
 | 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
 | 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
-| 25 | Reseña quedó sin flujo de reporte ni notificaciones | Baja | ambos |
+| 25 | Reseña no avisa al recibir una reseña (el reporte ya existe, spec 008) | Baja | ambos |
 | 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
-
-> **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
-> `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
-> hasta que entre el PR, el resto del equipo sigue con los archivos sin firmar. Borrar este
-> párrafo cuando se mergee.
-
----
-
-## 1. Los archivos subidos se sirven sin autenticación — ✅ **CERRADA**
-
-`/api/v1/archivos` se servía con `express.static` y sin ningún control: cualquiera con el link
-abría un adjunto de chat, un comprobante de historia clínica o una prueba de vida, sin sesión.
-
-Se cerró con **URLs firmadas** ([`shared/urlFirmada.ts`](../src/shared/urlFirmada.ts)): las
-tres subcarpetas privadas (`chats`, `historias-clinicas`, `seguimientos`) exigen un `exp` y un
-`sig` HMAC que emiten los DTOs; las públicas (`mascotas`, `publicaciones`, `perfiles`) siguen
-abiertas porque se muestran en el feed de adopción.
-
-**Por qué firmada y no un header.** En React Native, `<Image source={{ uri }} />` descarga por
-su cuenta y no manda `Authorization`. Poner `autenticar` delante habría dejado la app sin una
-sola foto, salvo pasarle `headers` a las 25 imágenes remotas y perder el cacheo. Es el mismo
-motivo por el que S3 y R2 tienen URLs prefirmadas.
-
-**Lo que NO resuelve, y hay que saberlo:** sigue siendo un *bearer*. Quien tenga el link
-vigente entra, aunque no participe del chat. Lo que se gana es que **vence** (6 h) y que no se
-puede fabricar uno para un archivo ajeno. La versión fuerte —verificar la pertenencia al chat
-en cada request— es justamente lo que el `<Image>` de RN no deja hacer.
-
-**El vencimiento se redondea a ventanas de 6 h** para que la URL no cambie en cada respuesta:
-si cambiara, el cliente volvería a descargar la misma foto —o el mismo video de 30 MB— cada
-vez, porque su caché indexa por URL.
-
----
-
-## 2. `r2.ts` no conoce los formatos de video — ✅ **CERRADA**
-
-Había dos mapas de mime → extensión, uno en `storage.ts` y otro en `r2.ts`, y habían
-divergido: el de R2 nunca supo de video, así que un `.mp4` se habría subido al bucket como
-`.jpg` apenas se activara R2 para el chat.
-
-Se cerró unificando los dos en [`src/shared/extensiones.ts`](../src/shared/extensiones.ts),
-que ahora es el único mapa del proyecto. Tiene un test que recorre **todos** los formatos
-declarados en `LIMITES` y falla si alguien suma uno sin decidirle extensión, para que no
-puedan volver a separarse.
+| 27 | Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado | Baja | backend |
+| 28 | El dueño de un aviso de mascota perdida no puede retirarlo (el admin sí, spec 008) | Baja | backend |
+| 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
+| 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
+| 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
 
 ---
 
@@ -583,15 +544,14 @@ geocodificarse (el feed usa la dirección del perfil).
 
 ---
 
-## 25. Reseña quedó sin flujo de reporte ni notificaciones — Baja
+## 25. Reseña no avisa al recibir una reseña — Baja
 
-**Qué pasa.** El Módulo 10 (spec 022) cubre alta, historial y baja lógica por el admin, pero
-no conecta con Moderación (reportar una reseña, HU-3.3) ni con Notificaciones (avisar al
-recibir una reseña). Esas HUs son de los módulos 3 y 4 y todavía no están implementadas.
+**Qué pasa.** El Módulo 10 (spec 022) cubre alta, historial y baja lógica por el admin, y desde
+la spec 008 una reseña se puede reportar (`tipo: RESENA`). Lo que sigue sin existir es el aviso
+al recibir una reseña (Módulo 4).
 
-**Cómo se arregla.** Cuando se haga el Módulo 3, agregar la FK polimórfica o `resena_id` a
-`Reporte_Problema`; cuando se haga el Módulo 4, enganchar el evento de alta de reseña al motor
- de notificaciones.
+**Cómo se arregla.** Cuando se haga el Módulo 4, enganchar el evento de alta de reseña al motor
+de notificaciones. Mismo trabajo que la #27.
 
 ## 26. Las vacunas son un enum: el admin no puede agregarlas desde el panel — Baja
 
@@ -610,3 +570,74 @@ igual, agregar una vacuna es una migración y un commit.
 conservando un código estable, para no romper `tipo` en los endpoints ni las medallas de
 mobile (definir color por defecto o campo `color`). Toca historia clínica, alta de mascota,
 publicaciones, catálogos y la app: hacerlo como cambio aparte.
+
+## 27. Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado — Baja
+
+**Qué pasa.** Resolver un reporte (spec 008) crea una fila en `Notificacion` para el
+reportante, igual que la baja de publicaciones y mascotas del admin avisa al dueño. Pero no
+existe ningún endpoint que lea esa tabla, así que el aviso queda guardado y nadie lo ve. Tampoco
+hay envío de correo (no hay mailer en el proyecto), y suspender un usuario o refugio no avisa al
+afectado: se entera al intentar loguearse (`USUARIO_SUSPENDIDO`).
+
+Tampoco existe un endpoint para que el reportante vea el estado y la respuesta de sus reportes
+(no hay HU que lo pida): hoy solo le queda la `Notificacion`, que no se puede leer.
+
+**Qué falta decidir.** Si la suspensión notifica al afectado, con o sin motivo, y si hace falta
+correo además del aviso en la app. El relevamiento de todos los puntos donde iría un
+correo está en [`MAIL.md`](MAIL.md).
+
+**Cómo se arregla.** Cuando se haga el Módulo 4: endpoints para listar y marcar como leídas
+las `Notificacion`, y enganchar `suspenderUsuario` y `suspenderRefugio` de `admin-usuarios` al
+mismo `crearNotificacion`. Mismo trabajo que la parte pendiente de la #25.
+
+## 28. El dueño de un aviso de mascota perdida no puede retirarlo — Baja
+
+**Qué pasa.** `animales-perdidos` (spec 020) tiene alta y listado. La baja por el **admin** existe
+desde la spec 008 (`PATCH /admin/animales-perdidos/:id/baja`), pero quien publicó el aviso no
+puede retirarlo ni marcarlo como resuelto (HU-13.3, estados del aviso).
+
+**Cómo se arregla.** Baja lógica y cambio de estado por el dueño, con el patrón de
+`publicaciones` (editar y finalizar).
+
+## 29. Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja — Media
+
+**Qué pasa.** Moderación (spec 008) ya puede reportar una campaña y mostrársela al admin, pero
+`Campania` es solo el esqueleto del modelo y el Módulo 12 no existe. Faltan tres cosas, todas de
+ese módulo:
+
+- **Alias y CBU** (HU-12.2). No hay columnas en `Campania`, así que `objeto.vista` del reporte
+  no los trae, justo lo que más se denuncia en una campaña falsa (la cuenta donde cae la plata).
+- **Confirmación manual de donaciones** (HU-12.3, regla transversal 11). `Donacion` no tiene
+  estado ni fecha de confirmación, así que `montoActual` de la vista suma todas las donaciones
+  activas. El comentario `ponytail:` de `reportes.service.ts` marca el lugar a cambiar.
+- **Baja de campaña** (HU-12.5). No hay endpoint: un reporte de campaña se resuelve, pero el
+  admin solo puede suspender al refugio. Falta un `PATCH /admin/campanias/:id/baja` como el de
+  publicaciones y avisos.
+
+**Cómo se arregla.** Con la spec del Módulo 12: columnas de alias y CBU en `Campania` (con
+sus validaciones en `shared/validation/`), estado de confirmación en `Donacion`, y la baja admin
+con notificación al refugio. Después, sumar `alias` y `cbu` a la `vista` de `CAMPANIA` y que
+`montoActual` cuente solo las confirmadas. Toca `docs/MODELO_DATOS.md`.
+
+## 30. Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto — Baja
+
+**Qué pasa.** `Mensaje` solo tiene alta (sin baja lógica), así que un reporte de mensaje se
+resuelve pero el mensaje sigue visible para quien lo recibió: la única acción posible es
+suspender al autor (`PATCH /admin/usuarios/:id/suspender`). Además el admin ve los 10 mensajes
+anteriores y los 10 posteriores (`VENTANA_CONTEXTO_MENSAJES`), sin forma de pedir más.
+
+**Cómo se arregla.** Si hace falta ocultar un mensaje, agregar una baja lógica solo para
+moderación (y que el chat lo filtre); es un cambio de modelo y de contrato del chat, no solo de
+moderación. Para el contexto, un parámetro de ampliación en `GET /admin/reportes/:id` si en la
+práctica falta información.
+
+## 31. El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra — Baja
+
+**Qué pasa.** `GET /refugios/:id` informa `resumen.publicacionesActivas` con todas las
+publicaciones activas, pero la lista de ese refugio sale del feed (`GET /publicaciones?refugioId=`),
+que excluye las mascotas que el usuario ya guardó en favoritos. Quien guardó una mascota del
+refugio la ve contada y no la ve en la lista (spec 023, §9).
+
+**Cómo se arregla.** Un endpoint propio de publicaciones por publicador que no excluya favoritos
+(la opción 2 del pedido en `docs/ideas/USER.md`), o contar en el resumen con el mismo criterio
+que el feed. Lo mismo vale para `GET /publicaciones?usuarioId=`.
