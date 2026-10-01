@@ -213,6 +213,15 @@ export async function gestionarRoles(adminId: number, usuarioId: number, body: R
     );
   }
 
+  // Todo usuario es adoptante siempre: lo que cambia es su vínculo con un refugio (MIEMBRO_REFUGIO).
+  if (body.quitar.includes(ROL_API.ADOPTANTE)) {
+    throw new AppError(
+      'NO_SE_PUEDE_QUITAR_ADOPTANTE',
+      'El rol de adoptante no se puede quitar: todos los usuarios son adoptantes.',
+      409,
+    );
+  }
+
   if (body.agregar.includes(ROL_API.MIEMBRO_REFUGIO) && body.refugioId !== undefined) {
     await buscarRefugioOFallar(body.refugioId);
   }
@@ -239,6 +248,14 @@ export async function gestionarRoles(adminId: number, usuarioId: number, body: R
 
     const vinculo = await repo.buscarVinculoRolActivo(usuarioId, rol.id);
     if (vinculo) await repo.quitarRol(vinculo.id, adminId);
+  }
+
+  // Sin rol de refugio no queda asociado a ningún refugio.
+  if (
+    body.quitar.includes(ROL_API.MIEMBRO_REFUGIO) &&
+    !body.agregar.includes(ROL_API.MIEMBRO_REFUGIO)
+  ) {
+    await repo.desasignarRefugio(usuarioId, adminId);
   }
 
   if (body.agregar.includes(ROL_API.MIEMBRO_REFUGIO) && body.refugioId !== undefined) {

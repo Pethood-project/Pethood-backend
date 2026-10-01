@@ -127,6 +127,13 @@ export function asignarRefugio(usuarioId: number, refugioId: number, adminId: nu
   });
 }
 
+export function desasignarRefugio(usuarioId: number, adminId: number) {
+  return prisma.usuario.update({
+    where: { id: usuarioId },
+    data: { refugioId: null, ...datosModificacion(adminId) },
+  });
+}
+
 export function buscarRefugio(id: number) {
   return prisma.refugio.findFirst({ where: { id, fechaBaja: null }, include: { estado: true } });
 }
