@@ -33,7 +33,11 @@ export async function registroRefugio(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const resultado = await authService.registrarRefugio(req.body as RegistroRefugioBody, req.file);
+    const resultado = await authService.registrarRefugio(
+      req.body as RegistroRefugioBody,
+      req.file,
+      req.ip,
+    );
     res.status(201).json(resultado);
   } catch (error) {
     next(error);

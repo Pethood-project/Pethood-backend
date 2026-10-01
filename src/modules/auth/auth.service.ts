@@ -133,7 +133,19 @@ async function exigirCatalogos(rolApi: string) {
 export async function registrarRefugio(
   body: RegistroRefugioBody,
   archivo?: ArchivoSubida,
+  ip = 'desconocida',
 ): Promise<RespuestaRegistroRefugio> {
+  // Endpoint público que crea cuentas: se cuenta cada intento por IP, no solo los fallidos.
+  const clave = `registro-refugio:${ip}`;
+  if (estaBloqueado(clave)) {
+    throw new AppError(
+      'DEMASIADOS_INTENTOS',
+      'Demasiados intentos de registro. Esperá unos minutos e intentalo de nuevo.',
+      429,
+    );
+  }
+  registrarFallo(clave);
+
   if (await authRepo.buscarPorEmail(body.email)) {
     throw new AppError('EMAIL_DUPLICADO', 'Ya existe una cuenta con ese correo.', 409);
   }

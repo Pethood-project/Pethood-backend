@@ -35,6 +35,7 @@ import {
   resetearPassword,
   solicitarRecuperacion,
 } from '../../../../src/modules/auth/auth.service';
+import { limpiarIntentos } from '../../../../src/shared/rateLimit';
 import { limpiarCodigosReset } from '../../../../src/modules/auth/auth.resetStore';
 import * as r2 from '../../../../src/shared/r2';
 
@@ -455,6 +456,7 @@ describe('registrarRefugio', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    limpiarIntentos('registro-refugio:1.2.3.4');
     vi.mocked(r2.r2Habilitado).mockReturnValue(false);
     mockedRepo.buscarEstadoPorNombre.mockResolvedValue({ id: 2 } as never);
     mockedRepo.buscarEstadoRefugioPorNombre.mockResolvedValue({ id: 7 } as never);
@@ -484,5 +486,19 @@ describe('registrarRefugio', () => {
 
     await expect(registrarRefugio(body)).rejects.toMatchObject({ codigo: 'EMAIL_DUPLICADO' });
     expect(mockedRepo.crearRefugioConMiembro).not.toHaveBeenCalled();
+  });
+
+  it('bloquea con 429 tras 5 intentos desde la misma IP', async () => {
+    mockedRepo.buscarPorEmail.mockResolvedValue(usuarioFake());
+
+    for (let i = 0; i < 5; i += 1) {
+      await expect(registrarRefugio(body, undefined, '1.2.3.4')).rejects.toMatchObject({
+        codigo: 'EMAIL_DUPLICADO',
+      });
+    }
+
+    await expect(registrarRefugio(body, undefined, '1.2.3.4')).rejects.toMatchObject({
+      codigo: 'DEMASIADOS_INTENTOS',
+    });
   });
 });
