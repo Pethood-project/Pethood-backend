@@ -223,8 +223,26 @@ export interface AvisoDto {
   fechaResuelto: string | null;
   /** Quien publicó el aviso: es la contraparte del chat de reencuentro (HU-13.2). */
   reportante: { id: number; nombre: string; apellido: string; imagenUrl: string | null };
-  /** Si el aviso es del usuario autenticado: con `true` la tarjeta no ofrece "Abrir chat". */
+  /**
+   * Si el aviso es del usuario autenticado. Decide qué botón ofrece el detalle: con `false`,
+   * "Enviar mensaje" (el reclamo, HU-13.2); con `true`, "Marcar como resuelto".
+   */
   esPropio: boolean;
+}
+
+/**
+ * Resultado de reclamar un aviso (HU-13.2): la sala de reencuentro, lista para abrir.
+ *
+ * Devuelve sólo el id y no la conversación entera porque el cliente navega a la sala y ésta
+ * se pinta sola con `GET /chats/:chatId` — es el endpoint que existe justamente para eso
+ * (abrir una sala sin haber pasado por el listado).
+ *
+ * `nueva` es `false` cuando la sala ya existía: el botón no se esconde después del primer
+ * reclamo, así que volver a tocarlo es el caso normal y devuelve la misma sala.
+ */
+export interface ReclamoDto {
+  chatId: number;
+  nueva: boolean;
 }
 
 /** Opciones del filtro: cada provincia con avisos y sus localidades con avisos. */

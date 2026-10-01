@@ -23,9 +23,11 @@ reencuentro (HU-13.2) y la gestión de estados (HU-13.3).
   - Catálogos para la pantalla de filtros: estados del aviso y lugares con avisos.
   - Datos del reportante en cada tarjeta, para el futuro botón "Abrir chat".
 - **NO incluye:**
-  - Botón "Abrir chat": nada en el sistema crea todavía una sala entre dos personas por un
-    aviso. Queda para **HU-13.2** (ver §9, decisión 7).
-  - Botón "Resuelto", cambios de estado, edición y baja del aviso: **HU-13.3**.
+  - Botón "Abrir chat": nada en el sistema creaba todavía una sala entre dos personas por un
+    aviso. Pasó a **HU-13.2** ([spec 024](024-reclamar-mascota-perdida.md)), ya implementada.
+  - Botón "Resuelto": también pasó a **HU-13.2**, porque "cierra el caso y el chat asociado"
+    no se podía implementar antes de que la sala existiera.
+  - Edición y baja del aviso por el reportante, histórico de estados y reapertura: **HU-13.3**.
   - Vincular el aviso a una mascota propia registrada (`mascota_id`): la columna existe pero
     el alta no la recibe todavía.
 
@@ -184,7 +186,8 @@ de cada una está en «Decisiones tomadas y por qué» del
 4. **Especie:** FK directa en el aviso, no derivada de la mascota.
 5. **Coordenadas:** obligatorias, pero son las del dispositivo al reportar y no se exponen.
 6. **Paginación por cursor**, que queda como estándar de los listados de la app móvil.
-7. **Chat fuera de alcance:** hace falta vincular la sala al aviso antes de crearla.
+7. **Chat fuera de alcance:** hacía falta vincular la sala al aviso antes de crearla. Lo
+   resolvió la [spec 024](024-reclamar-mascota-perdida.md) con `chat.animal_perdido_id`.
 8. **Actor:** cualquier usuario autenticado, desde cualquiera de sus perfiles, sin exigir
    cuenta verificada.
 9. **Imágenes:** hasta 5, con la misma cadena que las fotos de una publicación; el archivo
@@ -192,6 +195,7 @@ de cada una está en «Decisiones tomadas y por qué» del
 10. **Mensajes de validación:** se corrigieron `idSchema` (respondía en inglés y sin
     concordancia de género) y se sumó `limitePaginaSchema`.
 
-Lo que queda para HU-13.2 (incluido lo abierto del botón de chat), HU-13.3, los avisos viejos
-sin provincia y la mascota propia está en «Pendiente para otros módulos» del
+HU-13.2 (el botón de chat y el de "Resuelto") está en la
+[spec 024](024-reclamar-mascota-perdida.md). Lo que queda para HU-13.3, los avisos viejos sin
+provincia y la mascota propia está en «Pendiente para otros módulos» del
 [contrato](../api-mascotas-perdidas.md#pendiente-para-otros-módulos).

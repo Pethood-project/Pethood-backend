@@ -193,9 +193,16 @@ Con `solicitud_id` null la fila es del **catálogo** que se sortea. Con valor, e
 
 ### Chat
 
-`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable).
+`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable).
 
-`solicitud_id` es la solicitud que habilitó la sala (CONSTITUTION §7: no hay chat sin interacción previa). Es nullable porque las salas de coordinación por mascota perdida (HU-13.2) no salen de una solicitud. Un índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL` evita dos salas para la misma solicitud.
+**Dos FK excluyentes dicen de qué nació la sala** (CONSTITUTION §7: no hay chat sin interacción previa):
+
+- `solicitud_id` — la solicitud de adopción o tránsito que la habilitó. Índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL`: evita dos salas para la misma solicitud.
+- `animal_perdido_id` — el aviso de mascota perdida/encontrada que alguien reclamó (HU-13.2, spec 024). Índice único parcial sobre `(animal_perdido_id, chat_usuario_alta) WHERE animal_perdido_id IS NOT NULL AND chat_fecha_baja IS NULL`: **una sala por aviso y por reclamante**, porque en una sala de reclamo quien la crea es quien reclama.
+
+Las dos son nullables y **nunca van las dos juntas**. Con las dos en `null` es una sala anterior a HU-5.2. (Nada en base impide llenar las dos: queda anotado en `DEUDA_TECNICA.md`.)
+
+**La sala de una solicitud se reusa entre las partes; la de un reclamo, no.** Una segunda solicitud al mismo refugio cae en la conversación que ya existía, pero un aviso reclamado por cinco personas abre cinco salas: marcar el aviso Resuelto deja su sala en sólo lectura, y con una sala compartida eso cortaría una conversación ajena al aviso. La sala de un reclamo lleva `refugio_id` en `null` — el aviso es de la persona, no de su refugio.
 
 ### Usuario_Chat
 
@@ -205,11 +212,13 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 
 ### Mensaje
 
-`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable).
+`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD` | `ANIMAL_PERDIDO`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable).
 
 - **`mensaje_leido` quedó obsoleto.** Lo reemplazan las marcas de `Usuario_Chat`. Se sigue poblando para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo.
 - **`mensaje_imagen_url` es la PRIMERA de `mensaje_imagenes`**, desnormalizada para que el preview del listado no tenga que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`. Un mensaje admite hasta 5 fotos (`LIMITES.mensaje.fotos.maximo`).
 - **`mensaje_tipo = SOLICITUD`** es la tarjeta que PetHood inserta en la sala al enviarse una solicitud: la emite el usuario SISTEMA y lleva `solicitud_id`. No es una burbuja de texto y su `mensaje_contenido` va vacío — el texto lo pone la UI.
+- **`mensaje_tipo = ANIMAL_PERDIDO`** (HU-13.2) es lo mismo con la tarjeta del aviso reclamado: la emite SISTEMA, lleva `animal_perdido_id` y su contenido va vacío. Es el primer mensaje de una sala de reencuentro.
+- **El mensaje de cierre del caso es un `TEXTO`, no una tarjeta:** cuando el aviso pasa a Resuelto, cada sala recibe un mensaje de SISTEMA con el texto "Volvió con su dueño" y `animal_perdido_id` **vacío** — la columna está reservada para el mensaje que pinta la tarjeta, y la sala ya está vinculada al aviso por `chat.animal_perdido_id`.
 
 **Nota de auditoría — excepción:** el mensaje **solo tiene alta**, no baja (consistente con la nota del documento de requisitos: "El mensaje solo va a tener alta, y el chat va a tener alta y baja"). No implementar endpoint de borrado de mensaje individual.
 
@@ -274,6 +283,10 @@ Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
 - `animal_perdido_imagenes`: de 1 a 5 fotos. **El orden del array es el de la galería del detalle.** Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`: `animal_perdido_imagen_url` es la PRIMERA, la portada de la tarjeta del portal.
 
 Pendiente: reflejarlos en el diagrama de clases del grupo.
+
+**`animal_perdido_fecha_resuelto` la escribe HU-13.2** (spec 024). Hasta entonces sólo la llenaba el seed. Se completa cuando el reportante marca el caso resuelto, junto con el paso del estado a "Resuelto"; es el dato de **cuándo volvió**, independiente de `fecha_modificacion`, que cambia con cualquier edición.
+
+Hoy "Resuelto" es un **estado terminal**: no hay reapertura ni histórico de estados (si HU-13.3 los pide, corresponde una tabla `AnimalPerdidoEstado` con el patrón de `PublicacionEstado`). El aviso resuelto deja sus salas de reencuentro en **sólo lectura**, y ese estado **no se guarda**: se deriva de acá. Ver `Chat`.
 
 **Resuelto:** `animal_perdido_latitud` / `animal_perdido_longitud` se mantienen — sí se captura la coordenada al reportar un animal perdido/encontrado (ej. desde el GPS del dispositivo al momento del reporte). Lo que **no existe** es un mapa interactivo en la UI: el usuario busca y visualiza por ubicación administrativa (Provincia/Localidad), no por un mapa con pines. No quitar estos campos del modelo ni reemplazarlos por FK a Provincia/Localidad — conviven ambos: lat/long como dato del reporte, Provincia/Localidad como criterio de filtro para el usuario. Las del teléfono **nunca se exponen** en la API: sólo sirven de respaldo del filtro por cercanía cuando el lugar no se pudo geocodificar (2026-09-30).
 

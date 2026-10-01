@@ -42,6 +42,7 @@ enum GeneroMascota {
 enum TipoMensaje {
   TEXTO
   SOLICITUD
+  ANIMAL_PERDIDO
 
   @@map("tipo_mensaje")
 }
@@ -755,13 +756,22 @@ model Chat {
   // esta HU no salen de una solicitud.
   solicitudId Int? @map("solicitud_id")
 
+  // Aviso de animal perdido/encontrado que abrió la sala (HU-13.2). Excluyente con
+  // `solicitudId`: una sala nace de una solicitud o de un reclamo, nunca de las dos.
+  //
+  // A diferencia de la sala de una solicitud, que se reusa entre las mismas dos personas,
+  // la de un reclamo es POR AVISO: marcar el aviso Resuelto deja su sala en sólo lectura, y
+  // con una sala compartida eso cortaría una conversación ajena al aviso.
+  animalPerdidoId Int? @map("animal_perdido_id")
+
   usuarioAlta Int       @map("chat_usuario_alta")
   fechaAlta   DateTime  @default(now()) @map("chat_fecha_alta")
   usuarioBaja Int?      @map("chat_usuario_baja")
   fechaBaja   DateTime? @map("chat_fecha_baja")
 
-  refugio   Refugio?   @relation(fields: [refugioId], references: [id])
-  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
+  refugio       Refugio?       @relation(fields: [refugioId], references: [id])
+  solicitud     Solicitud?     @relation(fields: [solicitudId], references: [id])
+  animalPerdido AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
 
   participantes UsuarioChat[]
   mensajes      Mensaje[]
@@ -838,15 +848,19 @@ model Mensaje {
   // Sólo en los mensajes de tipo SOLICITUD: la tarjeta que se pinta en la sala.
   solicitudId Int? @map("solicitud_id")
 
+  // Sólo en los de tipo ANIMAL_PERDIDO: la tarjeta del aviso reclamado (HU-13.2).
+  animalPerdidoId Int? @map("animal_perdido_id")
+
   chatId    Int @map("chat_id")
   usuarioId Int @map("usuario_id")
 
   usuarioAlta Int      @map("mensaje_usuario_alta")
   fechaAlta   DateTime @default(now()) @map("mensaje_fecha_alta")
 
-  chat      Chat       @relation(fields: [chatId], references: [id])
-  usuario   Usuario    @relation(fields: [usuarioId], references: [id])
-  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
+  chat          Chat           @relation(fields: [chatId], references: [id])
+  usuario       Usuario        @relation(fields: [usuarioId], references: [id])
+  solicitud     Solicitud?     @relation(fields: [solicitudId], references: [id])
+  animalPerdido AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
 
   // Conteo de no leídos con el modelo nuevo: "mensajes de la sala que no emití yo y son
   // posteriores a mi última lectura". Los índices parciales de HU-5.1 siguen en SQL a mano.
@@ -1035,6 +1049,10 @@ model AnimalPerdido {
   mascota             Mascota?            @relation(fields: [mascotaId], references: [id])
   especie             Especie?            @relation(fields: [especieId], references: [id])
   estadoAnimalPerdido EstadoAnimalPerdido @relation(fields: [estadoAnimalPerdidoId], references: [id])
+
+  // Salas de reencuentro del aviso (HU-13.2): una por persona que lo reclamó.
+  chats    Chat[]
+  mensajes Mensaje[]
 
   @@index([especieId])
   // Filtro por provincia y localidad del portal.

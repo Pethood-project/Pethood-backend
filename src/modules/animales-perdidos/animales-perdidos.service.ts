@@ -1,13 +1,14 @@
 /**
- * Avisos de mascotas perdidas y encontradas (spec 020, HU-13.1): alta y portal.
+ * Avisos de mascotas perdidas y encontradas: alta y portal (spec 020, HU-13.1), reclamo con
+ * chat de reencuentro y cierre del caso (spec 024, HU-13.2).
  *
  * **El aviso es de la PERSONA que lo carga**, sea adoptante o miembro de un refugio, y desde
  * cualquiera de sus dos perfiles: el perfil activo (`X-Ambito`) no cambia nada. Es la misma
  * lógica que el chat de reencuentro (HU-13.2), que es entre personas y nunca lleva
  * `refugioId`.
  *
- * Fuera de esta HU, y anotado en la spec: el botón "Abrir chat" (HU-13.2) y el paso a
- * "Resuelto", la edición y la baja del aviso (HU-13.3).
+ * Fuera de estas dos HUs, y anotado en la spec 024: la edición del aviso, su baja por el
+ * reportante, el histórico de estados y la reapertura de un caso (HU-13.3).
  */
 import { AppError } from '../../middlewares/errorHandler';
 import { distanciaKm, resolverCoordenadasDeMapsUrl, type Coordenadas } from '../../shared/geo';
@@ -21,10 +22,15 @@ import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import { aFechaISO } from '../../shared/validation/dates';
-import { ESTADOS_ANIMAL_PERDIDO_EN_ALTA } from '../catalogos/catalogos.service';
+import {
+  ESTADO_ANIMAL_PERDIDO_RESUELTO,
+  ESTADOS_ANIMAL_PERDIDO_EN_ALTA,
+} from '../catalogos/catalogos.service';
+import * as chats from '../chats/chats.service';
 import type {
   AvisoDto,
   CrearAvisoDto,
+  ReclamoDto,
   FiltrosAvisosDto,
   ListaAvisosDto,
   LugarEnMapaDto,
@@ -323,6 +329,128 @@ export async function listarUbicaciones(): Promise<ProvinciaConLocalidadesDto[]>
       provincia,
       localidades: [...localidades].sort(alfabetico),
     }));
+}
+
+/**
+ * El aviso en condiciones de ser reclamado o cerrado, o un error explicando por qué no.
+ *
+ * Las dos acciones de HU-13.2 comparten estas tres validaciones: que el aviso exista, que no
+ * esté dado de baja y que el caso no esté ya cerrado. Lo que cambia es quién puede hacer
+ * cada una, y eso lo chequea cada función.
+ */
+async function exigirAvisoAbierto(id: number) {
+  const aviso = await repo.buscarParaReclamo(id);
+
+  if (!aviso || aviso.fechaBaja) {
+    throw new AppError('NO_ENCONTRADO', 'No encontramos ese aviso', 404);
+  }
+
+  if (aviso.estadoAnimalPerdido.nombre === ESTADO_ANIMAL_PERDIDO_RESUELTO) {
+    throw new AppError('AVISO_RESUELTO', 'Este caso ya está resuelto', 409);
+  }
+
+  return aviso;
+}
+
+/**
+ * HU-13.2: reclamar un aviso abre la sala de reencuentro con quien lo publicó.
+ *
+ * La sala es por aviso y por reclamante: ver `chats.asegurarChatDeReclamo`, que es donde
+ * vive esa regla. Acá quedan las validaciones del aviso, que es la entidad de este módulo.
+ *
+ * **Idempotente**: el botón "Enviar mensaje" no se esconde después del primer reclamo, así
+ * que volver a tocarlo devuelve la misma sala en vez de abrir otra. Por eso responde 200 y
+ * no 201 — ver el contrato.
+ *
+ * El ámbito del pedido NO se mira: el aviso es de la persona y la sala también, así que un
+ * miembro de refugio reclama como persona aunque esté mirando la app en vista refugio. Es la
+ * misma razón por la que el alta no exige ámbito.
+ */
+export async function reclamarAviso(id: number, reclamanteId: number): Promise<ReclamoDto> {
+  const aviso = await exigirAvisoAbierto(id);
+
+  // El front ya esconde el botón con `esPropio`; esto cubre a quien llame a la API directo.
+  // Es 400 y no 403: no es un permiso que le falte, es un pedido que no tiene sentido.
+  if (aviso.usuarioReportanteId === reclamanteId) {
+    throw new AppError('RECLAMO_PROPIO', 'Este aviso es tuyo: no podés reclamarlo', 400);
+  }
+
+  // Una cuenta dada de baja no puede recibir mensajes. El chat ya rechaza escribirle a un
+  // contacto inactivo, pero abrir una sala muerta y mandar al usuario ahí es peor que
+  // decírselo acá.
+  if (aviso.usuarioReportante.fechaBaja) {
+    throw new AppError(
+      'REPORTANTE_INACTIVO',
+      'No podemos abrir la conversación: la cuenta de quien publicó el aviso fue dada de baja',
+      409,
+    );
+  }
+
+  const { chatId, nueva } = await chats.asegurarChatDeReclamo(
+    id,
+    reclamanteId,
+    aviso.usuarioReportanteId,
+  );
+
+  await registrarAuditoria({
+    usuarioId: reclamanteId,
+    accion: 'RECLAMAR',
+    entidad: 'AnimalPerdido',
+    entidadId: id,
+    detalle: `chat=${chatId} nueva=${nueva}`,
+  });
+
+  return { chatId, nueva };
+}
+
+/**
+ * HU-13.2: el reportante marca que el animal volvió y el caso se cierra.
+ *
+ * Cierra el caso y las salas asociadas, que es lo que pide REQUISITOS §13. "Cerrar" la sala
+ * es dejarla en SÓLO LECTURA y no darla de baja: la conversación sigue visible y legible
+ * —hace falta para coordinar la entrega real del animal, que no termina cuando alguien toca
+ * el botón— pero no acepta mensajes nuevos. El estado no se guarda en `chat`: se deriva del
+ * estado del aviso, así no hay dos fuentes de verdad.
+ *
+ * Sólo el reportante: es su caso. Un reclamante que crea que ya está no cierra nada.
+ *
+ * Lo que NO hace, y es HU-13.3: reabrir un caso cerrado, pasar de Perdido a Encontrado o
+ * guardar el histórico de estados. Por eso "Resuelto" es terminal por ahora.
+ */
+export async function marcarResuelto(id: number, usuarioId: number): Promise<AvisoDto> {
+  const aviso = await exigirAvisoAbierto(id);
+
+  if (aviso.usuarioReportanteId !== usuarioId) {
+    throw new AppError('SIN_PERMISO', 'Sólo quien publicó el aviso puede resolverlo', 403);
+  }
+
+  const resuelto = await repo.buscarEstadoPorNombre(ESTADO_ANIMAL_PERDIDO_RESUELTO);
+
+  // El catálogo viene sembrado con los tres estados; si falta, es un problema de datos y no
+  // algo que el usuario pueda arreglar.
+  if (!resuelto) {
+    throw new AppError('ESTADO_INVALIDO', 'No pudimos resolver el aviso', 500);
+  }
+
+  const actualizado = await repo.marcarResuelto({
+    id,
+    estadoId: resuelto.id,
+    usuarioId,
+  });
+
+  // Después de persistir el estado: si esto falla, el caso ya está cerrado igual y lo único
+  // que se perdió es la línea de aviso en la sala.
+  const salasCerradas = await chats.cerrarSalasDeAviso(id).catch(() => 0);
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'RESOLVER',
+    entidad: 'AnimalPerdido',
+    entidadId: id,
+    detalle: `salas=${salasCerradas}`,
+  });
+
+  return aDto(actualizado, usuarioId);
 }
 
 /** Baja de un aviso por el admin (spec 008, deuda #28): el motivo le llega a quien lo publicó. */

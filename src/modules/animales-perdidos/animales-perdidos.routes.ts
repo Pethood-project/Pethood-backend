@@ -31,3 +31,14 @@ animalesPerdidosRouter.post(
   comprimirImagen,
   controller.crear,
 );
+
+// HU-13.2: reclamar el aviso abre (o reencuentra) la sala de reencuentro con quien lo
+// publicó. Es POST y no PATCH por lo mismo que `/chats/:id/leidos`: no se edita un recurso
+// identificado, se ejecuta la acción "reclamo este aviso".
+//
+// Sin `validar(...)`: no recibe body. Quién puede reclamar y en qué estado lo valida el
+// service, que es el que conoce el aviso.
+animalesPerdidosRouter.post('/:id/reclamo', controller.reclamar);
+
+// HU-13.2: el reportante cierra el caso. Mismo criterio de verbo que el reclamo.
+animalesPerdidosRouter.post('/:id/resuelto', controller.resolver);

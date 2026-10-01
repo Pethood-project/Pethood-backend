@@ -86,6 +86,29 @@ export async function listarUbicaciones(
   }
 }
 
+/**
+ * HU-13.2: reclamar el aviso y quedarse con la sala de reencuentro.
+ *
+ * 200 y no 201 porque es idempotente: el botón sigue visible después del primer reclamo y
+ * volver a tocarlo devuelve la misma sala. El `nueva` del body distingue los dos casos.
+ */
+export async function reclamar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json(await service.reclamarAviso(idDeParametro(req), req.usuario!.usuarioId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** HU-13.2: el reportante cierra el caso. Devuelve el aviso ya resuelto. */
+export async function resolver(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json(await service.marcarResuelto(idDeParametro(req), req.usuario!.usuarioId));
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** Baja de un aviso por el admin (spec 008, deuda #28). Devuelve 204. */
 export async function darDeBajaPorAdmin(
   req: Request,
