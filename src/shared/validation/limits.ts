@@ -52,6 +52,13 @@ export const LIMITES = {
   /** Solo web-admin (spec 002) — no hay contraparte en la app mobile, no se mirrorea. */
   admin: {
     motivo: { min: 1, max: 500 },
+    /** Respuesta con la que el admin resuelve un reporte (spec 008, HU-3.7). */
+    respuestaReporte: { min: 1, max: 500 },
+  },
+
+  /** Reporte de moderación (spec 008, HU-3.1 a HU-3.3). Texto libre. Espejo en el frontend mobile. */
+  reporte: {
+    motivo: { min: 5, max: 500 },
   },
 
   /** Formulario de contacto público (spec 015, HU-15.2). */
