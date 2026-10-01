@@ -257,19 +257,24 @@ export interface CabeceraChatDto {
    * ISO: el texto es una decisión de UI y el redondeo depende del idioma.
    */
   minutosRespuesta: number | null;
-  /** La solicitud que originó la sala, o `null` si no nació de una (HU-13.2, salas viejas). */
+  /** La solicitud vigente de la sala, o `null` si no hay ninguna. */
   solicitud: SolicitudEnChatDto | null;
-  /** El aviso que originó la sala, o `null` si no nació de un reclamo (HU-13.2). */
+  /**
+   * El aviso de la última tarjeta de aviso de la sala (HU-13.2), o `null` si no hay ninguna.
+   *
+   * **No es excluyente con `solicitud`**: desde que el reclamo entra en la conversación que ya
+   * existía con esa persona, una sala puede tener las dos tarjetas.
+   */
   aviso: AvisoEnChatDto | null;
   /**
-   * La sala se puede leer pero no escribir. Hoy pasa en una sola situación: el aviso de un
-   * reclamo se marcó Resuelto, que es lo que REQUISITOS llama "cierra el chat asociado".
+   * De qué se está hablando: cuál de las dos tarjetas es la vigente, o `null` si no hay
+   * ninguna. Es la más reciente, la misma regla que ya regía para dos solicitudes en la misma
+   * sala.
    *
-   * Viaja resuelto por el backend y no como "el aviso está Resuelto" para que el cliente no
-   * tenga que conocer la regla: cuando mañana haya otro motivo para cerrar una sala, la
-   * pantalla no cambia.
+   * Lo decide el backend para que el subtítulo de la cabecera no tenga que comparar fechas ni
+   * conocer la regla.
    */
-  soloLectura: boolean;
+  contexto: 'SOLICITUD' | 'ANIMAL_PERDIDO' | null;
 }
 
 /**

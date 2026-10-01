@@ -272,26 +272,28 @@ Las cinco condiciones que este documento anotaba se cumplieron:
 
 Si la creación de la sala falla, **no se cae la solicitud**: ya está creada y confirmada al usuario. Queda registrado en consola y la sala se puede abrir en un intento posterior.
 
-#### La sala de reencuentro (HU-13.2) — ✅ implementada
+#### La tarjeta de un aviso reclamado (HU-13.2) — ✅ implementada
 
-**Reclamar un aviso de mascota perdida/encontrada también abre una sala**, con la tarjeta del aviso adentro. Vive en `chats.service.ts → asegurarChatDeReclamo` y la llama el módulo de animales perdidos (`POST /animales-perdidos/:id/reclamo`, ver [`api-mascotas-perdidas.md`](./api-mascotas-perdidas.md)). Es el segundo —y por ahora último— lugar del sistema que crea chats.
+**Reclamar un aviso de mascota perdida/encontrada deja la tarjeta del aviso en la conversación con quien lo publicó**, y la abre si todavía no existía. Vive en `chats.service.ts → asegurarChatDeReclamo` y la llama el módulo de animales perdidos (`POST /animales-perdidos/:id/reclamo`, ver [`api-mascotas-perdidas.md`](./api-mascotas-perdidas.md)). Es el segundo —y por ahora último— lugar del sistema que crea chats.
 
-Las mismas cinco condiciones, resueltas distinto donde corresponde:
+Las mismas cinco condiciones:
 
 1. **CONSTITUTION §7** — la interacción previa es el reclamo, que el artículo nombra explícitamente junto con la solicitud ("solicitud de adopción **o reporte de mascota perdida**").
 2. **Fila de `UsuarioChat` para los dos**: el reclamante y el reportante. No hay miembros de refugio que sumar.
 3. **`Chat.refugioId` siempre `null`**: el aviso es de la persona que lo cargó, no de su refugio, así que las dos partes ven la sala desde su perfil **personal**. Un miembro de refugio reclama como persona aunque esté en vista refugio.
-4. **Sin salas duplicadas — pero la sala es por AVISO, no entre las partes.** Es la diferencia con la solicitud, y es deliberada: marcar el aviso Resuelto deja su sala en sólo lectura, y con una sala compartida eso cortaría una conversación ajena al aviso. Consecuencias:
-   - el mismo aviso reclamado por cinco personas abre **cinco salas**, cada una con el reportante;
-   - dos personas que ya tenían una conversación por una adopción abren **además** otra por el aviso;
-   - reclamar dos veces el mismo aviso devuelve **la misma sala** y no duplica la tarjeta (el endpoint es idempotente y responde 200).
+4. **Sin salas duplicadas — y la sala es entre las partes, igual que la de una solicitud.** Se busca con el mismo `buscarChatEntre`. Consecuencias:
+   - si las dos personas ya se escribían (por una adopción, o por otro aviso), la tarjeta entra en **esa misma** conversación;
+   - el mismo aviso reclamado por cinco personas deja **cinco tarjetas**, una en la conversación de cada reclamante con el reportante;
+   - reclamar dos veces el mismo aviso devuelve **la misma conversación** y **no** repite la tarjeta (el endpoint es idempotente y responde 200).
 
-   La búsqueda va por participación ("¿hay sala de este aviso donde este usuario participe?") y el índice único parcial sobre `(animal_perdido_id, chat_usuario_alta)` cubre dos requests concurrentes. En una sala de reclamo, quien la crea **es** quien reclama.
-5. **`chat_tipo` sigue sin definirse** y no se escribe: la sala de reclamo se reconoce por `animal_perdido_id`, no por un tipo.
+   La idempotencia es por **(aviso, sala)**, y el índice único parcial sobre `mensaje (animal_perdido_id, chat_id)` cubre dos requests concurrentes. Es el equivalente de `chat_solicitud_unico_idx`.
+5. **`chat_tipo` sigue sin definirse** y no se escribe.
 
-`chat.solicitud_id` y `chat.animal_perdido_id` son **excluyentes**: una sala nace de una solicitud o de un reclamo. Con las dos en `null` es una sala anterior a HU-5.2.
+`chat.animal_perdido_id` guarda el aviso que **abrió** la sala, igual que `solicitud_id` guarda la solicitud que la abrió; si el reclamo cayó en una conversación que ya existía, queda en `null`. **Lo que se habló vive en `mensaje.animal_perdido_id`**, una tarjeta por aviso — por eso una sala puede acumular dos avisos, o un aviso y una solicitud.
 
-A diferencia de la de solicitudes, esta función **sí lanza** si no puede abrir la sala: el reclamo no persistió nada antes de llamarla —la sala ES el resultado de la acción—, así que el endpoint tiene que decirlo en vez de devolver un 200 vacío.
+> **Resolver un aviso no cierra la conversación.** REQUISITOS §13 pedía "cierra el caso y el chat asociado"; la segunda mitad se descartó por decisión del equipo del 2026-10-01, justamente porque con la sala compartida cerrarla silenciaría charlas ajenas al aviso. Ver [spec 024 §9](./specs/024-reclamar-mascota-perdida.md).
+
+A diferencia de la de solicitudes, esta función **sí lanza** si no puede abrir la sala: el reclamo no persistió nada antes de llamarla —la conversación ES el resultado de la acción—, así que el endpoint tiene que decirlo en vez de devolver un 200 vacío.
 
 ### Deuda del modelo: `leido` no soportaba chats grupales — ✅ resuelta
 

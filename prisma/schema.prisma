@@ -756,12 +756,12 @@ model Chat {
   // esta HU no salen de una solicitud.
   solicitudId Int? @map("solicitud_id")
 
-  // Aviso de animal perdido/encontrado que abrió la sala (HU-13.2). Excluyente con
-  // `solicitudId`: una sala nace de una solicitud o de un reclamo, nunca de las dos.
+  // Aviso de animal perdido/encontrado que abrió la sala (HU-13.2). Mismo papel que
+  // `solicitudId`: es el ORIGEN de la conversación, no todo lo que se habló en ella.
   //
-  // A diferencia de la sala de una solicitud, que se reusa entre las mismas dos personas,
-  // la de un reclamo es POR AVISO: marcar el aviso Resuelto deja su sala en sólo lectura, y
-  // con una sala compartida eso cortaría una conversación ajena al aviso.
+  // La sala es entre las partes, igual que la de una solicitud: si las dos personas ya se
+  // escribían, el reclamo cae en la conversación que tenían y esta columna queda en null.
+  // Lo que se habló vive en `Mensaje.animalPerdidoId`, una tarjeta por aviso.
   animalPerdidoId Int? @map("animal_perdido_id")
 
   usuarioAlta Int       @map("chat_usuario_alta")
@@ -848,7 +848,9 @@ model Mensaje {
   // Sólo en los mensajes de tipo SOLICITUD: la tarjeta que se pinta en la sala.
   solicitudId Int? @map("solicitud_id")
 
-  // Sólo en los de tipo ANIMAL_PERDIDO: la tarjeta del aviso reclamado (HU-13.2).
+  // Sólo en los de tipo ANIMAL_PERDIDO: la tarjeta del aviso reclamado (HU-13.2). Una sala
+  // puede acumular varias (dos avisos de la misma persona, o un aviso y una solicitud); un
+  // índice único parcial sobre (animal_perdido_id, chat_id) evita repetir la misma.
   animalPerdidoId Int? @map("animal_perdido_id")
 
   chatId    Int @map("chat_id")
@@ -1050,7 +1052,7 @@ model AnimalPerdido {
   especie             Especie?            @relation(fields: [especieId], references: [id])
   estadoAnimalPerdido EstadoAnimalPerdido @relation(fields: [estadoAnimalPerdidoId], references: [id])
 
-  // Salas de reencuentro del aviso (HU-13.2): una por persona que lo reclamó.
+  // Las salas que abrió este aviso (HU-13.2) y las tarjetas que dejó en una conversación.
   chats    Chat[]
   mensajes Mensaje[]
 

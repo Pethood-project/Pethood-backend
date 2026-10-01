@@ -1,12 +1,13 @@
 /**
- * HU-13.2 — la sala de reencuentro de un aviso de animal perdido/encontrado.
+ * HU-13.2 — la tarjeta de un aviso de mascota perdida en la conversación.
  *
  * Mismos mocks que `chats.mensajes.service.test.ts`: el repository, el storage y el emisor de
  * websockets, para que el service se pueda testear sin base, sin disco y sin sockets.
  *
- * Lo que se verifica acá es lo que distingue esta sala de la de una solicitud: que sea por
- * aviso y por reclamante (y no entre las partes), que no se duplique, que la tarjeta la emita
- * SISTEMA, y que un aviso resuelto deje la conversación legible pero cerrada.
+ * Lo que se verifica acá es lo que define el diseño: que el reclamo **reuse** la conversación
+ * que ya exista con esa persona en vez de abrir una segunda, que la tarjeta no se duplique, que
+ * la emita SISTEMA, y que una sala con una solicitud y un aviso nombre el más reciente de los
+ * dos en la cabecera.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as repo from '../../../src/modules/chats/chats.repository';
@@ -28,6 +29,7 @@ const CHAT = 8;
 const CHAT_NUEVO = 300;
 
 const FECHA = new Date('2026-09-01T14:05:00.000Z');
+const FECHA_VIEJA = new Date('2026-08-20T09:00:00.000Z');
 
 /** Lo que devuelve `buscarAvisoParaChat`. */
 function aviso(opciones: { estado?: string; nombre?: string | null } = {}) {
@@ -47,6 +49,30 @@ function aviso(opciones: { estado?: string; nombre?: string | null } = {}) {
     usuarioReportanteId: REPORTANTE,
     estadoAnimalPerdido: { id: 1, nombre: estado },
     especie: { nombre: 'Gato' },
+  };
+}
+
+/** Lo que devuelve `buscarSolicitudParaChat`, para la sala que tiene las dos tarjetas. */
+function solicitud() {
+  return {
+    id: 90,
+    fechaAlta: FECHA_VIEJA,
+    usuarioId: RECLAMANTE,
+    tipoSolicitud: { nombre: 'Adopcion' },
+    historicoEstados: [{ estadoSolicitud: { nombre: 'Pendiente' } }],
+    publicacion: {
+      id: 12,
+      imagenUrl: '/api/v1/archivos/publicaciones/max.jpg',
+      mascota: {
+        id: 5,
+        nombre: 'Max',
+        fechaNacimiento: FECHA_VIEJA,
+        imagenUrl: null,
+        refugioId: null,
+        usuarioId: REPORTANTE,
+        raza: { especie: { nombre: 'Perro' } },
+      },
+    },
   };
 }
 
@@ -89,11 +115,12 @@ beforeEach(() => {
   vi.mocked(repo.ultimosMensajesParaRespuesta).mockResolvedValue([] as never);
   vi.mocked(repo.buscarUltimaSolicitudDelChat).mockResolvedValue(null);
   vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(null as never);
-  vi.mocked(repo.buscarChatDeReclamo).mockResolvedValue(null);
+  vi.mocked(repo.buscarUltimoAvisoDelChat).mockResolvedValue(null);
+  // Por defecto, sin conversación previa entre las dos personas.
+  vi.mocked(repo.buscarChatEntre).mockResolvedValue(null);
+  vi.mocked(repo.buscarMensajeDeReclamo).mockResolvedValue(null);
   vi.mocked(repo.buscarAvisoParaChat).mockResolvedValue(aviso() as never);
-  vi.mocked(repo.buscarAvisoDelChat).mockResolvedValue({ animalPerdidoId: AVISO } as never);
   vi.mocked(repo.crearChatDeReclamo).mockResolvedValue({ id: CHAT_NUEVO } as never);
-  vi.mocked(repo.listarChatsDeAviso).mockResolvedValue([] as never);
   vi.mocked(repo.crearMensaje).mockResolvedValue({
     id: 500,
     chatId: CHAT_NUEVO,
@@ -113,7 +140,7 @@ beforeEach(() => {
 });
 
 describe('asegurarChatDeReclamo', () => {
-  it('crea la sala entre el reclamante y el reportante, sin refugio', async () => {
+  it('sin conversación previa, la abre entre las dos personas y sin refugio', async () => {
     const resultado = await service.asegurarChatDeReclamo(AVISO, RECLAMANTE, REPORTANTE);
 
     expect(resultado).toEqual({ chatId: CHAT_NUEVO, nueva: true });
@@ -124,7 +151,27 @@ describe('asegurarChatDeReclamo', () => {
     });
   });
 
-  it('deja la tarjeta del aviso emitida por SISTEMA, no por el reclamante', async () => {
+  it('con una conversación ya abierta con esa persona, deja la tarjeta ahí y no crea otra', async () => {
+    // El caso que motivó el diseño: ya se escribían por una adopción.
+    vi.mocked(repo.buscarChatEntre).mockResolvedValue({ id: CHAT } as never);
+
+    const resultado = await service.asegurarChatDeReclamo(AVISO, RECLAMANTE, REPORTANTE);
+
+    expect(resultado).toEqual({ chatId: CHAT, nueva: false });
+    expect(repo.crearChatDeReclamo).not.toHaveBeenCalled();
+    // La tarjeta sí: es lo que dice de qué aviso se está hablando.
+    expect(repo.crearMensaje).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: CHAT, tipo: 'ANIMAL_PERDIDO', animalPerdidoId: AVISO }),
+    );
+  });
+
+  it('busca la conversación entre las partes, igual que una segunda solicitud', async () => {
+    await service.asegurarChatDeReclamo(AVISO, RECLAMANTE, REPORTANTE);
+
+    expect(repo.buscarChatEntre).toHaveBeenCalledWith(RECLAMANTE, { usuarioId: REPORTANTE });
+  });
+
+  it('deja la tarjeta emitida por SISTEMA, no por el reclamante', async () => {
     await service.asegurarChatDeReclamo(AVISO, RECLAMANTE, REPORTANTE);
 
     expect(repo.crearMensaje).toHaveBeenCalledWith({
@@ -164,115 +211,95 @@ describe('asegurarChatDeReclamo', () => {
     expect(mensaje.aviso).not.toHaveProperty('distanciaKm');
   });
 
-  it('el segundo reclamo reusa la sala y no duplica la tarjeta', async () => {
-    vi.mocked(repo.buscarChatDeReclamo).mockResolvedValue({ id: CHAT } as never);
+  it('el segundo reclamo del mismo aviso no repite la tarjeta', async () => {
+    vi.mocked(repo.buscarChatEntre).mockResolvedValue({ id: CHAT } as never);
+    vi.mocked(repo.buscarMensajeDeReclamo).mockResolvedValue({ chatId: CHAT } as never);
 
     const resultado = await service.asegurarChatDeReclamo(AVISO, RECLAMANTE, REPORTANTE);
 
     expect(resultado).toEqual({ chatId: CHAT, nueva: false });
-    expect(repo.crearChatDeReclamo).not.toHaveBeenCalled();
     expect(repo.crearMensaje).not.toHaveBeenCalled();
+    expect(emisor.emitirMensajeNuevo).not.toHaveBeenCalled();
   });
 
-  it('busca la sala por aviso y reclamante, no la que ya exista entre las dos personas', async () => {
+  it('la idempotencia es por aviso Y por sala: otro reclamante deja su propia tarjeta', async () => {
     await service.asegurarChatDeReclamo(AVISO, RECLAMANTE, REPORTANTE);
 
-    expect(repo.buscarChatDeReclamo).toHaveBeenCalledWith(AVISO, RECLAMANTE);
-    // `buscarChatEntre` es la regla de las solicitudes ("la sala es entre las partes") y acá
-    // no corresponde: cerrar una sala compartida cortaría una conversación ajena al aviso.
-    expect(repo.buscarChatEntre).not.toHaveBeenCalled();
+    expect(repo.buscarMensajeDeReclamo).toHaveBeenCalledWith(AVISO, CHAT_NUEVO);
   });
 });
 
-describe('cerrarSalasDeAviso', () => {
-  it('deja «Volvió con su dueño» en cada sala del aviso y no da de baja ninguna', async () => {
-    vi.mocked(repo.listarChatsDeAviso).mockResolvedValue([
-      { id: 11, participantes: [{ usuarioId: RECLAMANTE }, { usuarioId: REPORTANTE }] },
-      { id: 22, participantes: [{ usuarioId: 99 }, { usuarioId: REPORTANTE }] },
-    ] as never);
-
-    expect(await service.cerrarSalasDeAviso(AVISO)).toBe(2);
-
-    expect(repo.crearMensaje).toHaveBeenNthCalledWith(1, {
-      chatId: 11,
-      usuarioId: USUARIO_SISTEMA_ID,
-      contenido: 'Volvió con su dueño',
-      imagenes: [],
-    });
-    expect(repo.crearMensaje).toHaveBeenNthCalledWith(2, {
-      chatId: 22,
-      usuarioId: USUARIO_SISTEMA_ID,
-      contenido: 'Volvió con su dueño',
-      imagenes: [],
-    });
-    expect(emisor.emitirMensajeNuevo).toHaveBeenCalledTimes(2);
-  });
-
-  it('un aviso sin salas no es un error: nadie lo reclamó', async () => {
-    expect(await service.cerrarSalasDeAviso(AVISO)).toBe(0);
-    expect(repo.crearMensaje).not.toHaveBeenCalled();
-  });
-});
-
-describe('la sala de un aviso resuelto queda en sólo lectura', () => {
-  it('la cabecera lo dice y trae el aviso', async () => {
-    vi.mocked(repo.buscarAvisoParaChat).mockResolvedValue(aviso({ estado: 'Resuelto' }) as never);
+describe('la cabecera de una sala con aviso', () => {
+  it('trae el aviso de la última tarjeta y lo nombra como contexto', async () => {
+    vi.mocked(repo.buscarUltimoAvisoDelChat).mockResolvedValue({
+      animalPerdidoId: AVISO,
+      fechaAlta: FECHA,
+    } as never);
 
     const cabecera = await service.obtenerCabecera(RECLAMANTE, CHAT);
 
-    expect(cabecera.soloLectura).toBe(true);
-    expect(cabecera.aviso).toMatchObject({ id: AVISO, estado: 'Resuelto' });
-  });
-
-  it('con el aviso abierto se puede escribir', async () => {
-    const cabecera = await service.obtenerCabecera(RECLAMANTE, CHAT);
-
-    expect(cabecera.soloLectura).toBe(false);
     expect(cabecera.aviso).toMatchObject({ id: AVISO, estado: 'Perdido' });
+    expect(cabecera.contexto).toBe('ANIMAL_PERDIDO');
   });
 
-  it('una sala que no es de reclamo nunca está en sólo lectura', async () => {
-    vi.mocked(repo.buscarAvisoDelChat).mockResolvedValue({ animalPerdidoId: null } as never);
+  it('una sala sin tarjetas no tiene contexto', async () => {
+    const cabecera = await service.obtenerCabecera(RECLAMANTE, CHAT);
+
+    expect(cabecera.aviso).toBeNull();
+    expect(cabecera.solicitud).toBeNull();
+    expect(cabecera.contexto).toBeNull();
+  });
+
+  it('con una solicitud y un aviso, gana el más reciente', async () => {
+    // El caso que aparece al reusar la conversación: primero pidió adoptar, después reclamó.
+    vi.mocked(repo.buscarUltimaSolicitudDelChat).mockResolvedValue({
+      solicitudId: 90,
+      fechaAlta: FECHA_VIEJA,
+    } as never);
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(solicitud() as never);
+    vi.mocked(repo.buscarUltimoAvisoDelChat).mockResolvedValue({
+      animalPerdidoId: AVISO,
+      fechaAlta: FECHA,
+    } as never);
 
     const cabecera = await service.obtenerCabecera(RECLAMANTE, CHAT);
 
-    expect(cabecera.soloLectura).toBe(false);
-    expect(cabecera.aviso).toBeNull();
+    // Las dos viajan: el cliente las tiene si las necesita.
+    expect(cabecera.solicitud).toMatchObject({ id: 90 });
+    expect(cabecera.aviso).toMatchObject({ id: AVISO });
+    expect(cabecera.contexto).toBe('ANIMAL_PERDIDO');
   });
 
-  it('enviar un mensaje a una sala cerrada responde CHAT_CERRADO', async () => {
+  it('si la solicitud es la más reciente, el contexto es la solicitud', async () => {
+    vi.mocked(repo.buscarUltimaSolicitudDelChat).mockResolvedValue({
+      solicitudId: 90,
+      fechaAlta: FECHA,
+    } as never);
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(solicitud() as never);
+    vi.mocked(repo.buscarUltimoAvisoDelChat).mockResolvedValue({
+      animalPerdidoId: AVISO,
+      fechaAlta: FECHA_VIEJA,
+    } as never);
+
+    const cabecera = await service.obtenerCabecera(RECLAMANTE, CHAT);
+
+    expect(cabecera.contexto).toBe('SOLICITUD');
+  });
+});
+
+describe('resolver un aviso no toca la conversación', () => {
+  it('se puede seguir escribiendo en la sala de un aviso resuelto', async () => {
+    // Decisión del equipo del 2026-10-01: "cierra el caso y el chat asociado" quedó en cerrar
+    // sólo el caso. Con la sala compartida, cerrarla cortaría charlas ajenas al aviso.
     vi.mocked(repo.buscarAvisoParaChat).mockResolvedValue(aviso({ estado: 'Resuelto' }) as never);
-
-    await expect(
-      service.enviarMensaje({ contenido: 'Hola' }, { usuarioId: RECLAMANTE, chatId: CHAT }),
-    ).rejects.toMatchObject({ codigo: 'CHAT_CERRADO', httpStatus: 409 });
-
-    expect(repo.crearMensaje).not.toHaveBeenCalled();
-  });
-
-  it('la sala cerrada se rechaza antes de tocar el storage', async () => {
-    vi.mocked(repo.buscarAvisoParaChat).mockResolvedValue(aviso({ estado: 'Resuelto' }) as never);
-
-    await expect(
-      service.enviarMensaje(
-        { contenido: undefined },
-        {
-          usuarioId: RECLAMANTE,
-          chatId: CHAT,
-          archivos: [{ buffer: Buffer.from('foto'), mimetype: 'image/jpeg' }],
-        },
-      ),
-    ).rejects.toMatchObject({ codigo: 'CHAT_CERRADO' });
-
-    // Si se guardara primero, cada envío rechazado dejaría un archivo huérfano.
-    expect(storage.guardarImagenes).not.toHaveBeenCalled();
-  });
-
-  it('con el aviso abierto el mensaje se envía', async () => {
+    vi.mocked(repo.buscarUltimoAvisoDelChat).mockResolvedValue({
+      animalPerdidoId: AVISO,
+      fechaAlta: FECHA,
+    } as never);
     vi.mocked(repo.crearMensaje).mockResolvedValue({
       id: 501,
       chatId: CHAT,
-      contenido: 'Hola',
+      contenido: 'Gracias por todo',
       imagenUrl: null,
       imagenes: [],
       tipo: 'TEXTO' as const,
@@ -285,11 +312,25 @@ describe('la sala de un aviso resuelto queda en sólo lectura', () => {
     } as never);
 
     const enviado = await service.enviarMensaje(
-      { contenido: 'Hola' },
+      { contenido: 'Gracias por todo' },
       { usuarioId: RECLAMANTE, chatId: CHAT },
     );
 
-    expect(enviado.contenido).toBe('Hola');
+    expect(enviado.contenido).toBe('Gracias por todo');
     expect(enviado.aviso).toBeNull();
+  });
+
+  it('la cabecera de una sala con el aviso resuelto no la marca de ninguna forma especial', async () => {
+    vi.mocked(repo.buscarAvisoParaChat).mockResolvedValue(aviso({ estado: 'Resuelto' }) as never);
+    vi.mocked(repo.buscarUltimoAvisoDelChat).mockResolvedValue({
+      animalPerdidoId: AVISO,
+      fechaAlta: FECHA,
+    } as never);
+
+    const cabecera = await service.obtenerCabecera(RECLAMANTE, CHAT);
+
+    // El estado del aviso se informa en la tarjeta; la conversación sigue siendo normal.
+    expect(cabecera.aviso).toMatchObject({ estado: 'Resuelto' });
+    expect(cabecera).not.toHaveProperty('soloLectura');
   });
 });

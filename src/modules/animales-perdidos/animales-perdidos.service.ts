@@ -406,11 +406,15 @@ export async function reclamarAviso(id: number, reclamanteId: number): Promise<R
 /**
  * HU-13.2: el reportante marca que el animal volvió y el caso se cierra.
  *
- * Cierra el caso y las salas asociadas, que es lo que pide REQUISITOS §13. "Cerrar" la sala
- * es dejarla en SÓLO LECTURA y no darla de baja: la conversación sigue visible y legible
- * —hace falta para coordinar la entrega real del animal, que no termina cuando alguien toca
- * el botón— pero no acepta mensajes nuevos. El estado no se guarda en `chat`: se deriva del
- * estado del aviso, así no hay dos fuentes de verdad.
+ * **Cierra el caso, no la conversación.** REQUISITOS §13 describe HU-13.3 como "cierra el caso
+ * y el chat asociado"; esa segunda mitad se descartó por decisión del equipo del 2026-10-01
+ * (ver spec 024 §9): desde que el reclamo entra en la conversación que ya existía con esa
+ * persona, cerrarla cortaría charlas que no tienen nada que ver con el aviso. Y aunque fuera
+ * una sala dedicada, silenciarla justo cuando el caso se resolvió es lo peor para coordinar la
+ * entrega real del animal, que no termina cuando alguien toca el botón.
+ *
+ * Lo que sí hace: el estado pasa a Resuelto y se llena `fecha_resuelto`. El portal lo marca
+ * con "Volvió con su dueño", que es el criterio de aceptación de la HU.
  *
  * Sólo el reportante: es su caso. Un reclamante que crea que ya está no cierra nada.
  *
@@ -438,16 +442,12 @@ export async function marcarResuelto(id: number, usuarioId: number): Promise<Avi
     usuarioId,
   });
 
-  // Después de persistir el estado: si esto falla, el caso ya está cerrado igual y lo único
-  // que se perdió es la línea de aviso en la sala.
-  const salasCerradas = await chats.cerrarSalasDeAviso(id).catch(() => 0);
-
   await registrarAuditoria({
     usuarioId,
     accion: 'RESOLVER',
     entidad: 'AnimalPerdido',
     entidadId: id,
-    detalle: `salas=${salasCerradas}`,
+    detalle: `estado=${resuelto.nombre}`,
   });
 
   return aDto(actualizado, usuarioId);

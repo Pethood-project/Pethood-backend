@@ -146,9 +146,10 @@ una tarjeta que dijera "En revisión" para siempre mentiría.
 
 ### Mensajes de sistema: el aviso embebido (HU-13.2)
 
-Mismo tratamiento, con la **tarjeta del aviso de mascota perdida/encontrada** que PetHood deja
-en la sala cuando alguien reclama. Es el **primer mensaje** de una sala de reencuentro, lo emite
-SISTEMA y su `contenido` va vacío:
+Mismo tratamiento, con la **tarjeta del aviso de mascota perdida/encontrada** que PetHood deja en
+la conversación cuando alguien reclama. Lo emite SISTEMA y su `contenido` va vacío. Es el primer
+mensaje si la conversación nació del reclamo, y uno más en el medio si las dos personas ya se
+escribían:
 
 ```json
 {
@@ -196,9 +197,12 @@ resolvió, la tarjeta del historial lo dice.
 (regla 6 de la spec 020) y la distancia depende de dónde está quien mira, que en una sala de
 chat no es un dato que la tarjeta necesite. Si hace falta, el portal la trae.
 
-**El mensaje de cierre es otra cosa.** Cuando el aviso pasa a Resuelto, cada sala recibe un
-`TEXTO` de SISTEMA con `contenido: "Volvió con su dueño"` y `aviso: null`: es una línea del
-sistema, no una tarjeta.
+**Una sala puede tener varias tarjetas**, y de los dos tipos: la conversación con una persona
+acumula las solicitudes que le enviaste y los avisos que le reclamaste. Cada mensaje trae la suya;
+la cabecera nombra la más reciente (ver `contexto`).
+
+**Resolver el aviso no manda ningún mensaje ni cambia la sala.** Lo único que cambia es el
+`estado` que trae la tarjeta, que se resuelve en cada pedido.
 
 ---
 
@@ -234,7 +238,7 @@ Con esto **la pantalla se pinta sola**, sin depender de lo que le haya pasado el
     }
   },
   "aviso": null,
-  "soloLectura": false
+  "contexto": "SOLICITUD"
 }
 ```
 
@@ -245,8 +249,8 @@ Con esto **la pantalla se pinta sola**, sin depender de lo que le haya pasado el
 | `enLinea` | Snapshot de presencia al momento del pedido. **A partir de ahí lo actualiza `chat:presencia`** |
 | `minutosRespuesta` | En cuántos MINUTOS suele responder el contacto en esta sala, o `null`. Alimenta el "responde en ~2 h" del header |
 | `solicitud` | La solicitud **vigente** de la sala —la última tarjeta que se dejó—, o `null` si no hay ninguna. Una conversación con un refugio acumula pedidos; acá va el más reciente. Alimenta el subtítulo "Solicitud #1042 · Max" |
-| `aviso` | El aviso de mascota perdida que abrió la sala (HU-13.2), o `null` si no nació de un reclamo. Misma forma que en el mensaje — ver "Mensajes de sistema: el aviso embebido". **Excluyente con `solicitud`** |
-| `soloLectura` | La sala se **lee pero no se escribe**. Esconder la barra de escritura y mostrar un cartel |
+| `aviso` | El aviso de la **última** tarjeta de aviso de la sala (HU-13.2), o `null` si no hay ninguna. Misma forma que en el mensaje — ver "Mensajes de sistema: el aviso embebido". **No es excluyente con `solicitud`** |
+| `contexto` | `"SOLICITUD"`, `"ANIMAL_PERDIDO"` o `null`: de cuál de las dos se está hablando. Alimenta el subtítulo |
 
 **`minutosRespuesta` viaja como número y no como texto** por el mismo motivo que las fechas
 van en ISO: "~2 h" es una decisión de UI y el redondeo depende del idioma.
@@ -259,19 +263,22 @@ tendencia, y es preferible no decir nada a inventar una expectativa.
 
 **Un refugio nunca viene `enLinea: true`**: es una institución, no una sesión. Sólo las personas se conectan.
 
-#### `soloLectura`: por qué es un booleano y no "el aviso está resuelto"
+#### `contexto`: por qué lo decide el backend
 
-Hoy hay **un solo** motivo para cerrar una sala: el aviso de un reclamo pasó a Resuelto, que es
-lo que REQUISITOS §13 llama "cierra el chat asociado". El backend manda la conclusión y no la
-causa, así que el cliente no tiene que conocer la regla: el día que haya otro motivo, la
-pantalla no cambia.
+Desde HU-13.2, una sala puede tener **las dos** tarjetas: la conversación con una persona acumula
+las solicitudes que le enviaste y los avisos que le reclamaste. El subtítulo muestra una, y la
+elegida es la **más reciente** — la misma regla que ya regía cuando una sala acumulaba dos
+solicitudes ("la vigente es la última tarjeta").
 
-**Cerrar es sólo lectura, no baja lógica.** La sala sigue en el listado y la conversación se
-puede leer completa — hace falta para coordinar la entrega real del animal, que no termina
-cuando alguien toca el botón. Lo único que se rechaza son los mensajes nuevos.
+Viaja resuelta en `contexto` y no como dos fechas para que el cliente no tenga que compararlas ni
+conocer la regla; `solicitud` y `aviso` viajan igual las dos, por si la pantalla necesita algo
+más que el subtítulo.
 
-Del lado del backend **no hay columna**: se deriva del estado del aviso, así no hay dos fuentes
-de verdad que se puedan contradecir.
+**Ninguna sala se cierra.** REQUISITOS §13 pedía que resolver un aviso cerrara "el chat
+asociado"; se descartó por decisión del equipo del 2026-10-01 (ver
+[spec 024 §9](./specs/024-reclamar-mascota-perdida.md)), porque con la sala compartida eso
+silenciaría charlas que no tienen nada que ver con el aviso. No hay `soloLectura` ni
+`CHAT_CERRADO`.
 
 ### Errores
 
@@ -475,14 +482,13 @@ El objeto `Mensaje` completo, **ya persistido**: cuando el cliente recibe el 201
 | 400 | `DEMASIADOS_ARCHIVOS` | Podés adjuntar un solo video por mensaje | Más de un video |
 | 400 | `ADJUNTOS_MEZCLADOS` | Mandá el video solo: no se puede combinar con fotos en el mismo mensaje | Video + foto juntos |
 | 409 | `CONTACTO_INACTIVO` | No podés escribirle: la cuenta de este contacto fue dada de baja | El otro se dio de baja |
-| 409 | `CHAT_CERRADO` | Este caso se resolvió: la conversación quedó como consulta | La sala es de un reclamo y el aviso pasó a Resuelto (HU-13.2) |
 | 404 | `CHAT_SIN_CONTACTO` | Esta conversación ya no tiene contraparte | Sala sin ningún otro participante activo |
 
 **Sobre el 413:** el exceso de tamaño va como **400**, no 413. El middleware de upload es compartido con HU-6.1, publicaciones e historia clínica; devolver 413 sólo acá rompería la consistencia de la API por un matiz semántico. Si algún día se cambia, se cambia para todos los módulos a la vez.
 
 **`CONTACTO_INACTIVO` es la contracara de `activo: false` del listado:** con una cuenta dada de baja se puede **leer** la conversación pero no escribirle. El cliente debería deshabilitar el input antes de llegar acá; el backend lo garantiza igual.
 
-**`CHAT_CERRADO` es la contracara de `soloLectura: true` de la cabecera**, con la misma lógica: el cliente esconde la barra de escritura y el backend lo garantiza igual. Se chequea **antes de tocar el storage**, así un envío rechazado no deja un archivo huérfano.
+**Resolver un aviso no bloquea el envío.** No hay ningún código de error por "caso cerrado": las dos personas siguen pudiendo escribirse después de que el animal volvió, que es justamente cuando coordinan la entrega.
 
 ---
 
@@ -837,10 +843,9 @@ anotaban se cumplieron, incluida la fila de `UsuarioChat` para cada miembro del 
 sin ella la sala no aparecería en GUI-31 ni dejaría entrar por REST ni por socket, porque
 **todo este módulo autoriza contra `UsuarioChat`**.
 
-La **sala de reencuentro de HU-13.2** también está: la abre el reclamo de un aviso de mascota
-perdida/encontrada, con `refugio_id` en `null` y la tarjeta del aviso adentro. A diferencia de
-la de una solicitud, es **por aviso y por reclamante** y no entre las partes — el motivo y las
-consecuencias, en `api-chats.md`.
+El **reclamo de un aviso (HU-13.2)** también abre salas: con `refugio_id` en `null` y la tarjeta
+del aviso adentro, y sólo si las dos personas no se escribían ya. Es **entre las partes**, igual
+que la de una solicitud — las consecuencias, en `api-chats.md`.
 
 ### Auditoría de `Mensaje`
 

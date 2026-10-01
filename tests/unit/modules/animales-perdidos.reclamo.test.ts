@@ -7,7 +7,6 @@ vi.mock('../../../src/modules/animales-perdidos/animales-perdidos.repository', (
 }));
 vi.mock('../../../src/modules/chats/chats.service', () => ({
   asegurarChatDeReclamo: vi.fn(),
-  cerrarSalasDeAviso: vi.fn(),
 }));
 vi.mock('../../../src/shared/logAuditoria', () => ({
   registrarAuditoria: vi.fn().mockResolvedValue(undefined),
@@ -103,7 +102,7 @@ describe('reclamarAviso', () => {
 });
 
 describe('marcarResuelto', () => {
-  it('cierra el caso y deja el mensaje en las salas del aviso', async () => {
+  it('cierra el caso y devuelve el aviso resuelto', async () => {
     mockedRepo.buscarParaReclamo.mockResolvedValue(avisoAbierto());
     mockedRepo.buscarEstadoPorNombre.mockResolvedValue({ id: 3, nombre: 'Resuelto' });
     mockedRepo.marcarResuelto.mockResolvedValue({
@@ -125,13 +124,11 @@ describe('marcarResuelto', () => {
       especie: { id: 1, nombre: 'Gato' },
       usuarioReportante: { id: 3, nombre: 'Ana', apellido: 'Paz', imagenUrl: null },
     } as never);
-    mockedChats.cerrarSalasDeAviso.mockResolvedValue(2);
 
     const aviso = await marcarResuelto(7, 3);
 
     expect(aviso.estado.nombre).toBe('Resuelto');
     expect(aviso.fechaResuelto).not.toBeNull();
-    expect(mockedChats.cerrarSalasDeAviso).toHaveBeenCalledWith(7);
   });
 
   it('sólo lo puede resolver quien publicó el aviso', async () => {
@@ -150,7 +147,10 @@ describe('marcarResuelto', () => {
     expect(mockedRepo.marcarResuelto).not.toHaveBeenCalled();
   });
 
-  it('cierra el caso igual si el mensaje en las salas falla', async () => {
+  it('no toca las conversaciones del aviso', async () => {
+    // Decisión del equipo del 2026-10-01: resolver cierra el CASO, no el chat. REQUISITOS §13
+    // decía "y el chat asociado"; con la conversación compartida entre las dos personas,
+    // cerrarla cortaría charlas que no tienen nada que ver con el aviso.
     mockedRepo.buscarParaReclamo.mockResolvedValue(avisoAbierto());
     mockedRepo.buscarEstadoPorNombre.mockResolvedValue({ id: 3, nombre: 'Resuelto' });
     mockedRepo.marcarResuelto.mockResolvedValue({
@@ -172,10 +172,16 @@ describe('marcarResuelto', () => {
       especie: null,
       usuarioReportante: { id: 3, nombre: 'Ana', apellido: 'Paz', imagenUrl: null },
     } as never);
-    mockedChats.cerrarSalasDeAviso.mockRejectedValue(new Error('socket caído'));
 
-    // El aviso ya está resuelto en base: no tiene por qué volver atrás porque una sala no se
-    // pudo anotar.
-    await expect(marcarResuelto(7, 3)).resolves.toMatchObject({ id: 7 });
+    await marcarResuelto(7, 3);
+
+    // Resolver no pasa por el módulo de chat en absoluto: el estado del aviso es lo único que
+    // cambia, y la conversación sigue aceptando mensajes.
+    expect(mockedChats.asegurarChatDeReclamo).not.toHaveBeenCalled();
+    expect(mockedRepo.marcarResuelto).toHaveBeenCalledWith({
+      id: 7,
+      estadoId: 3,
+      usuarioId: 3,
+    });
   });
 });

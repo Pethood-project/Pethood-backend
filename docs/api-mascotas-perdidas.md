@@ -411,7 +411,7 @@ Ya existía (catálogos de HU-6.1). Devuelve `[{ "id": 1, "nombre": "Perro" }, {
 
 ## `POST /api/v1/animales-perdidos/:id/reclamo` — Reclamar el aviso (HU-13.2)
 
-Abre la **sala de reencuentro** con quien publicó el aviso y deja adentro la tarjeta del aviso. Si la sala ya existe, la devuelve.
+Deja la **tarjeta del aviso** en la conversación con quien lo publicó, y la abre si todavía no existía.
 
 Es el botón **"Enviar mensaje"** del popup de detalle de GUI-06.
 
@@ -435,10 +435,12 @@ No recibe body.
 
 | Campo | Tipo | Qué es |
 |---|---|---|
-| `chatId` | number | La sala. El cliente navega a ella y la pinta con `GET /chats/:chatId`, que existe justamente para abrir una sala sin pasar por el listado. |
-| `nueva` | boolean | `false` si la sala ya existía. |
+| `chatId` | number | La conversación. El cliente navega a ella y la pinta con `GET /chats/:chatId`, que existe justamente para abrir una sala sin pasar por el listado. |
+| `nueva` | boolean | `true` sólo si hubo que **abrir** la conversación. Con `false` el usuario entra a una que ya tenía con esa persona. |
 
-**200 y no 201 porque es idempotente.** El botón no se esconde después del primer reclamo, así que volver a tocarlo es el caso normal: devuelve la misma sala y **no** duplica la tarjeta. La sala es por **aviso y por reclamante**: el mismo aviso reclamado por cinco personas abre cinco salas, y dos personas que ya tenían una conversación por una adopción abren además otra por el aviso (el motivo está en la [spec 024 §3](specs/024-reclamar-mascota-perdida.md)).
+**200 y no 201 porque es idempotente.** El botón no se esconde después del primer reclamo, así que volver a tocarlo es el caso normal: devuelve la misma conversación y **no** repite la tarjeta.
+
+**La conversación es entre las partes, no por aviso.** Si las dos personas ya se escribían —por una adopción, o por otro aviso— la tarjeta entra en esa misma conversación en vez de abrir una segunda con el mismo contacto. El mismo aviso reclamado por cinco personas deja cinco tarjetas, una en la conversación de cada reclamante con el reportante. El motivo está en la [spec 024 §9](specs/024-reclamar-mascota-perdida.md).
 
 ### Errores
 
@@ -454,7 +456,7 @@ No recibe body.
 
 ## `POST /api/v1/animales-perdidos/:id/resuelto` — Cerrar el caso (HU-13.2)
 
-El reportante marca que el animal volvió. El aviso pasa a **Resuelto**, se le llena `fechaResuelto` y **sus salas quedan en sólo lectura**, con un mensaje de sistema "Volvió con su dueño" en cada una.
+El reportante marca que el animal volvió. El aviso pasa a **Resuelto** y se le llena `fechaResuelto`.
 
 Es el botón **"Resuelto"** del popup de detalle de GUI-06, que sólo aparece en un aviso propio.
 
@@ -472,13 +474,13 @@ No recibe body.
 
 La **tarjeta de aviso** completa (la misma forma de arriba), ya con `estado.nombre: "Resuelto"` y `fechaResuelto` llena, para que el cliente reemplace el ítem del portal en memoria sin refetch.
 
-### Qué significa "cerrar la sala"
+### Cierra el caso, NO la conversación
 
-**Sólo lectura, no baja lógica.** La conversación sigue apareciendo en el listado y se puede leer; lo que no acepta son mensajes nuevos (409 `CHAT_CERRADO` en el envío). Dar de baja la sala justo cuando el caso se resolvió es lo peor para coordinar la entrega real del animal, que no termina cuando alguien toca el botón.
+REQUISITOS §13 describe este botón como "cierra el caso **y el chat asociado**". Esa segunda mitad **no se implementa**, por decisión del equipo del 2026-10-01: con la conversación compartida entre las dos personas, cerrarla silenciaría charlas que no tienen nada que ver con el aviso. Y aun con una sala dedicada, silenciarla justo cuando el caso se resolvió es lo peor para coordinar la **entrega real del animal**, que no termina cuando alguien toca el botón.
 
-El estado **se deriva** del aviso: no hay columna en `chat`. El cliente lo recibe resuelto en `soloLectura` de la cabecera (ver [`api-chat-sala.md`](./api-chat-sala.md)).
+O sea: este endpoint **no toca el módulo de chat en absoluto**. No manda mensajes, no cierra salas, y las dos personas siguen pudiendo escribirse. El único cambio visible en la conversación es el `estado` de la tarjeta del aviso, que se resuelve en cada pedido.
 
-Si el mensaje de cierre falla, **el caso queda resuelto igual**: lo único que se pierde es esa línea en la sala.
+El razonamiento completo está en la [spec 024 §9, decisión 2](specs/024-reclamar-mascota-perdida.md).
 
 ### Errores
 
@@ -500,7 +502,7 @@ Si el mensaje de cierre falla, **el caso queda resuelto igual**: lo único que s
 3. **Badge de estado** con `estado.nombre`. Los avisos Resueltos también aparecen: la HU los quiere visibles.
 4. **Botón "Enviar mensaje"** (HU-13.2): visible cuando `esPropio` es `false` y el aviso no está Resuelto. Llama a `POST /animales-perdidos/:id/reclamo` y navega a `/chats/<chatId>` con el id que devuelve.
 5. **Botón "Marcar como resuelto"** (HU-13.2): en su lugar cuando `esPropio` es `true` y el aviso no está Resuelto, con modal de confirmación (regla transversal 6). Llama a `POST /animales-perdidos/:id/resuelto` y reemplaza el aviso del portal con la tarjeta que devuelve.
-6. **Aviso Resuelto:** la leyenda "Volvió con su dueño" en la tarjeta y en el detalle, y ninguno de los dos botones.
+6. **Aviso Resuelto:** la leyenda "Volvió con su dueño" en la tarjeta y en el detalle, y ninguno de los dos botones. La conversación con el reportante **no cambia**: se sigue pudiendo escribir.
 7. **Pantalla de filtros:** fecha "desde" (obligatoria para filtrar por fecha) y "hasta" (opcional); estados de `GET /estados-animal-perdido`; especies de `GET /especies`, las dos de selección múltiple; provincias y localidades (varias de cada una, en desplegables) de `GET /animales-perdidos/ubicaciones`; y un radio en km para la cercanía.
 8. **Estados de la pantalla:** cargando / vacío / error. El vacío es `avisos: []`, no un error.
 9. **Ubicación del usuario:** mandar `latitud` y `longitud` siempre que se tengan, aunque no haya radio: así cada tarjeta trae `distanciaKm`. Sin permiso de ubicación el portal funciona igual, sin distancias ni filtro por cercanía.
@@ -566,7 +568,6 @@ El paso a **Resuelto** y el cierre de las salas ya están: los implementó HU-13
 - **Histórico de estados:** hoy "Resuelto" es **terminal** y alcanzan la FK, `fecha_resuelto` y las columnas de auditoría. Si un aviso se puede **reabrir** o pasar de Perdido a Encontrado, conviene una tabla `AnimalPerdidoEstado` con el mismo patrón que `PublicacionEstado` (una fila vigente por aviso y el historial completo). El sólo lectura de las salas se deriva del estado del aviso, así que reabrir un caso reabre sus salas sin tocar `chat`.
 - **Editar y dar de baja el aviso** por el reportante (baja lógica).
 - **Tope anti-spam** de avisos activos por usuario, si el equipo lo quiere.
-- **Cerrar las salas de un aviso dado de baja por moderación:** hoy quedan vivas y escribibles. Anotado en `DEUDA_TECNICA.md`.
 
 ### Avisos viejos sin provincia
 

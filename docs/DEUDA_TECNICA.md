@@ -59,8 +59,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
 | 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
 | 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
-| 32 | `chat` tiene dos FK de origen excluyentes y nada en base impide llenar las dos | Baja | backend |
-| 33 | Un aviso dado de baja por moderación no cierra sus salas de reencuentro | Baja | backend |
+| 32 | `chat` tiene dos FK de origen y nada en base impide llenar las dos | Baja | backend |
 
 ---
 
@@ -645,16 +644,17 @@ que el feed. Lo mismo vale para `GET /publicaciones?usuarioId=`.
 
 ---
 
-## 32. `chat` tiene dos FK de origen excluyentes y nada en base impide llenar las dos — Baja
+## 32. `chat` tiene dos FK de origen y nada en base impide llenar las dos — Baja
 
-**Qué pasa.** Desde HU-13.2 (spec 024), `chat` tiene `solicitud_id` y `animal_perdido_id`: una
-sala nace de una solicitud **o** de un reclamo de aviso, nunca de las dos. Esa exclusión la
-sostienen las dos únicas funciones que crean salas —`asegurarChatDeSolicitud` y
-`asegurarChatDeReclamo`, que llenan una sola cada una— y **nada más**. Un INSERT a mano, un seed
+**Qué pasa.** Desde HU-13.2 (spec 024), `chat` tiene `solicitud_id` y `animal_perdido_id`: las
+dos guardan qué hecho **abrió** la conversación, y sólo se escribe una, la del hecho que creó la
+fila. Esa invariante la sostienen las dos funciones que crean salas
+—`asegurarChatDeSolicitud` y `asegurarChatDeReclamo`— y **nada más**. Un INSERT a mano, un seed
 descuidado o una tercera forma de abrir salas pueden dejar una fila con las dos.
 
-**Qué rompería.** Poco, hoy: la cabecera resuelve `solicitud` y `aviso` por separado, así que
-las dos viajarían llenas y la pantalla pintaría dos tarjetas donde el diseño tiene una.
+**Qué rompería.** Poco, y menos que antes: la cabecera ya no las lee para decidir nada —el
+contexto sale de las **tarjetas** de `mensaje`, no de estas columnas—, así que una fila con las dos
+no cambia ninguna pantalla. Queda como un dato inconsistente sobre el origen de la sala.
 
 **Cómo se arregla.** Un `CHECK` en la tabla, en SQL a mano porque Prisma no expresa constraints
 de tabla:
@@ -665,23 +665,6 @@ ALTER TABLE "chat" ADD CONSTRAINT "chat_origen_excluyente"
 ```
 
 No se hizo en el PR de la HU para no mezclar un cambio de integridad con la funcionalidad, y
-porque conviene decidir antes si el origen de una sala no debería ser **una** columna
-polimórfica (`origen_tipo` + `origen_id`, como ya hace `reporte_problema`) en lugar de una FK
-por tipo. Con una tercera clase de sala, el patrón actual suma una columna más.
-
----
-
-## 33. Un aviso dado de baja por moderación no cierra sus salas — Baja
-
-**Qué pasa.** `darDeBajaPorAdmin` (spec 008) da de baja el aviso y le notifica a quien lo
-publicó, pero **no toca las salas de reencuentro** que ese aviso abrió: quedan vivas y
-escribibles. El sólo lectura se deriva del **estado** del aviso (Resuelto), no de su baja.
-
-**Por qué quedó así.** Una baja por moderación no es un caso resuelto: el aviso puede haberse
-bajado por una foto inapropiada mientras la conversación entre dos personas que están
-coordinando un encuentro es perfectamente legítima, y cortarla sería un castigo que nadie pidió.
-Es defendible, pero **no se decidió explícitamente**, así que queda acá en vez de en la spec.
-
-**Cómo se arregla.** `avisoDeLaSala` ya tiene `fechaBaja` del aviso en el select: sumarla a la
-condición de `soloLectura` alcanza. La decisión de producto —si una baja por moderación cierra
-la conversación— va antes que el código.
+porque conviene decidir antes si el origen de una sala no debería ser **una** columna polimórfica
+(`origen_tipo` + `origen_id`, como ya hace `reporte_problema`) en lugar de una FK por tipo. Con
+una tercera clase de sala, el patrón actual suma una columna más.

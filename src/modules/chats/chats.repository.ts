@@ -366,7 +366,7 @@ export function buscarUltimaSolicitudDelChat(chatId: number) {
   return prisma.mensaje.findFirst({
     where: { chatId, tipo: 'SOLICITUD', solicitudId: { not: null } },
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
-    select: { solicitudId: true },
+    select: { solicitudId: true, fechaAlta: true },
   });
 }
 
@@ -542,40 +542,17 @@ export function ultimosMensajesParaRespuesta(chatId: number, limite: number) {
   });
 }
 
-// ─────────────── Salas que nacen de un reclamo de aviso (HU-13.2) ───────────────
-
-/**
- * La sala de reencuentro de ESTE aviso donde el reclamante ya participa, si la hay.
- *
- * A diferencia de `buscarChatEntre`, que busca "la sala entre estas dos personas", acá la
- * clave es el AVISO: dos personas pueden tener una conversación por una adopción y además
- * una por un aviso, y son salas distintas a propósito (ver la migración
- * `20261001150000_hu132_chat_de_reclamo`).
- *
- * Se busca por participación y no por `chat_usuario_alta` porque ésa es la pregunta
- * semántica; el índice único sobre `(animal_perdido_id, chat_usuario_alta)` está para que
- * dos requests simultáneos no abran dos salas.
- */
-export function buscarChatDeReclamo(animalPerdidoId: number, reclamanteId: number) {
-  return prisma.chat.findFirst({
-    where: {
-      fechaBaja: null,
-      animalPerdidoId,
-      participantes: { some: { usuarioId: reclamanteId, fechaBaja: null } },
-    },
-    orderBy: { fechaAlta: 'asc' },
-    select: { id: true },
-  });
-}
+// ─────────────── La tarjeta de un aviso reclamado (HU-13.2) ───────────────
 
 /**
  * Crea la sala de un reclamo con sus dos participantes, en una transacción.
  *
+ * Sólo se llama cuando NO existe conversación entre las dos personas: si existe, el reclamo
+ * deja su tarjeta ahí (ver `asegurarChatDeReclamo`), igual que hace una segunda solicitud.
+ *
  * `refugioId` queda en `null` SIEMPRE: el aviso es de la persona que lo cargó, no de su
  * refugio (ver `animales-perdidos.service.ts`), así que la sala es entre personas y las dos
  * la ven desde su perfil personal.
- *
- * `creadoPor` es quien reclama, y el índice único parcial cuenta con eso.
  *
  * `chat_tipo` NO se escribe: sus valores siguen sin definirse en MODELO_DATOS.md.
  */
@@ -600,7 +577,14 @@ export function crearChatDeReclamo(datos: {
   });
 }
 
-/** ¿Este reclamo ya dejó su tarjeta en la sala? Evita repetirla en un reintento. */
+/**
+ * ¿Este aviso ya dejó su tarjeta en esta sala?
+ *
+ * Es la idempotencia del reclamo: el botón "Enviar mensaje" no se esconde después del
+ * primero, así que volver a tocarlo tiene que devolver la misma conversación sin repetir la
+ * tarjeta. Es por (aviso, sala) y no por aviso a secas: el mismo aviso reclamado por cinco
+ * personas deja cinco tarjetas, una en la conversación de cada una con el reportante.
+ */
 export function buscarMensajeDeReclamo(animalPerdidoId: number, chatId: number) {
   return prisma.mensaje.findFirst({
     where: { tipo: 'ANIMAL_PERDIDO', animalPerdidoId, chatId },
@@ -631,26 +615,16 @@ export function buscarAvisoParaChat(animalPerdidoId: number) {
 }
 
 /**
- * El aviso de la sala, si nació de un reclamo.
+ * El aviso de la ÚLTIMA tarjeta de aviso de la sala, con su fecha.
  *
- * Es lo que decide si la sala está en sólo lectura: un aviso Resuelto cierra su conversación
- * para escritura y la deja legible. El estado se DERIVA del aviso y no se guarda en `chat`,
- * así no hay dos fuentes de verdad que se puedan contradecir.
+ * Mismo criterio que `buscarUltimaSolicitudDelChat`: la cabecera nombra lo vigente, que es lo
+ * último que se dejó en la conversación. La fecha sale para poder compararla con la de la
+ * última solicitud, porque una sala puede tener las dos cosas y el subtítulo muestra una.
  */
-export function buscarAvisoDelChat(chatId: number) {
-  return prisma.chat.findUnique({
-    where: { id: chatId },
-    select: { animalPerdidoId: true },
-  });
-}
-
-/** Las salas vivas de un aviso: las recorre el paso a Resuelto para cerrar cada una. */
-export function listarChatsDeAviso(animalPerdidoId: number) {
-  return prisma.chat.findMany({
-    where: { animalPerdidoId, fechaBaja: null },
-    select: {
-      id: true,
-      participantes: { where: { fechaBaja: null }, select: { usuarioId: true } },
-    },
+export function buscarUltimoAvisoDelChat(chatId: number) {
+  return prisma.mensaje.findFirst({
+    where: { chatId, tipo: 'ANIMAL_PERDIDO', animalPerdidoId: { not: null } },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { animalPerdidoId: true, fechaAlta: true },
   });
 }

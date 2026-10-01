@@ -18,61 +18,75 @@ botón "Enviar mensaje" deshabilitado, y esta HU lo enciende.
 - **Incluye:**
   - Reclamo de un aviso: abre (o reencuentra) la sala de reencuentro con el reportante y deja
     adentro la tarjeta del aviso.
-  - La sala de reencuentro en el chat: aparece en el listado (GUI-08), se abre como cualquier
-    otra (GUI-14) y arranca con la tarjeta del aviso en lugar de vacía.
+  - La tarjeta del aviso en el chat: la conversación con el reportante aparece en el listado
+    (GUI-08), se abre como cualquier otra (GUI-14) y lleva adentro la tarjeta del aviso.
   - Paso del aviso a **Resuelto** por el reportante, con la leyenda "Volvió con su dueño" en el
-    portal, y el cierre de las salas del aviso (sólo lectura).
-- **NO incluye** (queda para HU-13.3):
-  - Editar el aviso y darlo de baja por el reportante.
+    portal.
+- **NO incluye:**
+  - **Cerrar la conversación al resolver el aviso**: descartado por decisión del equipo, no
+    postergado. Ver §9, decisión 2.
+  - Editar el aviso y darlo de baja por el reportante (HU-13.3).
   - Histórico de estados, reabrir un caso resuelto y pasar de Perdido a Encontrado. "Resuelto"
-    es **terminal** por ahora.
-  - Tope anti-spam de avisos activos por usuario.
+    es **terminal** por ahora (HU-13.3).
+  - Tope anti-spam de avisos activos por usuario (HU-13.3).
   - Notificación push del reclamo: el reportante lo ve por el badge del chat, como cualquier
     mensaje. La notificación es de HU-4.3.
 
 ### Por qué el botón "Resuelto" entra acá y no en HU-13.3
 
-El criterio de aceptación 3 de la HU lo pide textualmente, y REQUISITOS §13 describe HU-13.3
-como "cierra el caso **y el chat asociado**": ese chat recién existe a partir de esta spec, así
-que el cierre no se podía implementar antes. Lo que queda en HU-13.3 es todo lo demás de la
-gestión de estados, que no depende del chat.
+El criterio de aceptación 3 de la HU lo pide textualmente. Lo que queda en HU-13.3 es todo lo
+demás de la gestión de estados, que no depende del chat.
 
-Decisión tomada con el equipo el 2026-10-01, junto con las otras tres de §9.
+La otra mitad de lo que REQUISITOS §13 pide para ese botón —"cierra el caso **y el chat
+asociado**"— **no se implementa**, por decisión del equipo. El motivo está en §9, decisión 2.
+
+Decisiones tomadas con el equipo el 2026-10-01.
 
 ## 3. Entidades involucradas
 
 `Chat`, `Mensaje` y `AnimalPerdido`, ya existentes. Cambios sobre `docs/MODELO_DATOS.md`
 (migración `20261001150000_hu132_chat_de_reclamo`):
 
-- **`chat.animal_perdido_id`** (FK nullable → `AnimalPerdido`): el aviso que abrió la sala.
-  **Excluyente con `chat.solicitud_id`**: una sala nace de una solicitud o de un reclamo, nunca
-  de las dos. Con las dos en `NULL` es una sala anterior a HU-5.2.
+- **`chat.animal_perdido_id`** (FK nullable → `AnimalPerdido`): el aviso que **abrió** la sala,
+  cuando la abrió un reclamo. Mismo papel que `chat.solicitud_id`: es el origen de la
+  conversación, no la lista de todo lo que se habló en ella. Si el reclamo cayó en una
+  conversación que ya existía, queda en `NULL`.
 - **`mensaje.animal_perdido_id`** (FK nullable → `AnimalPerdido`): sólo en los mensajes de tipo
-  `ANIMAL_PERDIDO`, que son los que pintan la tarjeta. El mensaje de cierre **no** la lleva: es
-  un texto de sistema, no una tarjeta.
+  `ANIMAL_PERDIDO`, que son los que pintan la tarjeta. **Acá vive lo que se habló**: una sala
+  puede acumular dos avisos de la misma persona, o un aviso y una solicitud.
 - **`tipo_mensaje` += `ANIMAL_PERDIDO`**: el enum ya tenía `TEXTO` y `SOLICITUD`.
-- **Índice único parcial `chat_reclamo_unico_idx`** sobre
-  `(animal_perdido_id, chat_usuario_alta) WHERE animal_perdido_id IS NOT NULL AND chat_fecha_baja IS NULL`:
-  una sala por aviso y por reclamante, incluso con dos requests simultáneos. Va en SQL a mano
-  porque Prisma no expresa índices parciales, igual que `chat_solicitud_unico_idx`.
-- **Índice `chat_animal_perdido_id_idx`**: las salas de un aviso, que es lo que recorre el paso
-  a Resuelto.
+- **Índice único parcial `mensaje_aviso_por_chat_unico_idx`** sobre
+  `(animal_perdido_id, chat_id) WHERE animal_perdido_id IS NOT NULL`: una tarjeta por aviso y por
+  sala, incluso con dos requests simultáneos. Es el equivalente de `chat_solicitud_unico_idx`, y
+  va en SQL a mano porque Prisma no expresa índices parciales. **No** es único por aviso a secas:
+  el mismo aviso reclamado por cinco personas deja cinco tarjetas, una en la conversación de
+  cada reclamante con el reportante.
 
 `animal_perdido_fecha_resuelto` ya existía y hasta ahora sólo la escribía el seed: esta HU es la
 que la llena de verdad. El catálogo `Estado_Animal_Perdido` ya estaba sembrado con los tres
 estados, "Resuelto" incluido.
 
-### Por qué la sala es por aviso y no entre las partes
+### La sala es entre las partes, como la de una solicitud
 
-`asegurarChatDeSolicitud` reusa la sala que ya exista entre las dos personas ("la sala es entre
-las partes"): una segunda solicitud al mismo refugio cae en la conversación que ya había. Para
-un reclamo esa regla **no sirve**, porque marcar el aviso Resuelto deja su sala en sólo lectura
-y, con una sala compartida, eso cortaría una conversación que no tiene nada que ver con el
-aviso. El mismo aviso reclamado por cinco personas abre **cinco salas**, cada una con el
-reportante.
+`asegurarChatDeSolicitud` reusa la conversación que ya exista entre las dos personas ("la sala es
+entre las partes"): una segunda solicitud al mismo refugio deja su tarjeta en la que ya había. El
+reclamo hace **lo mismo**.
 
-Dos personas pueden tener a la vez una conversación por una adopción y otra por un aviso. Son
-dos filas de `chat` a propósito.
+Entonces, con Ana:
+
+| Qué pasa | Resultado |
+|---|---|
+| Le pediste adoptar a Max y ahora reclamás su aviso de Michi | La tarjeta de Michi entra en **esa misma** conversación |
+| No tenían conversación y reclamás Michi | Se abre una, con `animal_perdido_id` = Michi |
+| Volvés a tocar "Enviar mensaje" en Michi | La misma conversación, **sin** repetir la tarjeta |
+| Reclamás otro aviso de Ana | Otra tarjeta en la misma conversación |
+| Ana marca Michi como resuelto | El aviso queda Resuelto. **La conversación no cambia** |
+
+La primera versión de esta spec abría una sala **por aviso**, para poder cerrarla al resolver el
+caso sin tocar las demás. Se descartó el 2026-10-01 por las dos razones de §9, decisión 2: en el
+listado de chats dos filas con la misma persona son indistinguibles —mismo nombre, misma foto, y
+el preview deja de decir "Mascota perdida" en cuanto alguien escribe—, y el cierre que la
+justificaba también se descartó.
 
 ## 4. API (contrato backend)
 
@@ -86,7 +100,7 @@ identificado, se ejecuta una acción.
 
 Además, tres campos nuevos en endpoints que ya existían:
 
-- `GET /chats/:chatId` (cabecera) suma **`aviso`** y **`soloLectura`**.
+- `GET /chats/:chatId` (cabecera) suma **`aviso`** y **`contexto`**.
 - `GET /chats/:chatId/mensajes` y el evento `chat:mensaje-nuevo` suman **`aviso`** en el mensaje
   y el valor `ANIMAL_PERDIDO` en `tipo`.
 - `GET /chats` suma el valor `ANIMAL_PERDIDO` en `ultimoMensaje.tipo`.
@@ -103,10 +117,11 @@ repite para que no haya dos versiones que se desincronicen.
   popup ofrece en su lugar **"Marcar como resuelto"**, con modal de confirmación (regla
   transversal 6). Un aviso Resuelto muestra la leyenda **"Volvió con su dueño"** en la tarjeta y
   en el detalle, y no ofrece ninguno de los dos botones.
-- **GUI-14 Conversación:** una sala de reencuentro arranca con la **tarjeta del aviso** (foto,
-  nombre o especie, estado, lugar y fecha del suceso), con el mismo tratamiento que la tarjeta
-  de solicitud: ancho completo, emitida por PetHood, con acción para ir al aviso. Si el caso se
-  resolvió, la barra de escritura se reemplaza por un cartel y la conversación queda legible.
+- **GUI-14 Conversación:** la **tarjeta del aviso** (foto, nombre o especie, estado, lugar y
+  fecha del suceso) con el mismo tratamiento que la de solicitud: ancho completo, emitida por
+  PetHood, con acción para ir al aviso. El subtítulo de la cabecera nombra el contexto vigente
+  —el aviso o la solicitud, el que sea más reciente— con el campo `contexto`. **La barra de
+  escritura no cambia nunca por el estado del aviso.**
 - **GUI-08 Chat (listado):** una sala cuyo último mensaje es la tarjeta muestra "Mascota
   perdida" como preview, igual que "Solicitud".
 
@@ -115,25 +130,27 @@ repite para que no haya dos versiones que se desincronicen.
 1. Cualquier usuario autenticado puede reclamar, desde cualquiera de sus dos perfiles: el aviso
    es de la persona y la sala también, así que `X-Ambito` no cambia nada. La sala queda con
    `refugio_id` en `NULL` y las dos partes la ven desde su perfil **personal**. (backend)
-2. **No se puede reclamar un aviso propio** → 400 `RECLAMO_PROPIO`. El front ya esconde el botón
+2. **La conversación es entre las partes**: si ya existe una con el reportante, el reclamo deja
+   su tarjeta ahí en vez de abrir otra. (backend)
+3. **No se puede reclamar un aviso propio** → 400 `RECLAMO_PROPIO`. El front ya esconde el botón
    con `esPropio`; el backend lo valida igual. (backend y front)
-3. **No se puede reclamar un caso resuelto** → 409 `AVISO_RESUELTO`. (backend y front)
-4. **No se abre una sala contra una cuenta dada de baja** → 409 `REPORTANTE_INACTIVO`: es mejor
-   decirlo que mandar al usuario a una sala donde no va a poder escribir. (backend)
-5. El reclamo es **idempotente**: el botón no se esconde después del primer reclamo, así que
-   volver a tocarlo devuelve la misma sala (`nueva: false`) y no duplica la tarjeta. Responde
-   200, no 201. (backend)
-6. **Sólo el reportante resuelve** su aviso → 403 `SIN_PERMISO`. Un reclamante que crea que ya
-   está no cierra nada. (backend)
-7. CONSTITUTION §7 ("chat habilitado sólo tras interacción previa") queda satisfecha por el
+4. **No se puede reclamar un caso resuelto** → 409 `AVISO_RESUELTO`. (backend y front)
+5. **No se abre una conversación contra una cuenta dada de baja** → 409 `REPORTANTE_INACTIVO`: es
+   mejor decirlo que mandar al usuario a una sala donde no va a poder escribir. (backend)
+6. El reclamo es **idempotente**: el botón no se esconde después del primero, así que volver a
+   tocarlo devuelve la misma conversación (`nueva: false`) y **no** repite la tarjeta. Responde
+   200, no 201. La idempotencia es por **(aviso, sala)**: el mismo aviso reclamado por otra
+   persona deja su propia tarjeta en su propia conversación. (backend)
+7. **Sólo el reportante resuelve** su aviso → 403 `SIN_PERMISO`. (backend)
+8. **Resolver cierra el caso, no la conversación.** No hay sólo lectura ni baja de salas: las dos
+   personas siguen pudiendo escribirse. (backend y front)
+9. CONSTITUTION §7 ("chat habilitado sólo tras interacción previa") queda satisfecha por el
    reclamo, que el artículo nombra explícitamente: "solicitud de adopción **o reporte de mascota
    perdida**". (backend)
-8. **"Cerrar el chat asociado" es dejarlo en sólo lectura**, no darlo de baja: la conversación
-   sigue visible y legible, pero no acepta mensajes nuevos → 409 `CHAT_CERRADO`. (backend y
-   front)
-9. El sólo lectura **se deriva** del estado del aviso, no se guarda en `chat`: con dos columnas
-   podrían contradecirse, y el estado del aviso ya es la fuente de verdad del caso. (backend)
-10. La tarjeta del aviso en el chat **no lleva coordenadas ni distancia**: la regla 6 de la spec
+10. El subtítulo de la cabecera nombra la tarjeta **más reciente** de la sala, que puede ser una
+    solicitud o un aviso. Lo decide el backend (`contexto`) para que la regla no quede escrita en
+    dos lugares. (backend)
+11. La tarjeta del aviso en el chat **no lleva coordenadas ni distancia**: la regla 6 de la spec
     020 es que las del dispositivo no se exponen nunca, y la distancia depende de dónde está
     quien mira. (backend)
 
@@ -150,16 +167,20 @@ Los tres de la HU, desglosados:
 
 Y los que agrega el diseño de esta spec:
 
-- [x] Reclamar dos veces el mismo aviso devuelve la misma sala y no duplica la tarjeta.
-- [x] Dos personas distintas reclamando el mismo aviso abren dos salas distintas.
+- [x] Reclamar sin conversación previa con el reportante abre una.
+- [x] Reclamar cuando **ya** hay conversación con esa persona deja la tarjeta ahí y **no** abre
+      una segunda.
+- [x] Reclamar dos veces el mismo aviso devuelve la misma conversación y **no** repite la tarjeta.
+- [x] Dos personas distintas reclamando el mismo aviso dejan cada una su tarjeta en su propia
+      conversación con el reportante.
 - [x] Reclamar el aviso propio → 400 `RECLAMO_PROPIO`.
 - [x] Reclamar un aviso resuelto → 409 `AVISO_RESUELTO`.
 - [x] Resolver un aviso ajeno → 403 `SIN_PERMISO`.
 - [x] Resolver dos veces → 409 `AVISO_RESUELTO`.
-- [x] Después de resolver, la cabecera de cada sala del aviso trae `soloLectura: true` y escribir
-      responde 409 `CHAT_CERRADO`.
-- [x] La sala de reencuentro de una persona que también tiene una conversación de adopción con
-      el reportante es una sala **distinta**.
+- [x] **Después de resolver, las dos personas siguen pudiendo escribirse.** Resolver no pasa por
+      el módulo de chat.
+- [x] Una sala con una solicitud y un aviso trae las dos en la cabecera, y `contexto` nombra la
+      más reciente.
 - [x] La tarjeta del aviso la emite SISTEMA y no el reclamante (si no, se pintaría como burbuja
       propia en su pantalla).
 - [x] La tarjeta no expone latitud, longitud ni distancia.
@@ -173,48 +194,74 @@ contra la base con la migración aplicada (ver §8).
 - **El reportante borra su cuenta con la sala abierta:** la sala se sigue leyendo y el chat ya
   rechaza escribirle a un contacto inactivo (`CONTACTO_INACTIVO`). Un reclamo nuevo, en cambio,
   se corta antes con `REPORTANTE_INACTIVO`.
-- **El aviso se da de baja (moderación) con salas abiertas:** las salas quedan vivas y
-  escribibles. No se cierran: la baja es por moderación del aviso, no un caso resuelto, y cortar
-  la conversación de las dos partes sería un castigo que nadie pidió. Anotado como deuda.
-- **El mensaje de cierre falla** (socket caído, error de base): el aviso **ya quedó Resuelto** y
-  el cierre vale igual, porque el sólo lectura se deriva del estado. Lo único que se pierde es la
-  línea de aviso en la sala.
-- **Un aviso que nadie reclamó pasa a Resuelto:** `cerrarSalasDeAviso` no encuentra salas y
-  devuelve 0. No es un error.
-- **Dos requests de reclamo simultáneos:** el índice único parcial corta el segundo. El servicio
-  busca antes de crear, así que el caso sólo se da en una carrera real.
-- **Cursor del historial en una sala de reencuentro:** la tarjeta es el primer mensaje, así que
-  la query del aviso la paga sólo la última página.
+- **El aviso se da de baja (moderación) con la conversación abierta:** la conversación queda viva
+  y escribible, igual que al resolver. La tarjeta sigue mostrando el aviso.
+- **Dos requests de reclamo simultáneos:** el índice único parcial sobre `mensaje` corta la
+  segunda tarjeta. El servicio busca antes de crear, así que el caso sólo se da en una carrera
+  real. Lo que **no** cubre ningún índice es que dos requests abran dos conversaciones a la vez
+  si no había ninguna: es la misma ventana que ya tiene `asegurarChatDeSolicitud` con
+  `buscarChatEntre`, y se resuelve con la misma respuesta (no se resuelve; la carrera necesita
+  dos reclamos en el mismo milisegundo del mismo usuario al mismo aviso).
+- **Reclamar un aviso cuya conversación tiene el último mensaje de hace un año:** la tarjeta
+  entra ahí igual y el chat sube al tope del listado por fecha de actividad. Es lo mismo que hace
+  una segunda solicitud.
+- **Cursor del historial:** en una conversación larga la tarjeta puede quedar en una página
+  vieja; la query del aviso la paga sólo la página que la trae.
 
 ## 9. Notas y decisiones
 
-Decisiones tomadas con el equipo el 2026-10-01, a partir del relevamiento de la HU.
+Decisiones tomadas con el equipo el 2026-10-01, a partir del relevamiento de la HU. Las
+decisiones 2 y 4 **reemplazan** a las que tenía el primer borrador de esta spec, el mismo día,
+después de revisar cómo se veía el resultado en el listado de chats.
 
 1. **El botón "Resuelto" entra en esta HU** y no en HU-13.3 — ver §2.
-2. **"Cerrar el chat asociado" = sólo lectura**, no baja lógica. Dar de baja la conversación
-   justo cuando el caso se resolvió es lo peor para coordinar la entrega real del animal, que no
-   termina cuando alguien toca el botón; y la baja no es reversible desde la UI.
-3. **La sala arranca con la tarjeta del aviso**, con un valor nuevo de `tipo_mensaje` y su
+
+2. **Resolver el aviso NO cierra la conversación.** REQUISITOS §13 pide "cierra el caso y el chat
+   asociado"; esa segunda mitad se descarta, y no es un olvido: **el requisito se escribió sin
+   pensar en qué conversación se estaba cerrando** (decisión explícita del equipo).
+
+   Dos razones, en orden de peso:
+   - Con la conversación compartida (decisión 4), cerrarla silenciaría charlas que no tienen nada
+     que ver con el aviso: la misma sala puede tener una solicitud de adopción en curso.
+   - Incluso con una sala dedicada, silenciarla justo cuando el caso se resolvió es lo peor para
+     coordinar la **entrega real del animal**, que no termina cuando alguien toca el botón.
+
+   Qué queda del requisito: el caso **sí** se cierra (estado Resuelto, `fecha_resuelto`, y la
+   leyenda "Volvió con su dueño" en el portal), que es lo que el criterio de aceptación de la HU
+   pide literalmente. Lo que no se toca es el chat.
+
+3. **La conversación lleva la tarjeta del aviso**, con un valor nuevo de `tipo_mensaje` y su
    columna, reusando el patrón de la tarjeta de solicitud. Un reportante con cinco reclamos no
    tiene otra forma de saber de qué aviso le hablan, y hace visible la interacción previa que
-   pide CONSTITUTION §7.
-4. **La sala es por aviso y por reclamante**, no entre las partes — ver §3.
+   pide CONSTITUTION §7. Con la sala compartida es **más** necesaria, no menos: es lo único que
+   distingue "me escribe por Max" de "me escribe por Michi".
+
+4. **La conversación es entre las partes**, como la de una solicitud, y no una por aviso — ver
+   §3. El primer borrador abría una sala por aviso para poder cerrarla sin tocar las demás;
+   descartado el cierre (decisión 2), lo único que quedaba de esa variante era el costo: dos o
+   más filas en el listado de chats con el mismo nombre y la misma foto, que el usuario no puede
+   distinguir una vez que alguien escribe y el preview deja de decir "Mascota perdida".
 5. **El criterio de aceptación 1 pide mostrar "la ubicación donde se encontró (longitud y
    latitud)" y no se implementa así.** Las coordenadas del dispositivo **no se exponen nunca**:
    es la regla 6 de la spec 020 y la ambigüedad ya resuelta en REQUISITOS §10.1 (no hay mapa
    interactivo; la ubicación se muestra como Provincia/Localidad). El popup de detalle ya muestra
    el lugar, la distancia y el link a Google Maps, que es lo que el criterio quería lograr.
    Decisión anterior a esta HU, que esta spec respeta.
-6. **`chat_tipo` sigue sin escribirse**: sus valores no están definidos en MODELO_DATOS.md. La
-   sala de reclamo se reconoce por `animal_perdido_id`, no por un tipo.
+6. **`chat_tipo` sigue sin escribirse**: sus valores no están definidos en MODELO_DATOS.md. Una
+   conversación que empezó por un reclamo se reconoce por `animal_perdido_id`, y lo que se habló
+   en ella por las tarjetas de `mensaje`.
+
+7. **El subtítulo de la cabecera nombra la tarjeta más reciente.** Es consecuencia de la decisión
+   4: una conversación puede tener una solicitud y un aviso, y el subtítulo muestra uno. Se eligió
+   el más reciente porque es la regla que ya regía para dos solicitudes en la misma sala ("la
+   vigente es la última tarjeta"), no una regla nueva.
 
 ### Deuda que deja esta spec
 
 Anotada en [`docs/DEUDA_TECNICA.md`](../DEUDA_TECNICA.md):
 
-- **Ítem 32** — `Chat` tiene dos FK de origen excluyentes (`solicitud_id` y
-  `animal_perdido_id`) y nada en base impide llenar las dos.
-- **Ítem 33** — un aviso dado de baja por moderación no cierra sus salas.
+- **Ítem 32** — `Chat` tiene dos FK de origen (`solicitud_id` y `animal_perdido_id`) que en la
+  práctica nunca se llenan juntas, pero nada en base lo impide.
 
 Y sigue abierta la **28** (el dueño de un aviso no puede retirarlo), que es de HU-13.3.
 
