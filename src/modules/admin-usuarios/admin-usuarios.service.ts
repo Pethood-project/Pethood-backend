@@ -1,7 +1,7 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_API, ROL_DB, rolApiADb, rolesDbAApi } from '../../shared/roles';
-import { listarDeUsuario } from '../resenas/resenas.service';
+import { listarDeRefugio, listarDeUsuario } from '../resenas/resenas.service';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import type {
   AltaRefugioBody,
@@ -319,7 +319,7 @@ export async function obtenerDetalleRefugio(id: number) {
   const refugio = await repo.buscarRefugioDetalle(id);
   if (!refugio) throw new AppError('REFUGIO_NO_ENCONTRADO', 'No encontramos ese refugio.', 404);
 
-  const resumen = await repo.resumenRefugio(id);
+  const [resumen, resenas] = await Promise.all([repo.resumenRefugio(id), listarDeRefugio(id)]);
 
   return {
     refugio: aRefugioDto(refugio),
@@ -331,6 +331,7 @@ export async function obtenerDetalleRefugio(id: number) {
       roles: rolesDbAApi(u.roles.map((v) => v.rol.nombre)),
     })),
     resumen,
+    resenas,
   };
 }
 
