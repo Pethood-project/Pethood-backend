@@ -16,7 +16,16 @@ vi.mock('../../../../src/modules/admin-usuarios/admin-usuarios.repository', () =
   agregarRol: vi.fn(),
   quitarRol: vi.fn(),
   asignarRefugio: vi.fn(),
+  desasignarRefugio: vi.fn(),
+  resumenUsuario: vi.fn(),
   buscarRefugio: vi.fn(),
+}));
+
+vi.mock('../../../../src/modules/resenas/resenas.service', () => ({
+  listarDeUsuario: vi
+    .fn()
+    .mockResolvedValue({ promedio: null, cantidad: 0, distribucion: [], resenas: [] }),
+  listarDeRefugio: vi.fn(),
 }));
 
 vi.mock('../../../../src/shared/logAuditoria', () => ({
@@ -187,5 +196,60 @@ describe('gestionarRoles — último administrador', () => {
     } as never);
 
     expect(mockedRepo.quitarRol).toHaveBeenCalledWith(99, 2);
+  });
+});
+
+describe('gestionarRoles — adoptante', () => {
+  it('rechaza quitar ADOPTANTE', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake());
+
+    await expect(
+      service.gestionarRoles(2, 5, {
+        agregar: [],
+        quitar: ['ADOPTANTE'],
+        refugioId: undefined,
+      } as never),
+    ).rejects.toMatchObject({ codigo: 'NO_SE_PUEDE_QUITAR_ADOPTANTE' });
+
+    expect(mockedRepo.quitarRol).not.toHaveBeenCalled();
+  });
+
+  it('al quitar MIEMBRO_REFUGIO desasocia el refugio', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ refugioId: 3 }));
+    mockedRepo.buscarRolPorNombre.mockResolvedValue({
+      id: 2,
+      nombre: ROL_DB.MIEMBRO_REFUGIO,
+    } as never);
+    mockedRepo.buscarVinculoRolActivo.mockResolvedValue({ id: 98 } as never);
+
+    await service.gestionarRoles(2, 5, {
+      agregar: [],
+      quitar: ['MIEMBRO_REFUGIO'],
+      refugioId: undefined,
+    } as never);
+
+    expect(mockedRepo.quitarRol).toHaveBeenCalledWith(98, 2);
+    expect(mockedRepo.desasignarRefugio).toHaveBeenCalledWith(5, 2);
+  });
+});
+
+describe('obtenerDetalleUsuario', () => {
+  it('devuelve usuario, resumen y reseñas', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake());
+    mockedRepo.resumenUsuario.mockResolvedValue({ mascotas: 1, solicitudes: 2, donaciones: 0 });
+
+    const r = await service.obtenerDetalleUsuario(5);
+
+    expect(r.usuario).toMatchObject({ id: 5, refugio: null });
+    expect(r.resumen).toEqual({ mascotas: 1, solicitudes: 2, donaciones: 0 });
+    expect(r.resenas.cantidad).toBe(0);
+  });
+
+  it('usuario inexistente lanza USUARIO_NO_ENCONTRADO', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(null);
+
+    await expect(service.obtenerDetalleUsuario(9)).rejects.toMatchObject({
+      codigo: 'USUARIO_NO_ENCONTRADO',
+    });
   });
 });

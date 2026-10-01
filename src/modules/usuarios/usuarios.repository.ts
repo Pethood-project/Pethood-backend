@@ -11,7 +11,9 @@ const includePerfil = {
   roles: { include: { rol: true } },
   // Mismo dato que devuelve el login: si no viniera acá, refrescar el perfil lo borraría de
   // la sesión (y el encabezado de Chats se quedaría sin el nombre del refugio).
-  refugio: { select: { id: true, nombre: true } },
+  refugio: {
+    select: { id: true, nombre: true, fechaBaja: true, estado: { select: { nombre: true } } },
+  },
   _count: {
     select: {
       // Las mascotas no se cuentan acá: dependen del perfil con el que se mira (personal o

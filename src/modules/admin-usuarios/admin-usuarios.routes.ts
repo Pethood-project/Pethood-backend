@@ -11,6 +11,7 @@ export const adminUsuariosRouter = Router();
 adminUsuariosRouter.use(autenticar, requiereRol(ROL_API.ADMIN));
 
 adminUsuariosRouter.get('/usuarios', controller.listarUsuarios);
+adminUsuariosRouter.get('/usuarios/:id', controller.obtenerUsuario);
 adminUsuariosRouter.patch('/usuarios/:id/verificar', controller.verificarUsuario);
 adminUsuariosRouter.patch(
   '/usuarios/:id/suspender',
