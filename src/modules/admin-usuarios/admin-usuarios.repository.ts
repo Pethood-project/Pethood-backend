@@ -39,6 +39,16 @@ function whereUsuarios(filtros: FiltrosUsuariosRepo): Prisma.UsuarioWhereInput {
   };
 }
 
+/** Conteos de actividad del usuario para el modal de detalle. */
+export async function resumenUsuario(usuarioId: number) {
+  const [mascotas, solicitudes, donaciones] = await Promise.all([
+    prisma.mascota.count({ where: { usuarioId, fechaBaja: null } }),
+    prisma.solicitud.count({ where: { usuarioId, fechaBaja: null } }),
+    prisma.donacion.count({ where: { usuarioId, fechaBaja: null } }),
+  ]);
+  return { mascotas, solicitudes, donaciones };
+}
+
 export async function listarUsuarios(
   filtros: FiltrosUsuariosRepo,
 ): Promise<{ usuarios: UsuarioAdmin[]; total: number }> {

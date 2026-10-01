@@ -1,6 +1,7 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_API, ROL_DB, rolApiADb, rolesDbAApi } from '../../shared/roles';
+import { listarDeUsuario } from '../resenas/resenas.service';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import type {
   AltaRefugioBody,
@@ -80,6 +81,24 @@ export async function listarUsuarios(filtros: FiltrosUsuarios) {
     page: filtros.page,
     limit: filtros.limit,
     usuarios: usuarios.map(aUsuarioDto),
+  };
+}
+
+export async function obtenerDetalleUsuario(id: number) {
+  const usuario = await buscarUsuarioOFallar(id);
+  const [resumen, resenas] = await Promise.all([repo.resumenUsuario(id), listarDeUsuario(id)]);
+
+  return {
+    usuario: {
+      ...aUsuarioDto(usuario),
+      imagenUrl: usuario.imagenUrl,
+      fechaNacimiento: usuario.fechaNacimiento,
+      fechaAlta: usuario.fechaAlta,
+      ubicacion: etiquetaUbicacion(usuario),
+      refugio: usuario.refugio ? { id: usuario.refugio.id, nombre: usuario.refugio.nombre } : null,
+    },
+    resumen,
+    resenas,
   };
 }
 
