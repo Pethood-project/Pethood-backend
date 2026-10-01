@@ -126,3 +126,13 @@ export function buscarEstadoMascotaVigente(mascotaId: number) {
     })
     .then((fila) => fila?.estadoMascota ?? null);
 }
+
+/** Reportes pendientes (spec 008) por publicación: `{ publicacionId → cantidad }`. */
+export async function contarReportesPendientes(ids: number[]) {
+  const filas = await prisma.reporteProblema.groupBy({
+    by: ['objetoId'],
+    where: { tipo: 'PUBLICACION', objetoId: { in: ids }, resuelto: false, fechaBaja: null },
+    _count: { _all: true },
+  });
+  return new Map(filas.map((f) => [f.objetoId, f._count._all]));
+}
