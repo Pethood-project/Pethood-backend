@@ -1,0 +1,36 @@
+name: Cron
+
+# Jobs programados de src/jobs/ (corren contra la base de producción, no levantan el server).
+# Render free no tiene cron jobs: el runner de GitHub se conecta directo a Neon, corre el job y termina.
+# Ojo: GitHub desactiva los `schedule` de repos públicos tras 60 días sin actividad en el repo.
+on:
+  schedule:
+    - cron: '17 6 * * *' # 03:17 ART, fuera del minuto 0 (el más cargado de Actions)
+  workflow_dispatch:
+
+jobs:
+  cancelar-solicitudes-vencidas:
+    name: HU-7.6 — cancelar solicitudes vencidas
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - run: npm run build
+
+      # El job importa config/env.ts, que valida al arrancar y exige JWT_SECRET aunque no firme tokens.
+      - name: Ejecutar job
+        run: node dist/jobs/cancelar-solicitudes-vencidas.job.js
+        env:
+          NODE_ENV: production
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
