@@ -59,6 +59,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
 | 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
 | 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
+| 32 | En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy | Media | backend |
 
 ---
 
@@ -641,3 +642,15 @@ refugio la ve contada y no la ve en la lista (spec 023, §9).
 **Cómo se arregla.** Un endpoint propio de publicaciones por publicador que no excluya favoritos
 (la opción 2 del pedido en `docs/ideas/USER.md`), o contar en el resumen con el mismo criterio
 que el feed. Lo mismo vale para `GET /publicaciones?usuarioId=`.
+
+## 32. En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy — Media
+
+**Qué pasa.** `CONSTITUTION.md` §4 pide el log de auditoría en un archivo append-only en
+`logs/`, pero en Render y Railway el disco del contenedor se recrea en cada deploy y reinicio:
+el archivo arranca vacío cada vez. Paliativo actual: con `NODE_ENV=production`,
+`registrarAuditoria` repite cada línea por stdout con el prefijo `[auditoria]`, así queda en el
+panel de logs de la plataforma. Pero esa retención es limitada y depende del plan.
+
+**Cómo se arregla.** Montar un volumen persistente en `logs/` (Railway lo permite; en Render es
+un disk pago), o mandar stdout a un servicio de logs con retención. Pasarlo a una tabla
+contradice la constitución: sería una decisión de equipo.
