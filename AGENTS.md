@@ -14,6 +14,7 @@ Plataforma híbrida de gestión de adopción de mascotas que conecta **adoptante
 - `docs/ROADMAP.md` — plan de desarrollo por fases y dependencias entre módulos.
 - `docs/ARQUITECTURA.md` — árbol de directorios de este repo y de `pethood-frontend`, convención de branches.
 - `docs/specs/` — una spec aprobada por módulo antes de codificarlo.
+- `docs/DEUDA_TECNICA.md` — lo que sabemos que está a medias o postergado, en **los dos repos**. Consultarlo antes de "arreglar" algo que parece roto: puede ser una decisión tomada y anotada. Si la deuda es de un módulo va en su contrato de API; acá sólo la transversal.
 
 No se leen completas en cada cambio: consultá solo lo que la tarea toque.
 
@@ -21,6 +22,7 @@ No se leen completas en cada cambio: consultá solo lo que la tarea toque.
 - Implementás funcionalidad nueva → buscá la HU en `docs/REQUISITOS.md` y respetá sus criterios de aceptación literales (textos de error, límites de caracteres, nombres de botones): son consigna académica evaluable.
 - Creás un módulo o directorio nuevo → mirá el árbol de directorios en `docs/ARQUITECTURA.md`.
 - Dudás en prioridades o dependencias entre módulos → `docs/ROADMAP.md`.
+- Encontrás algo que parece un bug o una decisión rara → fijate primero en `docs/DEUDA_TECNICA.md`; y si dejás deuda nueva, anotala ahí antes de cerrar el PR.
 - Duda sobre un principio no negociable → `docs/CONSTITUTION.md` (sus reglas operativas ya viven resumidas en «Reglas transversales», más abajo).
 
 ## Arquitectura general del proyecto
@@ -106,6 +108,8 @@ prisma/schema.prisma     # fuente de verdad física del modelo
 - Rutas bajo `/api/v1`, recursos en plural en español sin tildes (`/mascotas`, `/solicitudes`).
 - Errores SIEMPRE con formato `{ error: { codigo, mensaje } }` vía `errorHandler`; los servicios lanzan `AppError(codigo, mensaje, httpStatus)`.
 - Toda entrada se valida con Zod (`<modulo>.dto.ts`) antes de llegar al servicio.
+- **Paginación (estándar desde la spec 020).** Los listados que consume la **app móvil** paginan por **cursor**: `cursor` es el id del último elemento que el cliente ya tiene, `limite` se valida con `limitePaginaSchema`, el orden lleva el id como desempate, se piden `limite + 1` filas y se responde `{ <items>, hayMas, proximoCursor }`, sin `total`. Con offset, cada elemento nuevo que entra mientras el usuario scrollea corre la página y repite o saltea filas. Las **tablas de web-admin** (con número de página y total) siguen por offset: `page`/`limit` + `total`. Referencia: `modules/animales-perdidos`; el historial del chat usa el mismo esquema con `antesDe`. `solicitudes` (`limite`/`desplazamiento`) es anterior al estándar.
+- **Switch refugio/adoptante (spec 016):** quien pertenece a un refugio usa su única cuenta con dos perfiles separados. El perfil activo llega en la cabecera `X-Ambito` y `autenticar` lo deja en `req.ambito`; nunca se recibe por query ni body. Todo lo que tenga «lo mío» y «lo del refugio» se filtra con `req.ambito` usando `shared/ambito.ts` (`esMascotaDelAmbito`); las rutas de un solo perfil usan `requiereAmbito(...)`.
 - **Nunca escribir una validación genérica dentro de un `<modulo>.dto.ts`** — trim, longitudes, fechas, decimales, ids e imágenes viven en `src/shared/validation/` y el DTO solo las compone. Si te falta una regla, agregala ahí antes de usarla. Ver "Validación" más abajo.
 - `service.ts` nunca importa Prisma directamente — todo acceso a datos pasa por `repository.ts` del mismo módulo, para poder testear el service mockeando el repository.
 - Reglas de negocio (quotas, transiciones de estado, chat tras interacción) viven en servicios, nunca en el controller ni solo en el frontend.
@@ -124,6 +128,7 @@ Toda regla de validación **genérica** (o sea, que podría necesitar más de un
 | `dates.ts` | Parseo y comparación de fechas: `parsearFecha`, `esFutura`, `esPasada`, `validarFechaPasada`, `aFechaISO` | No |
 | `numbers.ts` | `parsearDecimal` (acepta coma o punto), `parsearId` | No |
 | `text.ts` | `validarTexto` (trim + longitudes), `mensajeLongitud` | No |
+| `imagen.ts` | `parsearRotacion` (0\|90\|180\|270), `parsearRecorte` (cropX/Y/Width/Height en px sobre la imagen original) | No |
 | `schemas.ts` | Adaptador que envuelve lo anterior en schemas Zod componibles | Sí |
 
 **Toda la lógica está en las funciones puras**; `schemas.ts` es solo una capa fina encima. Así se testean sin Zod y el día que cambie la librería de validación se toca un solo archivo.

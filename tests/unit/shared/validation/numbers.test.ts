@@ -1,8 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { parsearDecimal, parsearId } from '../../../../src/shared/validation/numbers';
+import {
+  parsearCoordenada,
+  parsearDecimal,
+  parsearId,
+  parsearListaDeIds,
+} from '../../../../src/shared/validation/numbers';
 import { LIMITES } from '../../../../src/shared/validation/limits';
 
 const peso = { ...LIMITES.mascota.peso, etiqueta: 'El peso' };
+const latitud = { ...LIMITES.animalPerdido.latitud, etiqueta: 'La latitud' };
+
+describe('parsearCoordenada', () => {
+  it('acepta negativos, que es lo normal en Argentina', () => {
+    expect(parsearCoordenada('-32.9264', latitud)).toEqual({ valido: true, valor: -32.9264 });
+  });
+
+  it('guarda todos los decimales del GPS, sin redondear', () => {
+    expect(parsearCoordenada('-32.92641234567', latitud)).toEqual({
+      valido: true,
+      valor: -32.92641234567,
+    });
+  });
+
+  it('acepta coma decimal y un number', () => {
+    expect(parsearCoordenada('-32,5', latitud)).toEqual({ valido: true, valor: -32.5 });
+    expect(parsearCoordenada(-32.5, latitud)).toEqual({ valido: true, valor: -32.5 });
+  });
+
+  it('rechaza un valor fuera del rango del eje', () => {
+    expect(parsearCoordenada('-90.5', latitud)).toEqual({
+      valido: false,
+      error: 'La latitud debe estar entre -90 y 90',
+    });
+  });
+
+  it('rechaza exponentes, infinitos y texto, que Number() aceptaría', () => {
+    for (const valor of ['1e2', 'Infinity', 'abc', '--3', '12.']) {
+      expect(parsearCoordenada(valor, latitud)).toEqual({
+        valido: false,
+        error: 'La latitud no es válida',
+      });
+    }
+  });
+
+  it('rechaza un valor ausente', () => {
+    expect(parsearCoordenada('', latitud)).toEqual({
+      valido: false,
+      error: 'La latitud es obligatoria',
+    });
+  });
+});
 
 describe('parsearDecimal', () => {
   it('acepta coma como separador decimal y la normaliza a punto', () => {
@@ -60,5 +107,29 @@ describe('parsearId', () => {
     expect(parsearId('-1')).toBeNull();
     expect(parsearId('1.5')).toBeNull();
     expect(parsearId('abc')).toBeNull();
+  });
+});
+
+describe('parsearListaDeIds', () => {
+  it('ausente o vacía es "sin filtro"', () => {
+    expect(parsearListaDeIds(undefined, 'El estado')).toEqual({ valido: true, valor: [] });
+    expect(parsearListaDeIds('', 'El estado')).toEqual({ valido: true, valor: [] });
+  });
+
+  it('separa por comas, tolera espacios y descarta repetidos', () => {
+    expect(parsearListaDeIds('1, 3,1', 'El estado')).toEqual({ valido: true, valor: [1, 3] });
+  });
+
+  it('rechaza la lista entera si un elemento no es un id', () => {
+    for (const valor of ['1,x', '1,,3', '0', '-2', '1.5']) {
+      expect(parsearListaDeIds(valor, 'El estado')).toEqual({
+        valido: false,
+        error: 'El estado no es válido',
+      });
+    }
+  });
+
+  it('rechaza un parámetro repetido (llega como array)', () => {
+    expect(parsearListaDeIds(['1', '2'], 'El estado').valido).toBe(false);
   });
 });

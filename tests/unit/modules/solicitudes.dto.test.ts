@@ -67,12 +67,12 @@ describe('resolverSolicitudSchema', () => {
 describe('filtrosRecibidasSchema', () => {
   it('valores por defecto sin query params', () => {
     const resultado = filtrosRecibidasSchema.parse({});
-    expect(resultado).toEqual({ limite: 20, desplazamiento: 0 });
+    expect(resultado).toEqual({ estados: [], limite: 20, desplazamiento: 0 });
   });
 
   it('coerciona limite/desplazamiento desde query string', () => {
     const resultado = filtrosRecibidasSchema.parse({ limite: '5', desplazamiento: '10' });
-    expect(resultado).toEqual({ limite: 5, desplazamiento: 10 });
+    expect(resultado).toEqual({ estados: [], limite: 5, desplazamiento: 10 });
   });
 
   it('acepta un estado válido del catálogo', () => {
@@ -82,6 +82,17 @@ describe('filtrosRecibidasSchema', () => {
 
   it('rechaza un estado que no está en el catálogo', () => {
     expect(() => filtrosRecibidasSchema.parse({ estado: 'no-existe' })).toThrow();
+  });
+
+  it('acepta varios estados separados por coma, sin repetidos', () => {
+    const resultado = filtrosRecibidasSchema.parse({
+      estados: 'Pendiente, En_Revision,Pendiente',
+    });
+    expect(resultado.estados).toEqual(['Pendiente', 'En_Revision']);
+  });
+
+  it('rechaza la lista entera si uno de los estados no está en el catálogo', () => {
+    expect(() => filtrosRecibidasSchema.parse({ estados: 'Pendiente,no-existe' })).toThrow();
   });
 
   it('rechaza limite por encima del máximo (50)', () => {

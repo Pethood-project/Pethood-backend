@@ -1,15 +1,19 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
+import { vacunasAplicadas, validarVacunaDeMascota } from '../../shared/vacunas';
 import { aFechaISO } from '../../shared/validation/dates';
 import {
   ESTADOS_QUE_HABILITAN_PUBLICACION,
   ESTADOS_SELECCIONABLES_EN_ALTA,
 } from '../catalogos/catalogos.service';
+import { obtenerPublicacionActivaIdDeMascota } from '../publicaciones/publicaciones.service';
 import type {
-  AmbitoMascotas,
   CrearMascotaDto,
   EditarMascotaDto,
+  FichaMascotaDto,
+  FiltrosMisMascotasDto,
   MascotaCreadaDto,
 } from './mascotas.dto';
 import * as repo from './mascotas.repository';
@@ -30,14 +34,20 @@ export interface ContextoCreacion {
   archivo?: { buffer: Buffer; mimetype: string };
 }
 
-export type ContextoEdicion = ContextoCreacion;
+export interface ContextoEdicion extends ContextoCreacion {
+  ambito: Ambito;
+}
 
 export interface ResultadoEliminacion {
   id: number;
   publicacionesDadasDeBaja: number;
 }
 
-type MascotaConRelaciones = Awaited<ReturnType<typeof repo.crearConEstado>>;
+/** Lo que necesita `aDto`: la mascota con raza, especie y estado vigente. */
+type MascotaConRelaciones = Omit<
+  Awaited<ReturnType<typeof repo.crearConEstado>>,
+  'historiaClinica'
+>;
 
 function aDto(mascota: MascotaConRelaciones): MascotaCreadaDto {
   const estado = mascota.historicoEstados[0]!.estadoMascota;
@@ -80,19 +90,40 @@ async function exigirUsuarioVerificado(usuarioId: number) {
 }
 
 /**
- * Propiedad = ser quien creó el registro (precondición de HU-6.2 y HU-6.3). Se resuelve
- * siempre en el backend: esconder el botón en la UI no alcanza. Un compañero del mismo
- * refugio tampoco pasa, igual que en publicaciones.service.ts.
+ * La mascota tiene que ser del perfil con el que se está operando (ver `shared/ambito.ts`):
+ * desde la vista personal no se toca nada del refugio, y viceversa. Mismo 404 que si no
+ * existiera, porque desde ese perfil no se ve.
  */
-async function exigirMascotaPropia(mascotaId: number, usuarioId: number) {
+async function exigirMascotaDelAmbito(
+  mascota: { usuarioId: number; refugioId: number | null },
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<void> {
+  const usuario = await repo.buscarUsuario(usuarioId);
+
+  if (!usuario || !esMascotaDelAmbito(mascota, usuario, ambito)) {
+    throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
+  }
+}
+
+/**
+ * Propiedad = ser quien creó el registro (precondición de HU-6.2 y HU-6.3), y desde el
+ * perfil al que pertenece la mascota. Se resuelve siempre en el backend: esconder el botón
+ * en la UI no alcanza. Un compañero del mismo refugio tampoco pasa, igual que en
+ * publicaciones.service.ts.
+ */
+async function exigirMascotaPropia(mascotaId: number, usuarioId: number, ambito: Ambito) {
   const mascota = await repo.buscarPorId(mascotaId);
 
   if (!mascota) {
     throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
   }
+
   if (mascota.usuarioId !== usuarioId) {
     throw new AppError('NO_AUTORIZADO', 'Esa mascota no es tuya', 403);
   }
+
+  await exigirMascotaDelAmbito(mascota, usuarioId, ambito);
 
   return mascota;
 }
@@ -109,6 +140,37 @@ async function resolverRaza(razaId: number, especieId: number) {
   }
 
   return raza;
+}
+
+/**
+ * Vacunas que la mascota ya tiene al darla de alta (spec 019), listas para crearse como
+ * registros de historia clínica. Cada una tiene que ser del plan de la especie y posterior
+ * al nacimiento, y no se repite: un mismo tipo dos veces en el alta es un error de carga.
+ */
+function resolverVacunasIniciales(
+  vacunas: CrearMascotaDto['vacunas'],
+  mascota: { especie: string; fechaNacimiento: Date },
+): repo.DatosVacunaInicial[] {
+  const tipos = new Set(vacunas.map((vacuna) => vacuna.tipo));
+
+  if (tipos.size !== vacunas.length) {
+    throw new AppError('VALIDACION', 'No podés cargar la misma vacuna dos veces', 400);
+  }
+
+  return vacunas.map(({ tipo, fecha }) => {
+    const resultado = validarVacunaDeMascota(tipo, fecha, mascota);
+
+    if (!resultado.valida) {
+      throw new AppError('VALIDACION', resultado.error, 400);
+    }
+
+    return {
+      tipoVacuna: tipo,
+      fechaVisita: fecha,
+      titulo: resultado.vacuna.nombre,
+      descripcion: resultado.vacuna.descripcion,
+    };
+  });
 }
 
 async function resolverEstadoInicial(datos: CrearMascotaDto): Promise<number> {
@@ -147,6 +209,10 @@ export async function crearMascota(
 
   const usuario = await exigirUsuarioVerificado(contexto.usuarioId);
   const raza = await resolverRaza(datos.razaId, datos.especieId);
+  const vacunas = resolverVacunasIniciales(datos.vacunas, {
+    especie: raza.especie.nombre,
+    fechaNacimiento: datos.fechaNacimiento,
+  });
   const estadoMascotaId = await resolverEstadoInicial(datos);
 
   if (datos.actor === 'REFUGIO' && !usuario.refugioId) {
@@ -155,7 +221,7 @@ export async function crearMascota(
 
   const imagenUrl = await guardarImagen(contexto.archivo, SUBCARPETA_FOTOS);
 
-  let mascota: MascotaConRelaciones;
+  let mascota: Awaited<ReturnType<typeof repo.crearConEstado>>;
   try {
     // La mascota queda asociada automáticamente a quien la crea.
     mascota = await repo.crearConEstado(
@@ -172,6 +238,7 @@ export async function crearMascota(
         refugioId: datos.actor === 'REFUGIO' ? usuario.refugioId : null,
         usuarioId: usuario.id,
         estadoMascotaId,
+        vacunas,
       },
       usuario.id,
     );
@@ -186,8 +253,20 @@ export async function crearMascota(
     accion: 'CREAR',
     entidad: 'Mascota',
     entidadId: mascota.id,
-    detalle: `actor=${datos.actor}`,
+    detalle: `actor=${datos.actor} vacunas=${vacunas.length}`,
   });
+
+  // Cada vacuna es un registro de historia clínica más: se audita igual que un alta desde
+  // ese módulo.
+  for (const registro of mascota.historiaClinica) {
+    await registrarAuditoria({
+      usuarioId: usuario.id,
+      accion: 'CREAR',
+      entidad: 'HistoriaClinica',
+      entidadId: registro.id,
+      detalle: `mascota=${mascota.id}`,
+    });
+  }
 
   return aDto(mascota);
 }
@@ -202,7 +281,7 @@ export async function editarMascota(
   datos: EditarMascotaDto,
   contexto: ContextoEdicion,
 ): Promise<MascotaCreadaDto> {
-  const mascota = await exigirMascotaPropia(mascotaId, contexto.usuarioId);
+  const mascota = await exigirMascotaPropia(mascotaId, contexto.usuarioId, contexto.ambito);
 
   const camposCambiados = Object.entries(datos)
     .filter(([, valor]) => valor !== undefined)
@@ -281,8 +360,9 @@ export async function editarMascota(
 export async function eliminarMascota(
   mascotaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<ResultadoEliminacion> {
-  await exigirMascotaPropia(mascotaId, usuarioId);
+  await exigirMascotaPropia(mascotaId, usuarioId, ambito);
 
   const solicitudes = await repo.listarSolicitudesDeMascota(mascotaId);
   const hayAbiertas = solicitudes.some((solicitud) => {
@@ -312,19 +392,74 @@ export async function eliminarMascota(
 }
 
 /**
- * Listado de mascotas del ámbito pedido.
+ * Ficha de una mascota (HU-6.4: verla individualmente desde "Mis mascotas").
+ *
+ * Autorización más amplia que `exigirMascotaPropia`: alcanza con que sea del perfil con el
+ * que se consulta, igual criterio que `listarPorAmbito` usa para el listado — en la vista de
+ * refugio un compañero ve la ficha aunque no sea quien la dio de alta.
+ */
+export async function obtenerMascota(
+  mascotaId: number,
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<FichaMascotaDto> {
+  const mascota = await repo.buscarPorIdConRelaciones(mascotaId);
+
+  if (!mascota || mascota.historicoEstados.length === 0) {
+    throw new AppError('NO_ENCONTRADO', 'La mascota no existe', 404);
+  }
+
+  await exigirMascotaDelAmbito(mascota, usuarioId, ambito);
+
+  const publicacionActivaId = await obtenerPublicacionActivaIdDeMascota(mascotaId);
+
+  return {
+    ...aDto(mascota as MascotaConRelaciones),
+    publicacionActivaId,
+    vacunas: vacunasAplicadas(mascota.historiaClinica, mascota.raza.especie.nombre),
+  };
+}
+
+/**
+ * Listado de mascotas del perfil con el que se consulta.
  *
  * Un miembro de refugio tiene dos conjuntos separados: las mascotas que cargó como
- * persona y las del refugio. El cliente elige cuál quiere con `ambito`; sin ese dato se
- * devuelven las personales, que es lo que ve un adoptante común.
- *
- * Pedir el ámbito del refugio sin pertenecer a uno es un error y no una lista vacía: la
- * app no debería llegar a preguntarlo, y devolver vacío escondería el bug.
+ * persona y las del refugio, y el switch decide cuál ve (ver `shared/ambito.ts`).
  */
 export async function listarMisMascotas(
   usuarioId: number,
-  ambito: AmbitoMascotas = 'PERSONAL',
+  ambito: Ambito,
+  filtros: FiltrosMisMascotasDto = { estados: [] },
 ): Promise<MascotaCreadaDto[]> {
+  const mascotas = await listarDelAmbito(usuarioId, ambito, filtros.estados);
+  return mascotas.map((mascota) => aDto(mascota as MascotaConRelaciones));
+}
+
+/**
+ * Mascotas que se pueden elegir en "Nueva publicación": del perfil activo, con un estado que
+ * habilita publicar y sin una publicación viva. Además tienen que haber sido cargadas por
+ * quien consulta, porque `crearPublicacion` lo exige — así el selector no ofrece nada que el
+ * alta después rechace.
+ *
+ * Vacía es un caso de negocio, no un error: la app manda a cargar la mascota primero.
+ */
+export async function listarPublicables(
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<MascotaCreadaDto[]> {
+  const mascotas = await listarDelAmbito(usuarioId, ambito);
+
+  return mascotas
+    .filter((mascota) => mascota.usuarioId === usuarioId && mascota.publicaciones.length === 0)
+    .map((mascota) => aDto(mascota as MascotaConRelaciones))
+    .filter((mascota) => mascota.habilitaPublicacion);
+}
+
+/**
+ * Mascotas activas del perfil con el que se consulta, con estado vigente. Un miembro de
+ * refugio tiene dos conjuntos separados y el switch decide cuál ve (ver `shared/ambito.ts`).
+ */
+async function listarDelAmbito(usuarioId: number, ambito: Ambito, estadoIds: number[] = []) {
   let filtro: { usuarioId: number } | { refugioId: number } = { usuarioId };
 
   if (ambito === 'REFUGIO') {
@@ -340,9 +475,6 @@ export async function listarMisMascotas(
     filtro = { refugioId: usuario.refugioId };
   }
 
-  const mascotas = await repo.listarPorAmbito(filtro);
-
-  return mascotas
-    .filter((mascota) => mascota.historicoEstados.length > 0)
-    .map((mascota) => aDto(mascota as MascotaConRelaciones));
+  const mascotas = await repo.listarPorAmbito(filtro, estadoIds);
+  return mascotas.filter((mascota) => mascota.historicoEstados.length > 0);
 }

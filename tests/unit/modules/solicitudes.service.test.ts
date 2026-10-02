@@ -89,7 +89,14 @@ function solicitudConDetalle(opciones: {
       mascota: {
         id: 8,
         nombre: 'Toby',
+        fechaNacimiento: new Date('2023-04-01T00:00:00.000Z'),
+        genero: 'MACHO',
+        peso: 12.5,
+        tamanio: 'MEDIANO',
+        castrado: true,
+        descripcion: 'Muy jugueton',
         imagenUrl: '/img/toby.jpg',
+        razaId: 4,
         refugioId: mascotaRefugioId,
         usuarioId: mascotaUsuarioId,
       },
@@ -138,7 +145,7 @@ describe('resolución del actor (compartida por las tres operaciones)', () => {
     vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(null as never);
 
     await expect(
-      service.listarRecibidas(MIEMBRO_REFUGIO, { limite: 20, desplazamiento: 0 }),
+      service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', { limite: 20, desplazamiento: 0 }),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
   });
 
@@ -149,9 +156,13 @@ describe('resolución del actor (compartida por las tres operaciones)', () => {
     vi.mocked(repo.listarDelActor).mockResolvedValue([] as never);
 
     await expect(
-      service.listarRecibidas(ADOPTANTE_PUBLICADOR, { limite: 20, desplazamiento: 0 }),
+      service.listarRecibidas(ADOPTANTE_PUBLICADOR, 'PERSONAL', { limite: 20, desplazamiento: 0 }),
     ).resolves.toEqual({ total: 0, solicitudes: [] });
-    expect(repo.listarDelActor).toHaveBeenCalledWith({ id: ADOPTANTE_PUBLICADOR, refugioId: null });
+    expect(repo.listarDelActor).toHaveBeenCalledWith({
+      id: ADOPTANTE_PUBLICADOR,
+      refugioId: null,
+      ambito: 'PERSONAL',
+    });
   });
 });
 
@@ -161,7 +172,8 @@ describe('listarRecibidas', () => {
       solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }] }),
     ] as never);
 
-    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, {
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
+      estados: [],
       limite: 20,
       desplazamiento: 0,
     });
@@ -176,6 +188,7 @@ describe('listarRecibidas', () => {
     expect(repo.listarDelActor).toHaveBeenCalledWith({
       id: MIEMBRO_REFUGIO,
       refugioId: REFUGIO_ID,
+      ambito: 'REFUGIO',
     });
   });
 
@@ -187,8 +200,9 @@ describe('listarRecibidas', () => {
       }),
     ] as never);
 
-    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, {
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
       estado: 'Pendiente',
+      estados: [],
       limite: 20,
       desplazamiento: 0,
     });
@@ -198,6 +212,27 @@ describe('listarRecibidas', () => {
     expect(solicitudes[0]!.estado.nombre).toBe('Pendiente');
   });
 
+  it('filtra por varios estados a la vez (cualquiera de ellos)', async () => {
+    vi.mocked(repo.listarDelActor).mockResolvedValue([
+      solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }] }),
+      solicitudConDetalle({
+        historial: [{ estado: estado(2, 'En_Revision'), fecha: FECHA_RESPUESTA }],
+      }),
+      solicitudConDetalle({
+        historial: [{ estado: estado(3, 'Aprobada'), fecha: FECHA_RESPUESTA }],
+      }),
+    ] as never);
+
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
+      estados: ['Pendiente', 'En_Revision'],
+      limite: 20,
+      desplazamiento: 0,
+    });
+
+    expect(total).toBe(2);
+    expect(solicitudes.map((s) => s.estado.nombre)).toEqual(['Pendiente', 'En_Revision']);
+  });
+
   it('pagina con limite/desplazamiento sobre el total filtrado', async () => {
     vi.mocked(repo.listarDelActor).mockResolvedValue(
       Array.from({ length: 3 }, () =>
@@ -205,7 +240,8 @@ describe('listarRecibidas', () => {
       ).map((s, i) => ({ ...s, id: i + 1 })) as never,
     );
 
-    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, {
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
+      estados: [],
       limite: 1,
       desplazamiento: 1,
     });
@@ -229,7 +265,7 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     expect(detalle.estado.nombre).toBe('Aprobada');
     expect(detalle.historial).toEqual([
@@ -241,7 +277,9 @@ describe('obtenerDetalle', () => {
   it('rechaza una solicitud que no existe', async () => {
     vi.mocked(repo.buscarConDetalle).mockResolvedValue(null as never);
 
-    await expect(service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO)).rejects.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -255,7 +293,9 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    await expect(service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO)).rejects.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -274,7 +314,7 @@ describe('obtenerDetalle', () => {
     );
 
     await expect(
-      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO),
+      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO, 'REFUGIO'),
     ).resolves.toMatchObject({ id: SOLICITUD });
   });
 
@@ -290,7 +330,9 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    await expect(service.obtenerDetalle(SOLICITUD, ADOPTANTE_PUBLICADOR)).resolves.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, ADOPTANTE_PUBLICADOR, 'PERSONAL'),
+    ).resolves.toMatchObject({
       id: SOLICITUD,
     });
   });
@@ -307,7 +349,9 @@ describe('obtenerDetalle', () => {
       }) as never,
     );
 
-    await expect(service.obtenerDetalle(SOLICITUD, OTRO_ADOPTANTE)).rejects.toMatchObject({
+    await expect(
+      service.obtenerDetalle(SOLICITUD, OTRO_ADOPTANTE, 'PERSONAL'),
+    ).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -315,14 +359,39 @@ describe('obtenerDetalle', () => {
 });
 
 describe('resolverSolicitud', () => {
+  const ESTADO_APROBADA = estado(3, 'Aprobada');
+  const ESTADO_RECHAZADA = estado(4, 'Rechazada');
+  const ESTADO_MASCOTA_ADOPTADO = estado(3, 'Adoptado');
+  const ESTADO_PUBLICACION_FINALIZADA = estado(3, 'Finalizada');
+
+  function resultadoAprobacion(solicitud: unknown) {
+    return {
+      solicitud,
+      mascotaAdoptadaId: 99,
+      solicitudesRechazadas: [13, 14],
+    };
+  }
+
   beforeEach(() => {
     vi.mocked(repo.buscarConDetalle).mockResolvedValue(
       solicitudConDetalle({
         historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
       }) as never,
     );
-    vi.mocked(repo.buscarEstadoSolicitudPorNombre).mockResolvedValue(
-      estado(3, 'Aprobada') as never,
+    vi.mocked(repo.buscarEstadoSolicitudPorNombre).mockImplementation((nombre: string) =>
+      Promise.resolve(
+        (nombre === 'Aprobada'
+          ? ESTADO_APROBADA
+          : nombre === 'Rechazada'
+            ? ESTADO_RECHAZADA
+            : undefined) as never,
+      ),
+    );
+    vi.mocked(repo.buscarEstadoMascotaPorNombre).mockResolvedValue(
+      ESTADO_MASCOTA_ADOPTADO as never,
+    );
+    vi.mocked(repo.buscarEstadoPublicacionPorNombre).mockResolvedValue(
+      ESTADO_PUBLICACION_FINALIZADA as never,
     );
     vi.mocked(repo.resolverSiPendiente).mockResolvedValue(
       solicitudConDetalle({
@@ -334,22 +403,82 @@ describe('resolverSolicitud', () => {
         ],
       }) as never,
     );
+    vi.mocked(repo.aprobarAdopcion).mockImplementation((solicitudId: number) =>
+      Promise.resolve(
+        resultadoAprobacion(
+          solicitudConDetalle({
+            comentario: 'Bienvenido a la familia',
+            fechaRespuesta: FECHA_RESPUESTA,
+            historial: [
+              { estado: estado(3, 'Aprobada'), fecha: FECHA_RESPUESTA },
+              { estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA },
+            ],
+          }),
+        ) as never,
+      ),
+    );
   });
 
-  it('acepta una solicitud pendiente', async () => {
+  it('acepta una solicitud de adopción y le crea la mascota al adoptante', async () => {
     const resultado = await service.resolverSolicitud(
       SOLICITUD,
       { estado: 'Aprobada', comentario: 'Bienvenido a la familia' },
       MIEMBRO_REFUGIO,
+      'REFUGIO',
     );
 
     expect(resultado.estado.nombre).toBe('Aprobada');
-    expect(repo.resolverSiPendiente).toHaveBeenCalledWith(
+    expect(repo.aprobarAdopcion).toHaveBeenCalledWith(
       SOLICITUD,
-      3,
-      'Bienvenido a la familia',
       MIEMBRO_REFUGIO,
+      expect.objectContaining({
+        estadoAprobadaId: ESTADO_APROBADA.id,
+        estadoRechazadaId: ESTADO_RECHAZADA.id,
+        estadoMascotaAdoptadoId: ESTADO_MASCOTA_ADOPTADO.id,
+        estadoPublicacionFinalizadaId: ESTADO_PUBLICACION_FINALIZADA.id,
+        adoptanteId: SOLICITANTE,
+        mascotaOrigenId: 8,
+        publicacionId: 40,
+        mascotaOrigen: expect.objectContaining({ nombre: 'Toby', razaId: 4 }),
+      }),
     );
+  });
+
+  it('rechazar una solicitud no crea mascota (va por el camino simple)', async () => {
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
+
+    await service.resolverSolicitud(
+      SOLICITUD,
+      { estado: 'Rechazada', comentario: null },
+      MIEMBRO_REFUGIO,
+      'REFUGIO',
+    );
+
+    expect(repo.resolverSiPendiente).toHaveBeenCalledWith(SOLICITUD, 4, null, MIEMBRO_REFUGIO);
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
+  });
+
+  it('aprobar una solicitud de TRÁNSITO no crea mascota ni finaliza la publicación', async () => {
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        transito: { inicio: FECHA_ALTA, fin: FECHA_RESPUESTA },
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
+
+    await service.resolverSolicitud(
+      SOLICITUD,
+      { estado: 'Aprobada', comentario: null },
+      MIEMBRO_REFUGIO,
+      'REFUGIO',
+    );
+
+    expect(repo.resolverSiPendiente).toHaveBeenCalledWith(SOLICITUD, 3, null, MIEMBRO_REFUGIO);
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('un adoptante particular puede resolver la solicitud de su propia mascota publicada', async () => {
@@ -369,6 +498,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         ADOPTANTE_PUBLICADOR,
+        'PERSONAL',
       ),
     ).resolves.toMatchObject({ estado: { nombre: 'Aprobada' } });
   });
@@ -385,21 +515,24 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Rechazada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'SOLICITUD_YA_RESUELTA', httpStatus: 409 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('dos PATCH concurrentes: el que pierde la carrera atómica recibe 409, no pisa el histórico', async () => {
     // El chequeo previo la ve "Pendiente", pero para cuando la transacción Serializable
-    // corre, el otro PATCH ya ganó — resolverSiPendiente devuelve null.
-    vi.mocked(repo.resolverSiPendiente).mockResolvedValue(null as never);
+    // corre, el otro PATCH ya ganó — aprobarAdopcion devuelve null.
+    vi.mocked(repo.aprobarAdopcion).mockResolvedValue(null as never);
 
     await expect(
       service.resolverSolicitud(
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'SOLICITUD_YA_RESUELTA', httpStatus: 409 });
   });
@@ -417,9 +550,11 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('un adoptante no puede resolver la solicitud de la mascota de OTRO adoptante (404)', async () => {
@@ -439,9 +574,11 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         OTRO_ADOPTANTE,
+        'PERSONAL',
       ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
     expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+    expect(repo.aprobarAdopcion).not.toHaveBeenCalled();
   });
 
   it('revienta con un error interno si el catálogo no tiene el estado destino', async () => {
@@ -452,6 +589,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'ERROR_INTERNO', httpStatus: 500 });
   });
@@ -461,6 +599,7 @@ describe('resolverSolicitud', () => {
       SOLICITUD,
       { estado: 'Aprobada', comentario: null },
       MIEMBRO_REFUGIO,
+      'REFUGIO',
     );
 
     expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
@@ -468,18 +607,50 @@ describe('resolverSolicitud', () => {
       accion: 'APROBAR',
       entidad: 'Solicitud',
       entidadId: SOLICITUD,
-      detalle: 'Pendiente -> Aprobada',
+      detalle: 'Pendiente -> Aprobada (adopción, mascota 8 -> usuario 7)',
+    });
+  });
+
+  it('audita la mascota creada, los cambios de estado y los rechazos automáticos', async () => {
+    await service.resolverSolicitud(
+      SOLICITUD,
+      { estado: 'Aprobada', comentario: null },
+      MIEMBRO_REFUGIO,
+      'REFUGIO',
+    );
+
+    expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
+      usuarioId: MIEMBRO_REFUGIO,
+      accion: 'CREAR',
+      entidad: 'Mascota',
+      entidadId: 99,
+      detalle: `adoptada por usuario ${SOLICITANTE} (solicitud ${SOLICITUD})`,
+    });
+    expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
+      usuarioId: MIEMBRO_REFUGIO,
+      accion: 'CAMBIAR_ESTADO',
+      entidad: 'Publicacion',
+      entidadId: 40,
+      detalle: 'Finalizada (adopción aprobada)',
+    });
+    expect(logAuditoria.registrarAuditoria).toHaveBeenCalledWith({
+      usuarioId: MIEMBRO_REFUGIO,
+      accion: 'RECHAZAR',
+      entidad: 'Solicitud',
+      entidadId: 13,
+      detalle: 'Rechazada al aprobarse otra solicitud de la misma publicación',
     });
   });
 
   it('no registra auditoría si pierde la carrera atómica', async () => {
-    vi.mocked(repo.resolverSiPendiente).mockResolvedValue(null as never);
+    vi.mocked(repo.aprobarAdopcion).mockResolvedValue(null as never);
 
     await expect(
       service.resolverSolicitud(
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toMatchObject({ codigo: 'SOLICITUD_YA_RESUELTA' });
     expect(logAuditoria.registrarAuditoria).not.toHaveBeenCalled();
@@ -493,6 +664,7 @@ describe('resolverSolicitud', () => {
         SOLICITUD,
         { estado: 'Aprobada', comentario: null },
         MIEMBRO_REFUGIO,
+        'REFUGIO',
       ),
     ).rejects.toBeInstanceOf(AppError);
   });
@@ -523,12 +695,19 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
   };
 
   /** Publicación solicitable: viva, de otro dueño y con la mascota "Disponible". */
-  function publicacionDisponible(estadoMascota = 'Disponible', duenio = MIEMBRO_REFUGIO) {
+  function publicacionDisponible(
+    estadoMascota = 'Disponible',
+    duenio = MIEMBRO_REFUGIO,
+    refugioId: number | null = null,
+    estadoPublicacion = 'Activa',
+  ) {
     return {
       id: PUBLICACION,
+      historicoEstados: [{ estadoPublicacion: { nombre: estadoPublicacion } }],
       mascota: {
         id: 8,
         usuarioId: duenio,
+        refugioId,
         historicoEstados: [{ estadoMascota: { nombre: estadoMascota } }],
       },
     };
@@ -655,6 +834,20 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
     });
   });
 
+  it('tampoco se puede solicitar una mascota del propio refugio, aunque la haya cargado otro miembro: desde el perfil personal lo del refugio no se ve', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, 1),
+      verificado: true,
+    } as never);
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue(
+      publicacionDisponible('Disponible', MIEMBRO_REFUGIO, 1) as never,
+    );
+
+    await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).rejects.toMatchObject({
+      codigo: 'PUBLICACION_PROPIA',
+    });
+  });
+
   it('no se puede solicitar una mascota que ya no está disponible', async () => {
     vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue(
       publicacionDisponible('Adoptado') as never,
@@ -663,6 +856,18 @@ describe('crear del lado del solicitante (HU-7.1)', () => {
     await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).rejects.toMatchObject({
       codigo: 'MASCOTA_NO_DISPONIBLE',
     });
+  });
+
+  it('no se puede solicitar sobre una publicación pausada, aunque la mascota esté disponible', async () => {
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue(
+      publicacionDisponible('Disponible', MIEMBRO_REFUGIO, null, 'Pausada') as never,
+    );
+
+    await expect(service.crearSolicitud(NUEVA, SOLICITANTE)).rejects.toMatchObject({
+      codigo: 'PUBLICACION_NO_ACTIVA',
+      httpStatus: 409,
+    });
+    expect(repo.crearConHogar).not.toHaveBeenCalled();
   });
 
   it('devuelve el período de tránsito como día de calendario, no como instante', async () => {
@@ -720,14 +925,21 @@ describe('visibilidad del solicitante (HU-7.3)', () => {
   });
 
   it('ve el detalle de su propia solicitud aunque no publique la mascota', async () => {
-    await expect(service.obtenerDetalle(SOLICITUD, SOLICITANTE)).resolves.toMatchObject({
-      id: SOLICITUD,
-    });
+    await expect(service.obtenerDetalle(SOLICITUD, SOLICITANTE, 'PERSONAL')).resolves.toMatchObject(
+      {
+        id: SOLICITUD,
+      },
+    );
   });
 
   it('pero no puede resolverla: eso es de quien publicó la mascota', async () => {
     await expect(
-      service.resolverSolicitud(SOLICITUD, { estado: 'Aprobada', comentario: null }, SOLICITANTE),
+      service.resolverSolicitud(
+        SOLICITUD,
+        { estado: 'Aprobada', comentario: null },
+        SOLICITANTE,
+        'PERSONAL',
+      ),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
   });
 
@@ -737,7 +949,7 @@ describe('visibilidad del solicitante (HU-7.3)', () => {
     );
 
     await expect(
-      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO),
+      service.obtenerDetalle(SOLICITUD, OTRO_MIEMBRO_MISMO_REFUGIO, 'REFUGIO'),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
   });
 });
@@ -806,6 +1018,87 @@ describe('obtenerElegibilidad (chequeo previo de HU-7.1)', () => {
     });
     expect(repo.buscarVivaDeUsuarioEnPublicacion).not.toHaveBeenCalled();
   });
+
+  it('sobre la propia mascota, PUBLICACION_PROPIA gana sobre el resto de los motivos', async () => {
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue({
+      id: 40,
+      mascota: { id: 8, usuarioId: SOLICITANTE, refugioId: null, historicoEstados: [] },
+    } as never);
+
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40)).resolves.toMatchObject({
+      puedeSolicitar: false,
+      motivo: 'PUBLICACION_PROPIA',
+      mensaje: 'No podés solicitar tu propia mascota',
+    });
+  });
+
+  it('bloquea sobre una publicación del propio refugio, aunque la haya cargado otro miembro', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue({
+      ...usuario(SOLICITANTE, 1),
+      verificado: true,
+    } as never);
+    vi.mocked(repo.buscarPublicacionParaSolicitar).mockResolvedValue({
+      id: 40,
+      mascota: { id: 8, usuarioId: MIEMBRO_REFUGIO, refugioId: 1, historicoEstados: [] },
+    } as never);
+
+    await expect(service.obtenerElegibilidad(SOLICITANTE, 40)).resolves.toMatchObject({
+      motivo: 'PUBLICACION_PROPIA',
+    });
+  });
+});
+
+describe('switch refugio/adoptante — cada perfil ve solo lo suyo', () => {
+  it('desde la vista de refugio no se ve una solicitud que el miembro mandó como adoptante', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(usuario(SOLICITANTE, 1) as never);
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        mascotaRefugioId: 99,
+        mascotaUsuarioId: OTRO_ADOPTANTE,
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
+
+    await expect(service.obtenerDetalle(SOLICITUD, SOLICITANTE, 'REFUGIO')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('desde el perfil personal no se resuelve una solicitud de una mascota del refugio', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(
+      usuario(MIEMBRO_REFUGIO, REFUGIO_ID) as never,
+    );
+    vi.mocked(repo.buscarConDetalle).mockResolvedValue(
+      solicitudConDetalle({
+        historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }],
+      }) as never,
+    );
+
+    await expect(
+      service.resolverSolicitud(
+        SOLICITUD,
+        { estado: 'Aprobada', comentario: null },
+        MIEMBRO_REFUGIO,
+        'PERSONAL',
+      ),
+    ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
+    expect(repo.resolverSiPendiente).not.toHaveBeenCalled();
+  });
+
+  it('las recibidas del perfil personal piden solo las de sus mascotas personales', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(
+      usuario(MIEMBRO_REFUGIO, REFUGIO_ID) as never,
+    );
+    vi.mocked(repo.listarDelActor).mockResolvedValue([] as never);
+
+    await service.listarRecibidas(MIEMBRO_REFUGIO, 'PERSONAL', { limite: 20, desplazamiento: 0 });
+
+    expect(repo.listarDelActor).toHaveBeenCalledWith({
+      id: MIEMBRO_REFUGIO,
+      refugioId: REFUGIO_ID,
+      ambito: 'PERSONAL',
+    });
+  });
 });
 
 describe('versionado del hogar (mudanza posterior al envío)', () => {
@@ -823,7 +1116,7 @@ describe('versionado del hogar (mudanza posterior al envío)', () => {
       solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: FECHA_ALTA }] }),
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     expect(detalle.cambioDeHogar).toBeNull();
     expect(detalle.hogar?.direccion).toBe('Av. Santa Fe 3450, Palermo');
@@ -841,7 +1134,7 @@ describe('versionado del hogar (mudanza posterior al envío)', () => {
       }),
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     // Lo que el refugio evaluó no se reescribe...
     expect(detalle.hogar?.direccion).toBe('Av. Santa Fe 3450, Palermo');
@@ -861,7 +1154,7 @@ describe('versionado del hogar (mudanza posterior al envío)', () => {
       }),
     );
 
-    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO);
+    const detalle = await service.obtenerDetalle(SOLICITUD, MIEMBRO_REFUGIO, 'REFUGIO');
 
     expect(detalle.hogar).toBeNull();
     expect(detalle.cambioDeHogar).toBeNull();

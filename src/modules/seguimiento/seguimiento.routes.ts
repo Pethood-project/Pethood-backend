@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requiereAmbito } from '../../middlewares/ambito';
 import { autenticar } from '../../middlewares/auth';
 import { comprimirImagen } from '../../middlewares/comprimirImagen';
 import { uploadImagen } from '../../middlewares/uploadImagen';
@@ -34,4 +35,20 @@ seguimientoRouter.post(
   uploadImagen('foto'),
   comprimirImagen,
   controller.subirActualizacion,
+);
+
+// Spec 011 §6.11: preguntas propias del refugio. Solo desde la vista de refugio; que sea el
+// refugio dueño de ESA mascota lo verifica el service.
+seguimientoRouter.post(
+  '/solicitudes/:solicitudId/seguimientos/preguntas',
+  autenticar,
+  requiereAmbito('REFUGIO'),
+  controller.enviarPregunta,
+);
+
+seguimientoRouter.delete(
+  '/solicitudes/:solicitudId/seguimientos/pregunta-programada',
+  autenticar,
+  requiereAmbito('REFUGIO'),
+  controller.cancelarPreguntaProgramada,
 );

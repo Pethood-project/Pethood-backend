@@ -3,6 +3,7 @@
  * decimales) salen de `shared/validation`; acá solo se compone lo propio de Mascota.
  */
 import { z } from 'zod';
+import { TIPOS_VACUNA, type VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
@@ -10,6 +11,8 @@ import {
   decimalSchema,
   fechaPasadaSchema,
   idSchema,
+  listaDeIdsSchema,
+  listaJsonSchema,
   textoOpcionalSchema,
   textoSchema,
 } from '../../shared/validation/schemas';
@@ -21,17 +24,14 @@ export const GENEROS = ['MACHO', 'HEMBRA'] as const;
 export const DESTINOS = ['PROPIA', 'ADOPCION'] as const;
 
 /**
- * Qué conjunto de mascotas se pide en el listado. Un miembro de refugio tiene los dos:
- * las que cargó a título personal y las del refugio al que pertenece.
+ * Vacuna que la mascota ya tiene al cargarla (spec 019). Se da de alta como registro de su
+ * historia clínica; que sea del plan de la especie y posterior al nacimiento lo chequea el
+ * service, que es quien conoce la especie de la raza elegida.
  */
-export const AMBITOS_MASCOTAS = ['PERSONAL', 'REFUGIO'] as const;
-export type AmbitoMascotas = (typeof AMBITOS_MASCOTAS)[number];
-
-/** Llega por query string, así que es opcional: sin dato, el ámbito personal. */
-export const ambitoMascotasSchema = z
-  .enum(AMBITOS_MASCOTAS, { errorMap: () => ({ message: 'El ámbito no es válido' }) })
-  .optional()
-  .default('PERSONAL');
+const vacunaInicialSchema = z.object({
+  tipo: z.enum(TIPOS_VACUNA, { errorMap: () => ({ message: 'La vacuna no es válida' }) }),
+  fecha: fechaPasadaSchema('La fecha de la vacuna'),
+});
 
 /** Campos que piden por igual el formulario del adoptante y el del refugio. */
 const camposBase = {
@@ -47,12 +47,17 @@ const camposBase = {
     max: LIMITES.mascota.descripcion.max,
     etiqueta: 'La descripción',
   }),
+  /** JSON en el multipart: `[{ "tipo": "ANTIRRABICA", "fecha": "2026-05-10" }]`. Opcional. */
+  vacunas: listaJsonSchema(vacunaInicialSchema, {
+    max: TIPOS_VACUNA.length,
+    etiqueta: 'Las vacunas',
+  }),
 };
 
 /**
  * Un schema por actor. El adoptante elige destino y el refugio elige estado — nunca
  * ambos, así un adoptante no puede fijarse un estado a mano. El `actor` lo setea el
- * controller desde el token, nunca el cliente.
+ * controller desde el ámbito del pedido (`req.ambito`), nunca el body.
  */
 export const crearMascotaSchema = z.discriminatedUnion('actor', [
   z.object({
@@ -100,6 +105,16 @@ export const editarMascotaSchema = z
 
 export type EditarMascotaDto = z.infer<typeof editarMascotaSchema>;
 
+/**
+ * Filtro de "Mis mascotas": `?estados=1,3` (ids de `Estado_Mascota`). Sin el parámetro, o
+ * vacío, trae todas.
+ */
+export const filtrosMisMascotasSchema = z.object({
+  estados: listaDeIdsSchema('El estado de la mascota'),
+});
+
+export type FiltrosMisMascotasDto = z.infer<typeof filtrosMisMascotasSchema>;
+
 export interface MascotaCreadaDto {
   id: number;
   nombre: string | null;
@@ -117,4 +132,14 @@ export interface MascotaCreadaDto {
   usuarioId: number;
   /** Si el estado actual permite ofrecer la mascota en adopción. */
   habilitaPublicacion: boolean;
+}
+
+/**
+ * Ficha de detalle (HU-6.4): igual que el listado, más el id de la publicación activa para
+ * el botón "Ver publicación asociada" (`null` si la mascota no está publicada) y sus vacunas.
+ */
+export interface FichaMascotaDto extends MascotaCreadaDto {
+  publicacionActivaId: number | null;
+  /** Medallas: una por vacuna vigente en la historia clínica (spec 019). */
+  vacunas: VacunaAplicadaDto[];
 }

@@ -1,10 +1,21 @@
 import bcrypt from 'bcrypt';
 import { AppError } from '../../middlewares/errorHandler';
+import type { Ambito } from '../../shared/ambito';
+import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocoding';
+import { resolverCoordenadasDeMapsUrl } from '../../shared/geo';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
 import type { ArchivoSubida } from '../../shared/r2';
-import type { ActualizarPerfilBody, CambiarPasswordBody, PerfilPropio } from './usuarios.dto';
+import type {
+  PerfilPublicoUsuarioDto,
+  ActualizarPerfilBody,
+  CambiarPasswordBody,
+  PerfilPropio,
+  PreviewUbicacionBody,
+  UbicacionGeocodificadaDto,
+} from './usuarios.dto';
+import { aRefugioDeSesion } from '../../shared/refugioSesion';
 import type { UsuarioPerfil } from './usuarios.repository';
 import * as repo from './usuarios.repository';
 
@@ -16,38 +27,54 @@ function nombresDeRol(usuario: UsuarioPerfil): string[] {
     .map((vinculo) => vinculo.rol.nombre);
 }
 
-function aPerfil(usuario: UsuarioPerfil, valoracion: number | null): PerfilPropio {
+function aPerfil(
+  usuario: UsuarioPerfil,
+  mascotas: number,
+  valoracion: number | null,
+): PerfilPropio {
   return {
     id: usuario.id,
     nombre: usuario.nombre,
     apellido: usuario.apellido,
     email: usuario.email,
     telefono: usuario.telefono,
-    ubicacion: usuario.ubicacion,
+    provincia: usuario.provincia,
+    localidad: usuario.localidad,
+    calleAltura: usuario.calleAltura,
+    mapaUrl: usuario.mapaUrl,
+    latitud: usuario.latitud,
+    longitud: usuario.longitud,
+    ubicacionVerificada: usuario.ubicacionVerificada,
     imagenUrl: usuario.imagenUrl,
     roles: rolesDbAApi(nombresDeRol(usuario)),
+    refugio: aRefugioDeSesion(usuario.refugio),
     tienePassword: Boolean(usuario.contrasena),
-    mascotas: usuario._count.mascotas,
+    mascotas,
     favoritos: usuario._count.favoritos,
     valoracion: valoracion === null ? null : Math.round(valoracion * 10) / 10,
   };
 }
 
-async function armarPerfil(usuario: UsuarioPerfil): Promise<PerfilPropio> {
-  const valoracion = await repo.promedioValoracion(usuario.id);
-  return aPerfil(usuario, valoracion);
+/** `ambito` decide qué mascotas cuenta el perfil: las personales o las del refugio. */
+async function armarPerfil(usuario: UsuarioPerfil, ambito: Ambito): Promise<PerfilPropio> {
+  const [mascotas, valoracion] = await Promise.all([
+    repo.contarMascotasDelAmbito(usuario, ambito),
+    repo.promedioValoracion(usuario.id),
+  ]);
+  return aPerfil(usuario, mascotas, valoracion);
 }
 
-export async function obtenerPerfil(usuarioId: number): Promise<PerfilPropio> {
+export async function obtenerPerfil(usuarioId: number, ambito: Ambito): Promise<PerfilPropio> {
   const usuario = await repo.buscarPerfil(usuarioId);
   if (!usuario) {
     throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
   }
-  return armarPerfil(usuario);
+  return armarPerfil(usuario, ambito);
 }
 
 export async function actualizarPerfil(
   usuarioId: number,
+  ambito: Ambito,
   body: ActualizarPerfilBody,
   archivo?: ArchivoSubida,
 ): Promise<PerfilPropio> {
@@ -63,8 +90,31 @@ export async function actualizarPerfil(
     }
   }
 
+  // Solo se geocodifica si la dirección estructurada cambió y está completa. Así, editar el
+  // nombre o corregir el link de Maps a mano no lo pisa con el resultado del geocoder.
+  const cambioDireccion =
+    body.provincia !== actual.provincia ||
+    body.localidad !== actual.localidad ||
+    body.calleAltura !== actual.calleAltura;
+  const direccion = cambioDireccion ? direccionDesdeCampos(body) : null;
+  const ubicacion = direccion ? await geocodificarDireccion(direccion) : null;
+
+  if (direccion && !ubicacion) {
+    throw new AppError(
+      'DIRECCION_NO_GEOCODIFICADA',
+      'No pudimos ubicar esa dirección. Revisá la localidad y la provincia.',
+      422,
+    );
+  }
+
   const imagenUrl = archivo ? await persistirImagenPerfil(archivo) : undefined;
-  const actualizado = await repo.actualizarPerfil(usuarioId, { ...body, imagenUrl });
+  const actualizado = await repo.actualizarPerfil(usuarioId, {
+    ...body,
+    imagenUrl,
+    mapaUrl: ubicacion?.mapaUrl,
+    latitud: ubicacion?.latitud,
+    longitud: ubicacion?.longitud,
+  });
 
   await registrarAuditoria({
     usuarioId,
@@ -73,7 +123,68 @@ export async function actualizarPerfil(
     entidadId: usuarioId,
   });
 
-  return armarPerfil(actualizado);
+  return armarPerfil(actualizado, ambito);
+}
+
+/**
+ * Edición manual del link de Google Maps desde Mi Perfil. Parsea las coordenadas del link
+ * (incluidos los cortos de `maps.app.goo.gl`) y actualiza latitud/longitud junto con la URL,
+ * para que el pin quede exactamente donde el usuario lo pegó.
+ */
+export async function actualizarUbicacion(
+  usuarioId: number,
+  ambito: Ambito,
+  mapaUrl: string,
+): Promise<PerfilPropio> {
+  const actual = await repo.buscarPerfil(usuarioId);
+  if (!actual) {
+    throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
+  }
+
+  const coordenadas = await resolverCoordenadasDeMapsUrl(mapaUrl);
+  if (!coordenadas) {
+    throw new AppError(
+      'LINK_MAPA_INVALIDO',
+      'No pudimos leer la ubicación de ese link. Pegá el link de Google Maps de tu ubicación.',
+      422,
+    );
+  }
+
+  const actualizado = await repo.actualizarUbicacion(usuarioId, {
+    mapaUrl,
+    latitud: coordenadas.latitud,
+    longitud: coordenadas.longitud,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'EDITAR_UBICACION',
+    entidad: 'Usuario',
+    entidadId: usuarioId,
+  });
+
+  return armarPerfil(actualizado, ambito);
+}
+
+/**
+ * Geocodifica la dirección estructurada sin guardar nada, para que Datos personales muestre
+ * el link de Maps que se generaría y el usuario lo verifique antes de guardar.
+ */
+export async function previewUbicacion(
+  body: PreviewUbicacionBody,
+): Promise<UbicacionGeocodificadaDto> {
+  const direccion = direccionDesdeCampos(body);
+  const ubicacion = direccion ? await geocodificarDireccion(direccion) : null;
+
+  if (!ubicacion) {
+    throw new AppError(
+      'DIRECCION_NO_GEOCODIFICADA',
+      'No pudimos ubicar esa dirección. Revisá la localidad y la provincia.',
+      422,
+    );
+  }
+
+  return ubicacion;
 }
 
 export async function cambiarPassword(usuarioId: number, body: CambiarPasswordBody): Promise<void> {
@@ -144,4 +255,37 @@ export async function darDeBajaCuenta(usuarioId: number): Promise<void> {
     entidad: 'Usuario',
     entidadId: usuarioId,
   });
+}
+
+/** Email del usuario SISTEMA (prisma/seed): una cuenta interna que no es un perfil. */
+const EMAIL_SISTEMA = 'sistema@pethood.internal';
+
+/** Spec 023. Una persona suspendida, inactiva, dada de baja o el usuario SISTEMA no se muestran. */
+export async function obtenerPerfilPublico(
+  id: number,
+  actorId: number,
+): Promise<PerfilPublicoUsuarioDto> {
+  const usuario = await repo.buscarPerfilPublico(id);
+  const estado = usuario?.estado.nombre;
+  const visible =
+    usuario !== null &&
+    usuario.email !== EMAIL_SISTEMA &&
+    estado !== ESTADO_USUARIO.SUSPENDIDO &&
+    estado !== ESTADO_USUARIO.INACTIVO;
+
+  if (!usuario || !visible) {
+    throw new AppError('NO_ENCONTRADO', 'No encontramos a esa persona', 404);
+  }
+
+  return {
+    id: usuario.id,
+    nombre: usuario.nombre,
+    apellido: usuario.apellido,
+    imagenUrl: usuario.imagenUrl,
+    verificado: usuario.verificado,
+    provincia: usuario.provincia,
+    localidad: usuario.localidad,
+    fechaAlta: usuario.fechaAlta.toISOString(),
+    esPropio: usuario.id === actorId,
+  };
 }

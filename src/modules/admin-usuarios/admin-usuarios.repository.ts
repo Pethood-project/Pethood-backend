@@ -39,6 +39,16 @@ function whereUsuarios(filtros: FiltrosUsuariosRepo): Prisma.UsuarioWhereInput {
   };
 }
 
+/** Conteos de actividad del usuario para el modal de detalle. */
+export async function resumenUsuario(usuarioId: number) {
+  const [mascotas, solicitudes, donaciones] = await Promise.all([
+    prisma.mascota.count({ where: { usuarioId, fechaBaja: null } }),
+    prisma.solicitud.count({ where: { usuarioId, fechaBaja: null } }),
+    prisma.donacion.count({ where: { usuarioId, fechaBaja: null } }),
+  ]);
+  return { mascotas, solicitudes, donaciones };
+}
+
 export async function listarUsuarios(
   filtros: FiltrosUsuariosRepo,
 ): Promise<{ usuarios: UsuarioAdmin[]; total: number }> {
@@ -124,6 +134,13 @@ export function asignarRefugio(usuarioId: number, refugioId: number, adminId: nu
   return prisma.usuario.update({
     where: { id: usuarioId },
     data: { refugioId, ...datosModificacion(adminId) },
+  });
+}
+
+export function desasignarRefugio(usuarioId: number, adminId: number) {
+  return prisma.usuario.update({
+    where: { id: usuarioId },
+    data: { refugioId: null, ...datosModificacion(adminId) },
   });
 }
 
@@ -240,7 +257,9 @@ export async function resumenRefugio(refugioId: number) {
 export function crearRefugio(
   datos: {
     nombre: string;
-    direccion: string;
+    provincia: string;
+    localidad: string;
+    calleAltura: string;
     telefono?: string;
     email?: string;
     descripcion: string | null;
@@ -251,7 +270,9 @@ export function crearRefugio(
   return prisma.refugio.create({
     data: {
       nombre: datos.nombre,
-      direccion: datos.direccion,
+      provincia: datos.provincia,
+      localidad: datos.localidad,
+      calleAltura: datos.calleAltura,
       telefono: datos.telefono,
       email: datos.email,
       descripcion: datos.descripcion,

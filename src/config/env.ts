@@ -18,6 +18,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET debe tener al menos 16 caracteres'),
   JWT_EXPIRES_IN: z.string().default('7d'),
+  // Saltos de proxy delante del server (0 = ninguno). El rate limit por IP lo necesita para ver la IP real.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   GOOGLE_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
@@ -31,9 +33,27 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   R2_BUCKET_NAME: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   R2_PUBLIC_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  // Geocodificación de direcciones (node-geocoder). `openstreetmap` es gratis y no pide key;
+  // `google` exige GEOCODER_API_KEY (lo verifica el refine de abajo).
+  GEOCODER_PROVIDER: z.enum(['openstreetmap', 'google']).default('openstreetmap'),
+  GEOCODER_API_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  // Contacto para Nominatim (OpenStreetMap), que lo pide para uso sostenido. Opcional.
+  GEOCODER_EMAIL: z.preprocess(emptyToUndefined, z.string().email().optional()),
 });
 
-const parsed = envSchema.safeParse(process.env);
+// La key de Google no es opcional si el proveedor elegido es Google: fallar al arrancar es
+// mejor que descubrir en la primera geocodificación que falta.
+const envSchemaConGeocoder = envSchema.superRefine((valores, ctx) => {
+  if (valores.GEOCODER_PROVIDER === 'google' && !valores.GEOCODER_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['GEOCODER_API_KEY'],
+      message: 'GEOCODER_API_KEY es obligatoria cuando GEOCODER_PROVIDER es "google"',
+    });
+  }
+});
+
+const parsed = envSchemaConGeocoder.safeParse(process.env);
 
 if (!parsed.success) {
   console.error('❌ Variables de entorno inválidas:', parsed.error.flatten().fieldErrors);

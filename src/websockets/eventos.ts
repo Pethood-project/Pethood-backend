@@ -15,6 +15,8 @@ export const EVENTOS = {
   MENSAJE_NUEVO: 'chat:mensaje-nuevo',
   /** server → sala. Alguien leyó la conversación: habilita el doble check del emisor. */
   LEIDO: 'chat:leido',
+  /** server → sala. A alguien le LLEGARON los mensajes, aunque no los haya abierto. */
+  ENTREGADO: 'chat:entregado',
   /** server → sala personal. Contador de la pestaña Chat (HU-5.1) en otros dispositivos. */
   NO_LEIDOS: 'chat:no-leidos',
   /** server → sala. El contacto se conectó o se desconectó. */

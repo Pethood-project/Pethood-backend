@@ -56,7 +56,13 @@ function membresia(opciones: {
     id: chatId * 100,
     chatId,
     usuarioId: USUARIO,
-    chat: { id: chatId, fechaAlta, refugio: refugioDelChat, participantes },
+    chat: {
+      id: chatId,
+      fechaAlta,
+      refugioId: refugioDelChat?.id ?? null,
+      refugio: refugioDelChat,
+      participantes,
+    },
   };
 }
 
@@ -75,11 +81,12 @@ function ultimoMensaje(opciones: {
     imagenUrl = null,
   } = opciones;
 
-  return { chatId, contenido, usuarioId, imagenUrl, fechaAlta };
+  return { chatId, contenido, usuarioId, imagenUrl, tipo: 'TEXTO' as const, fechaAlta };
 }
 
+/** Fila de `contarNoLeidosPorChat`: el conteo ya resuelto contra la marca del participante. */
 function conteo(chatId: number, cantidad: number) {
-  return { chatId, _count: { _all: cantidad } };
+  return { chatId, noLeidos: cantidad };
 }
 
 beforeEach(() => {
@@ -93,14 +100,32 @@ beforeEach(() => {
 
 describe('listarConversaciones — lista vacía', () => {
   it('un usuario sin conversaciones recibe total 0, no un error', async () => {
-    await expect(service.listarConversaciones(USUARIO)).resolves.toEqual({ total: 0, chats: [] });
+    await expect(service.listarConversaciones(USUARIO, 'PERSONAL')).resolves.toEqual({
+      total: 0,
+      chats: [],
+    });
   });
 
   it('sin chats no consulta mensajes: se ahorra las dos queries', async () => {
-    await service.listarConversaciones(USUARIO);
+    await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(repo.ultimoMensajePorChat).not.toHaveBeenCalled();
     expect(repo.contarNoLeidosPorChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('listarConversaciones — preview de la tarjeta de solicitud', () => {
+  it('cuando lo último es una solicitud, el preview lo dice con tipo y contenido vacío', async () => {
+    vi.mocked(repo.listarChatsActivosDeUsuario).mockResolvedValue([
+      membresia({ chatId: 1 }),
+    ] as never);
+    vi.mocked(repo.ultimoMensajePorChat).mockResolvedValue([
+      { ...ultimoMensaje({ chatId: 1, fechaAlta: RECIENTE, contenido: '' }), tipo: 'SOLICITUD' },
+    ] as never);
+
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
+
+    expect(chats[0]!.ultimoMensaje).toMatchObject({ tipo: 'SOLICITUD', contenido: '' });
   });
 });
 
@@ -115,7 +140,7 @@ describe('listarConversaciones — orden', () => {
       ultimoMensaje({ chatId: 2, fechaAlta: RECIENTE }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats.map((chat) => chat.chatId)).toEqual([2, 1]);
   });
@@ -132,7 +157,7 @@ describe('listarConversaciones — orden', () => {
       ultimoMensaje({ chatId: 1, fechaAlta: VIEJA }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats.map((chat) => chat.chatId)).toEqual([2, 1]);
     expect(chats[0]!.fechaUltimaActividad).toBe(creacionNueva.toISOString());
@@ -145,7 +170,7 @@ describe('listarConversaciones — orden', () => {
       membresia({ chatId: 3 }),
     ] as never);
 
-    await service.listarConversaciones(USUARIO);
+    await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(repo.ultimoMensajePorChat).toHaveBeenCalledTimes(1);
     expect(repo.ultimoMensajePorChat).toHaveBeenCalledWith([1, 2, 3]);
@@ -160,7 +185,7 @@ describe('listarConversaciones — chats sin mensajes', () => {
       membresia({ chatId: 1 }),
     ] as never);
 
-    const { total, chats } = await service.listarConversaciones(USUARIO);
+    const { total, chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(total).toBe(1);
     expect(chats[0]).toMatchObject({
@@ -183,13 +208,15 @@ describe('listarConversaciones — vista previa del último mensaje', () => {
       ultimoMensaje({ chatId: 1, fechaAlta: RECIENTE, contenido: largo }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.ultimoMensaje).toEqual({
       contenido: largo,
+      tipo: 'TEXTO',
       fecha: '2026-09-01T14:05:00.000Z',
       esMio: false,
       tieneImagen: false,
+      tieneVideo: false,
     });
   });
 
@@ -201,7 +228,7 @@ describe('listarConversaciones — vista previa del último mensaje', () => {
       ultimoMensaje({ chatId: 1, fechaAlta: RECIENTE, usuarioId: USUARIO }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.ultimoMensaje!.esMio).toBe(true);
   });
@@ -219,7 +246,7 @@ describe('listarConversaciones — vista previa del último mensaje', () => {
       }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.ultimoMensaje).toMatchObject({ contenido: '', tieneImagen: true });
   });
@@ -237,7 +264,7 @@ describe('listarConversaciones — no leídos', () => {
     ] as never);
     vi.mocked(repo.contarNoLeidosPorChat).mockResolvedValue([conteo(1, 3)] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.noLeidos).toBe(3);
     expect(chats[1]!.noLeidos).toBe(0);
@@ -250,7 +277,7 @@ describe('listarConversaciones — resolución del contacto', () => {
       membresia({ chatId: 1, refugio: refugio() }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.contacto).toEqual({
       tipo: 'REFUGIO',
@@ -267,7 +294,7 @@ describe('listarConversaciones — resolución del contacto', () => {
       membresia({ chatId: 1, refugio: refugio() }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'REFUGIO');
 
     expect(chats[0]!.contacto).toMatchObject({ tipo: 'USUARIO', id: OTRO, nombre: 'Ana Pérez' });
   });
@@ -278,7 +305,7 @@ describe('listarConversaciones — resolución del contacto', () => {
       membresia({ chatId: 1, refugio: refugio() }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.contacto.tipo).toBe('REFUGIO');
   });
@@ -288,7 +315,7 @@ describe('listarConversaciones — resolución del contacto', () => {
       membresia({ chatId: 1, refugio: null }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.contacto).toEqual({
       tipo: 'USUARIO',
@@ -306,7 +333,7 @@ describe('listarConversaciones — contraparte dada de baja', () => {
       membresia({ chatId: 1, participantes: [participante({ fechaBaja: VIEJA })] }),
     ] as never);
 
-    const { total, chats } = await service.listarConversaciones(USUARIO);
+    const { total, chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(total).toBe(1);
     // Se conserva el nombre real: el backend manda el hecho, el placeholder lo pone la UI.
@@ -318,7 +345,7 @@ describe('listarConversaciones — contraparte dada de baja', () => {
       membresia({ chatId: 1, refugio: refugio({ fechaBaja: VIEJA }) }),
     ] as never);
 
-    const { chats } = await service.listarConversaciones(USUARIO);
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.contacto).toMatchObject({ tipo: 'REFUGIO', activo: false });
   });
@@ -331,7 +358,7 @@ describe('listarConversaciones — contraparte dada de baja', () => {
       membresia({ chatId: 2, participantes: [] }),
     ] as never);
 
-    const { total, chats } = await service.listarConversaciones(USUARIO);
+    const { total, chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats).toHaveLength(1);
     expect(chats[0]!.chatId).toBe(1);
@@ -347,9 +374,61 @@ describe('listarConversaciones — total', () => {
       membresia({ chatId: 3, participantes: [] }),
     ] as never);
 
-    const { total, chats } = await service.listarConversaciones(USUARIO);
+    const { total, chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(total).toBe(chats.length);
     expect(total).toBe(2);
+  });
+});
+
+describe('listarConversaciones — separación por perfil (switch refugio/adoptante)', () => {
+  beforeEach(() => {
+    vi.mocked(repo.buscarRefugioDeUsuario).mockResolvedValue({ refugioId: REFUGIO } as never);
+    vi.mocked(repo.listarChatsActivosDeUsuario).mockResolvedValue([
+      membresia({ chatId: 1, refugio: refugio() }),
+      membresia({ chatId: 2, refugio: refugio({ id: 99 }) }),
+      membresia({ chatId: 3 }),
+    ] as never);
+  });
+
+  it('desde la vista de refugio ve solo los chats de SU refugio', async () => {
+    const { total, chats } = await service.listarConversaciones(USUARIO, 'REFUGIO');
+
+    expect(chats.map((chat) => chat.chatId)).toEqual([1]);
+    expect(total).toBe(1);
+  });
+
+  it('desde el perfil personal ve el resto: con otros refugios y entre personas', async () => {
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
+
+    expect(chats.map((chat) => chat.chatId).sort()).toEqual([2, 3]);
+  });
+});
+
+describe('exigirChatDelAmbito', () => {
+  beforeEach(() => {
+    vi.mocked(repo.buscarRefugioDeUsuario).mockResolvedValue({ refugioId: REFUGIO } as never);
+  });
+
+  it('rechaza abrir un chat del refugio desde el perfil personal', async () => {
+    vi.mocked(repo.buscarRefugioDeChat).mockResolvedValue({ refugioId: REFUGIO } as never);
+
+    await expect(service.exigirChatDelAmbito(USUARIO, 1, 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'AMBITO_NO_PERMITIDO',
+    });
+  });
+
+  it('rechaza abrir un chat personal desde la vista de refugio', async () => {
+    vi.mocked(repo.buscarRefugioDeChat).mockResolvedValue({ refugioId: null } as never);
+
+    await expect(service.exigirChatDelAmbito(USUARIO, 1, 'REFUGIO')).rejects.toMatchObject({
+      codigo: 'AMBITO_NO_PERMITIDO',
+    });
+  });
+
+  it('deja pasar un chat del perfil activo', async () => {
+    vi.mocked(repo.buscarRefugioDeChat).mockResolvedValue({ refugioId: REFUGIO } as never);
+
+    await expect(service.exigirChatDelAmbito(USUARIO, 1, 'REFUGIO')).resolves.toBeUndefined();
   });
 });

@@ -10,4 +10,8 @@ export const catalogosRouter = Router();
 
 catalogosRouter.get('/especies', autenticar, controller.listarEspecies);
 catalogosRouter.get('/especies/:especieId/razas', autenticar, controller.listarRazasDeEspecie);
+catalogosRouter.get('/especies/:especieId/vacunas', autenticar, controller.listarVacunasDeEspecie);
 catalogosRouter.get('/estados-mascota', autenticar, controller.listarEstadosMascota);
+catalogosRouter.get('/estados-publicacion', autenticar, controller.listarEstadosPublicacion);
+// Spec 020: filtro del portal de perdidos y selector del alta del aviso.
+catalogosRouter.get('/estados-animal-perdido', autenticar, controller.listarEstadosAnimalPerdido);

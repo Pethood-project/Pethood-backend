@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { LIMITES } from '../../shared/validation/limits';
+import { textoOpcionalSchema, textoSchema } from '../../shared/validation/schemas';
 import { ROL_API } from '../../shared/roles';
 
 export const nombrePersonaSchema = z
@@ -45,10 +47,57 @@ export const registroBodySchema = z.object({
     .trim()
     .regex(/^\d{7,8}$/, 'El DNI debe tener 7 u 8 dígitos numéricos.')
     .optional(),
+  // Dirección estructurada opcional que se geocodifica al crear la cuenta (node-geocoder).
+  provincia: textoOpcionalSchema({
+    max: LIMITES.usuario.provincia.max,
+    etiqueta: 'La provincia',
+  }),
+  localidad: textoOpcionalSchema({
+    max: LIMITES.usuario.localidad.max,
+    etiqueta: 'La localidad',
+  }),
+  calleAltura: textoOpcionalSchema({
+    max: LIMITES.usuario.calleAltura.max,
+    etiqueta: 'La calle y altura',
+  }),
   rol: z.enum([ROL_API.ADOPTANTE, ROL_API.MIEMBRO_REFUGIO]).default(ROL_API.ADOPTANTE),
 });
 
 export type RegistroBody = z.infer<typeof registroBodySchema>;
+
+/** Un campo opcional de formulario multipart llega como '' cuando está vacío: se trata como ausente. */
+const vacioAUndefined = (valor: unknown) => (valor === '' ? undefined : valor);
+
+/**
+ * Alta pública de refugio desde la landing de web-admin (HU-1.1 / HU-2.4): crea a la persona
+ * que lo gestiona y al refugio, que nace sin verificar hasta que el admin lo apruebe (HU-2.2).
+ */
+export const registroRefugioBodySchema = z.object({
+  nombre: nombrePersonaSchema,
+  apellido: nombrePersonaSchema,
+  email: emailSchema,
+  password: passwordSchema,
+  refugioNombre: textoSchema({ ...LIMITES.refugio.nombre, etiqueta: 'El nombre del refugio' }),
+  provincia: textoSchema({ max: LIMITES.refugio.provincia.max, etiqueta: 'La provincia' }),
+  localidad: textoSchema({ max: LIMITES.refugio.localidad.max, etiqueta: 'La localidad' }),
+  calleAltura: textoSchema({
+    max: LIMITES.refugio.calleAltura.max,
+    etiqueta: 'La calle y altura',
+  }),
+  refugioTelefono: z.preprocess(vacioAUndefined, telefonoSchema.optional()),
+  refugioEmail: z.preprocess(vacioAUndefined, emailSchema.optional()),
+  refugioDescripcion: textoOpcionalSchema({
+    max: LIMITES.refugio.descripcion.max,
+    etiqueta: 'La descripción',
+  }),
+});
+
+export type RegistroRefugioBody = z.infer<typeof registroRefugioBodySchema>;
+
+export interface RespuestaRegistroRefugio {
+  mensaje: string;
+  refugio: { id: number; nombre: string; estado: string };
+}
 
 export const loginBodySchema = z.object({
   email: emailSchema,
@@ -86,6 +135,20 @@ export interface RespuestaRecuperar {
 
 export type GoogleIdTokenBody = z.infer<typeof googleIdTokenBodySchema>;
 
+/**
+ * El refugio en el que trabaja la persona, o `null` si no pertenece a ninguno.
+ *
+ * Viaja en la sesión y no como un pedido aparte porque define qué ve la app apenas entra:
+ * la cabecera de GUI-31 lo nombra, y el chat ya distinguía al refugio del adoptante con un
+ * dato que el cliente no tenía.
+ */
+export const refugioDeSesionSchema = z.object({
+  id: z.number(),
+  nombre: z.string(),
+  /** Estado del refugio (`Activo`, `Pendiente_Verificacion`, `Suspendido`, `Inactivo`). */
+  estado: z.string(),
+});
+
 export const usuarioPublicoSchema = z.object({
   id: z.number(),
   nombre: z.string(),
@@ -94,7 +157,7 @@ export const usuarioPublicoSchema = z.object({
   roles: z.array(z.string()),
   imagenUrl: z.string().nullable(),
   telefono: z.string().nullable().optional(),
-  ubicacion: z.string().nullable().optional(),
+  refugio: refugioDeSesionSchema.nullable(),
 });
 
 export const respuestaAuthSchema = z.object({

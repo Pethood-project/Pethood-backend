@@ -26,7 +26,21 @@ function exigirChatId(req: Request): number {
  */
 export async function listar(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    res.json(await service.listarConversaciones(req.usuario!.usuarioId));
+    res.json(await service.listarConversaciones(req.usuario!.usuarioId, req.ambito!));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Guard de todas las rutas de sala: la conversación tiene que ser del perfil activo. */
+export async function exigirAmbitoDelChat(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    await service.exigirChatDelAmbito(req.usuario!.usuarioId, exigirChatId(req), req.ambito!);
+    next();
   } catch (err) {
     next(err);
   }
@@ -84,10 +98,14 @@ export async function enviarMensaje(
   try {
     const chatId = exigirChatId(req);
 
+    // `req.files` es un array cuando el upload es de varios campos homónimos; multer lo
+    // deja vacío si el cliente no mandó ninguno.
+    const archivos = Array.isArray(req.files) ? req.files : [];
+
     const mensaje = await service.enviarMensaje(req.body, {
       usuarioId: req.usuario!.usuarioId,
       chatId,
-      archivo: req.file,
+      archivos,
     });
 
     res.status(201).json(mensaje);
@@ -101,6 +119,25 @@ export async function marcarLeidos(req: Request, res: Response, next: NextFuncti
   try {
     const chatId = exigirChatId(req);
     res.json(await service.marcarLeidos(req.usuario!.usuarioId, chatId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * HU-5.2. Acusa recibo de los mensajes de la sala: el segundo tilde del emisor.
+ *
+ * Lo llama el cliente apenas le llega un mensaje, tenga o no la conversación abierta, así
+ * que es la ruta más repetida del módulo: escribe una sola fila y no devuelve la sala.
+ */
+export async function marcarEntregados(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    res.json(await service.marcarEntregados(req.usuario!.usuarioId, chatId));
   } catch (err) {
     next(err);
   }

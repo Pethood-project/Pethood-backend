@@ -1,6 +1,9 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
+import { firmarUrlArchivo } from '../../shared/urlFirmada';
+import { validarVacunaDeMascota } from '../../shared/vacunas';
 import { aFechaISO } from '../../shared/validation/dates';
 import type {
   CrearHistoriaClinicaDto,
@@ -13,6 +16,8 @@ const SUBCARPETA_DOCUMENTOS = 'historias-clinicas';
 
 export interface Contexto {
   usuarioId: number;
+  /** Perfil con el que se opera: la historia clínica sigue a la mascota (ver `shared/ambito.ts`). */
+  ambito: Ambito;
   archivo?: { buffer: Buffer; mimetype: string };
 }
 
@@ -25,9 +30,11 @@ function aDto(registro: Registro): HistoriaClinicaDto {
     fechaProxima: registro.fechaProxima ? aFechaISO(registro.fechaProxima) : null,
     requiereRevision: registro.requiereRevision,
     vacunacion: registro.vacunacion,
+    tipoVacuna: registro.tipoVacuna,
     titulo: registro.titulo,
     descripcion: registro.descripcion,
-    documentoUrl: registro.documentoUrl,
+    // Comprobante médico: privado, la URL sale firmada y vence.
+    documentoUrl: firmarUrlArchivo(registro.documentoUrl),
     mascotaId: registro.mascotaId,
     usuarioAlta: registro.usuarioAlta,
     fechaAlta: registro.fechaAlta.toISOString(),
@@ -37,10 +44,13 @@ function aDto(registro: Registro): HistoriaClinicaDto {
 type Mascota = NonNullable<Awaited<ReturnType<typeof repo.buscarMascota>>>;
 type Usuario = NonNullable<Awaited<ReturnType<typeof repo.buscarUsuario>>>;
 
-/** Asociación mínima para leer o dar de alta (HU-8.1/HU-8.2): dueño directo o refugio dueño. */
-function tieneAcceso(mascota: Mascota, usuario: Usuario): boolean {
-  if (mascota.usuarioId === usuario.id) return true;
-  return usuario.refugioId !== null && usuario.refugioId === mascota.refugioId;
+/**
+ * Asociación mínima para leer o dar de alta (HU-8.1/HU-8.2): que la mascota sea del perfil
+ * con el que se opera — la personal propia desde la vista personal, cualquiera del refugio
+ * desde la vista de refugio.
+ */
+function tieneAcceso(mascota: Mascota, usuario: Usuario, ambito: Ambito): boolean {
+  return esMascotaDelAmbito(mascota, usuario, ambito);
 }
 
 /**
@@ -52,9 +62,10 @@ function puedeGestionar(
   mascota: Mascota,
   usuario: Usuario,
   registro: { usuarioAlta: number },
+  ambito: Ambito,
 ): boolean {
-  if (usuario.refugioId !== null && usuario.refugioId === mascota.refugioId) return true;
-  return mascota.usuarioId === usuario.id && registro.usuarioAlta === usuario.id;
+  if (!tieneAcceso(mascota, usuario, ambito)) return false;
+  return ambito === 'REFUGIO' || registro.usuarioAlta === usuario.id;
 }
 
 async function exigirMascotaYUsuario(mascotaId: number, usuarioId: number) {
@@ -69,14 +80,43 @@ async function exigirMascotaYUsuario(mascotaId: number, usuarioId: number) {
   return { mascota, usuario };
 }
 
-async function exigirAcceso(mascotaId: number, usuarioId: number) {
+async function exigirAcceso(mascotaId: number, usuarioId: number, ambito: Ambito) {
   const { mascota, usuario } = await exigirMascotaYUsuario(mascotaId, usuarioId);
 
-  if (!tieneAcceso(mascota, usuario)) {
+  if (!tieneAcceso(mascota, usuario, ambito)) {
     throw new AppError('NO_AUTORIZADO', 'Esa mascota no está asociada a tu cuenta', 403);
   }
 
   return { mascota, usuario };
+}
+
+/**
+ * Título y descripción con los que se guarda el alta. Una vacuna (spec 019) se titula con
+ * su nombre y, si no trae descripción, lleva la del plan de vacunación; tiene que ser del
+ * plan de la especie y posterior al nacimiento, igual que al cargarla con la mascota.
+ */
+function resolverContenido(
+  datos: CrearHistoriaClinicaDto,
+  mascota: Mascota,
+): { titulo: string; descripcion: string } {
+  if (!datos.tipoVacuna) {
+    // El DTO ya exige los dos cuando no es vacuna.
+    return { titulo: datos.titulo!, descripcion: datos.descripcion! };
+  }
+
+  const resultado = validarVacunaDeMascota(datos.tipoVacuna, datos.fechaVisita, {
+    especie: mascota.raza.especie.nombre,
+    fechaNacimiento: mascota.fechaNacimiento,
+  });
+
+  if (!resultado.valida) {
+    throw new AppError('VALIDACION', resultado.error, 400);
+  }
+
+  return {
+    titulo: resultado.vacuna.nombre,
+    descripcion: datos.descripcion ?? resultado.vacuna.descripcion,
+  };
 }
 
 export async function crearHistoriaClinica(
@@ -84,7 +124,8 @@ export async function crearHistoriaClinica(
   datos: CrearHistoriaClinicaDto,
   contexto: Contexto,
 ): Promise<HistoriaClinicaDto> {
-  await exigirAcceso(mascotaId, contexto.usuarioId);
+  const { mascota } = await exigirAcceso(mascotaId, contexto.usuarioId, contexto.ambito);
+  const { titulo, descripcion } = resolverContenido(datos, mascota);
 
   const documentoUrl = contexto.archivo
     ? await guardarImagen(contexto.archivo, SUBCARPETA_DOCUMENTOS)
@@ -97,9 +138,10 @@ export async function crearHistoriaClinica(
         fechaVisita: datos.fechaVisita,
         fechaProxima: datos.fechaProxima,
         requiereRevision: datos.requiereRevision,
-        vacunacion: datos.vacunacion,
-        titulo: datos.titulo,
-        descripcion: datos.descripcion,
+        vacunacion: datos.tipoVacuna !== null,
+        tipoVacuna: datos.tipoVacuna,
+        titulo,
+        descripcion,
         documentoUrl,
         mascotaId,
       },
@@ -124,8 +166,9 @@ export async function crearHistoriaClinica(
 export async function listarHistorial(
   mascotaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<HistoriaClinicaDto[]> {
-  await exigirAcceso(mascotaId, usuarioId);
+  await exigirAcceso(mascotaId, usuarioId, ambito);
 
   const registros = await repo.listarPorMascota(mascotaId);
   return registros.map(aDto);
@@ -148,12 +191,13 @@ async function buscarRegistroConMascota(historiaClinicaId: number) {
 export async function obtenerHistoriaClinica(
   historiaClinicaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<HistoriaClinicaDto> {
   const { registro, mascota } = await buscarRegistroConMascota(historiaClinicaId);
   const usuario = await repo.buscarUsuario(usuarioId);
 
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
-  if (!tieneAcceso(mascota, usuario)) {
+  if (!tieneAcceso(mascota, usuario, ambito)) {
     throw new AppError('NO_AUTORIZADO', 'Esa mascota no está asociada a tu cuenta', 403);
   }
 
@@ -163,7 +207,8 @@ export async function obtenerHistoriaClinica(
 /**
  * "Modificar" (HU-8.3): nunca actualiza el registro persistido. Da de baja el anterior y
  * crea uno nuevo con los campos fusionados — lo que no vino en el PATCH conserva el valor
- * vigente. `vacunacion` no es editable y siempre se arrastra del registro anterior.
+ * vigente. `vacunacion` y `tipoVacuna` no son editables y siempre se arrastran del registro
+ * anterior; en una vacuna el título tampoco, porque es el nombre de la vacuna.
  */
 export async function editarHistoriaClinica(
   historiaClinicaId: number,
@@ -174,7 +219,7 @@ export async function editarHistoriaClinica(
   const usuario = await repo.buscarUsuario(contexto.usuarioId);
 
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
-  if (!puedeGestionar(mascota, usuario, registro)) {
+  if (!puedeGestionar(mascota, usuario, registro, contexto.ambito)) {
     throw new AppError('NO_AUTORIZADO', 'No tenés permisos para editar este registro', 403);
   }
 
@@ -191,7 +236,8 @@ export async function editarHistoriaClinica(
         fechaProxima: datos.fechaProxima !== undefined ? datos.fechaProxima : registro.fechaProxima,
         requiereRevision: datos.requiereRevision ?? registro.requiereRevision,
         vacunacion: registro.vacunacion,
-        titulo: datos.titulo ?? registro.titulo,
+        tipoVacuna: registro.tipoVacuna,
+        titulo: registro.tipoVacuna ? registro.titulo : (datos.titulo ?? registro.titulo),
         descripcion: datos.descripcion ?? registro.descripcion,
         documentoUrl: documentoNuevo ?? registro.documentoUrl,
         mascotaId: registro.mascotaId,
@@ -223,17 +269,18 @@ export async function editarHistoriaClinica(
 /**
  * HU-8.4: baja lógica simple, sin baja+alta — el registro se elimina, no se "corrige".
  * Mismo permiso que HU-8.3: dueño (adoptante) que lo cargó, o cualquier integrante del
- * refugio dueño de la mascota.
+ * refugio dueño de la mascota desde la vista de refugio.
  */
 export async function eliminarHistoriaClinica(
   historiaClinicaId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<{ id: number }> {
   const { registro, mascota } = await buscarRegistroConMascota(historiaClinicaId);
   const usuario = await repo.buscarUsuario(usuarioId);
 
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
-  if (!puedeGestionar(mascota, usuario, registro)) {
+  if (!puedeGestionar(mascota, usuario, registro, ambito)) {
     throw new AppError('NO_AUTORIZADO', 'No tiene permisos para eliminar este registro', 403);
   }
 

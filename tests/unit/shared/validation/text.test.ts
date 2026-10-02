@@ -1,11 +1,58 @@
 import { describe, expect, it } from 'vitest';
 import {
+  mensajeInvalido,
   mensajeLongitud,
+  parsearListaDeTextos,
+  parsearListaDeValores,
+  parsearListaJson,
   mensajeObligatorio,
   validarTexto,
 } from '../../../../src/shared/validation/text';
 
 const nombre = { min: 2, max: 25, etiqueta: 'El nombre' };
+const ubicaciones = { max: 80, maximoElementos: 3, etiqueta: 'La ubicación' };
+
+describe('mensajeInvalido', () => {
+  it('concuerda en género con la etiqueta', () => {
+    expect(mensajeInvalido('La especie')).toBe('La especie no es válida');
+    expect(mensajeInvalido('El estado')).toBe('El estado no es válido');
+  });
+});
+
+describe('parsearListaDeTextos', () => {
+  it('ausente o vacía es "sin filtro"', () => {
+    expect(parsearListaDeTextos(undefined, ubicaciones)).toEqual({ valido: true, valor: [] });
+    expect(parsearListaDeTextos('', ubicaciones)).toEqual({ valido: true, valor: [] });
+  });
+
+  it('un solo valor llega como string y NO se parte por comas', () => {
+    expect(parsearListaDeTextos('Godoy Cruz, Mendoza', ubicaciones)).toEqual({
+      valido: true,
+      valor: ['Godoy Cruz, Mendoza'],
+    });
+  });
+
+  it('varios valores llegan como array: recorta, descarta vacíos y repetidos sin mayúsculas', () => {
+    expect(parsearListaDeTextos([' Maipú ', 'maipú', '  ', 'Godoy Cruz'], ubicaciones)).toEqual({
+      valido: true,
+      valor: ['Maipú', 'Godoy Cruz'],
+    });
+  });
+
+  it('rechaza la lista entera si un valor es demasiado largo o no es texto', () => {
+    const invalida = { valido: false, error: 'La ubicación no es válida' };
+
+    expect(parsearListaDeTextos(['Maipú', 'x'.repeat(81)], ubicaciones)).toEqual(invalida);
+    expect(parsearListaDeTextos([{ a: 1 }], ubicaciones)).toEqual(invalida);
+  });
+
+  it('rechaza más opciones de las permitidas', () => {
+    expect(parsearListaDeTextos(['a', 'b', 'c', 'd'], ubicaciones)).toEqual({
+      valido: false,
+      error: 'Podés elegir hasta 3 opciones a la vez',
+    });
+  });
+});
 
 describe('validarTexto', () => {
   it('recorta los espacios de los extremos', () => {
@@ -125,5 +172,61 @@ describe('validarTexto — campos sin mínimo', () => {
       valido: false,
       error: 'La ubicación no puede superar los 50 caracteres',
     });
+  });
+});
+
+describe('parsearListaDeValores', () => {
+  const ESTADOS = ['Pendiente', 'En_Revision', 'Aprobada'] as const;
+
+  it('ausente o vacía es "sin filtro"', () => {
+    expect(parsearListaDeValores(undefined, ESTADOS, 'El estado')).toEqual({
+      valido: true,
+      valor: [],
+    });
+    expect(parsearListaDeValores('', ESTADOS, 'El estado')).toEqual({ valido: true, valor: [] });
+  });
+
+  it('separa por comas, tolera espacios y descarta repetidos', () => {
+    expect(parsearListaDeValores('Pendiente, Aprobada,Pendiente', ESTADOS, 'El estado')).toEqual({
+      valido: true,
+      valor: ['Pendiente', 'Aprobada'],
+    });
+  });
+
+  it('rechaza la lista entera si un valor no está permitido o viene vacío', () => {
+    for (const valor of ['Pendiente,Otro', 'Pendiente,,Aprobada', 'pendiente']) {
+      expect(parsearListaDeValores(valor, ESTADOS, 'El estado')).toEqual({
+        valido: false,
+        error: 'El estado no es válido',
+      });
+    }
+  });
+
+  it('rechaza un parámetro repetido (llega como array)', () => {
+    expect(parsearListaDeValores(['Pendiente'], ESTADOS, 'El estado').valido).toBe(false);
+  });
+});
+
+describe('parsearListaJson', () => {
+  it('ausente o vacía es una lista vacía', () => {
+    expect(parsearListaJson(undefined, 'Las vacunas')).toEqual({ valido: true, valor: [] });
+    expect(parsearListaJson('', 'Las vacunas')).toEqual({ valido: true, valor: [] });
+  });
+
+  it('parsea el JSON que llega como texto en un multipart', () => {
+    expect(parsearListaJson('[{"tipo":"ANTIRRABICA"}]', 'Las vacunas')).toEqual({
+      valido: true,
+      valor: [{ tipo: 'ANTIRRABICA' }],
+    });
+  });
+
+  it('acepta el array ya parseado de un body JSON', () => {
+    expect(parsearListaJson([1, 2], 'Las vacunas')).toEqual({ valido: true, valor: [1, 2] });
+  });
+
+  it('rechaza un JSON roto o que no es una lista', () => {
+    const error = { valido: false, error: 'Las vacunas: formato inválido' };
+    expect(parsearListaJson('[{', 'Las vacunas')).toEqual(error);
+    expect(parsearListaJson('{"tipo":"ANTIRRABICA"}', 'Las vacunas')).toEqual(error);
   });
 });

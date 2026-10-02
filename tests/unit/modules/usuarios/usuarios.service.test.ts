@@ -7,7 +7,9 @@ vi.mock('../../../../src/modules/usuarios/usuarios.repository', () => ({
   buscarPerfil: vi.fn(),
   buscarPorEmail: vi.fn(),
   promedioValoracion: vi.fn(),
+  contarMascotasDelAmbito: vi.fn(),
   actualizarPerfil: vi.fn(),
+  actualizarUbicacion: vi.fn(),
   actualizarContrasena: vi.fn(),
   buscarHashContrasena: vi.fn(),
   buscarEstadoUsuarioPorNombre: vi.fn(),
@@ -26,6 +28,7 @@ vi.mock('../../../../src/shared/imagenPerfil', () => ({
 import * as repo from '../../../../src/modules/usuarios/usuarios.repository';
 import {
   actualizarPerfil,
+  actualizarUbicacion,
   cambiarPassword,
   darDeBajaCuenta,
   obtenerPerfil,
@@ -49,6 +52,7 @@ function perfilFake(overrides: Partial<UsuarioPerfil> = {}): UsuarioPerfil {
     imagenUrl: null,
     ubicacion: 'Palermo, CABA',
     refugioId: null,
+    refugio: null,
     estadoId: 2,
     usuarioAlta: 1,
     fechaAlta: new Date(),
@@ -91,7 +95,7 @@ function perfilFake(overrides: Partial<UsuarioPerfil> = {}): UsuarioPerfil {
         },
       },
     ],
-    _count: { mascotas: 2, favoritos: 3 },
+    _count: { favoritos: 3 },
     ...overrides,
   };
 }
@@ -100,18 +104,30 @@ describe('usuarios.service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedRepo.promedioValoracion.mockResolvedValue(4.8);
+    mockedRepo.contarMascotasDelAmbito.mockResolvedValue(2);
   });
 
   it('devuelve el perfil propio con métricas', async () => {
     mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
 
-    const perfil = await obtenerPerfil(10);
+    const perfil = await obtenerPerfil(10, 'PERSONAL');
 
     expect(perfil.roles).toEqual([ROL_API.ADOPTANTE]);
     expect(perfil.mascotas).toBe(2);
     expect(perfil.favoritos).toBe(3);
     expect(perfil.valoracion).toBe(4.8);
     expect(perfil.tienePassword).toBe(true);
+  });
+
+  it('cuenta las mascotas del perfil con el que se consulta (switch refugio/adoptante)', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+
+    await obtenerPerfil(10, 'REFUGIO');
+
+    expect(mockedRepo.contarMascotasDelAmbito).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 10 }),
+      'REFUGIO',
+    );
   });
 
   it('actualiza el perfil y persiste la foto', async () => {
@@ -129,6 +145,7 @@ describe('usuarios.service', () => {
     const archivo = { buffer: Buffer.from('fake'), mimetype: 'image/jpeg' };
     const perfil = await actualizarPerfil(
       10,
+      'PERSONAL',
       {
         nombre: 'Anita',
         apellido: 'Perez',
@@ -147,12 +164,34 @@ describe('usuarios.service', () => {
     expect(perfil.nombre).toBe('Anita');
   });
 
+  it('actualiza la ubicación desde un link de Maps y recalcula las coordenadas', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+    mockedRepo.actualizarUbicacion.mockResolvedValue(perfilFake());
+
+    await actualizarUbicacion(10, 'PERSONAL', 'https://www.google.com/maps?q=-32.889,-68.845');
+
+    expect(mockedRepo.actualizarUbicacion).toHaveBeenCalledWith(10, {
+      mapaUrl: 'https://www.google.com/maps?q=-32.889,-68.845',
+      latitud: -32.889,
+      longitud: -68.845,
+    });
+  });
+
+  it('rechaza un link de mapa sin coordenadas', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+
+    await expect(
+      actualizarUbicacion(10, 'PERSONAL', 'https://www.google.com/'),
+    ).rejects.toMatchObject({ codigo: 'LINK_MAPA_INVALIDO', httpStatus: 422 });
+    expect(mockedRepo.actualizarUbicacion).not.toHaveBeenCalled();
+  });
+
   it('rechaza cambiar el correo a uno ya usado por otro usuario', async () => {
     mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
     mockedRepo.buscarPorEmail.mockResolvedValue({ id: 99 });
 
     await expect(
-      actualizarPerfil(10, {
+      actualizarPerfil(10, 'PERSONAL', {
         nombre: 'Ana',
         apellido: 'Perez',
         email: 'otro@mail.com',

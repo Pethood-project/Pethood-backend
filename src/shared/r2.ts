@@ -1,13 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { env } from '../config/env';
 import { AppError } from '../middlewares/errorHandler';
-
-const MIME_A_EXTENSION: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-};
+import { extensionPara } from './extensiones';
 
 export interface ArchivoSubida {
   buffer: Buffer;
@@ -75,13 +70,19 @@ function clienteR2(config: ConfigR2): S3Client {
 }
 
 /**
- * Sube una imagen a Cloudflare R2 y devuelve la URL pública.
- * En la base solo se persiste ese link (`usuario_imagen_url`), nunca el archivo.
+ * Sube un archivo a Cloudflare R2 y devuelve la URL pública.
+ * En la base solo se persiste ese link, nunca el archivo.
+ *
+ * `carpeta` es el prefijo de la key (`perfiles`, `chats`, `mascotas`…): el mismo valor que
+ * `storage.ts` usa como subcarpeta en disco, para que las dos formas de persistir organicen
+ * los archivos igual.
+ *
+ * El `immutable` del cache vale porque el nombre es un UUID: un archivo nunca se pisa, se
+ * sube uno nuevo.
  */
-export async function subirImagenPerfil(archivo: ArchivoSubida): Promise<string> {
+export async function subirArchivo(archivo: ArchivoSubida, carpeta: string): Promise<string> {
   const config = exigirConfigR2();
-  const extension = MIME_A_EXTENSION[archivo.mimetype] ?? 'jpg';
-  const key = `perfiles/${randomUUID()}.${extension}`;
+  const key = `${carpeta}/${randomUUID()}.${extensionPara(archivo.mimetype)}`;
 
   await clienteR2(config).send(
     new PutObjectCommand({
@@ -94,4 +95,40 @@ export async function subirImagenPerfil(archivo: ArchivoSubida): Promise<string>
   );
 
   return `${config.publicBaseUrl}/${key}`;
+}
+
+/**
+ * La foto de perfil, que es el único caller histórico de R2. Se conserva con su nombre para
+ * no tocar `auth.service` ni sus tests, que mockean esta función.
+ */
+export function subirImagenPerfil(archivo: ArchivoSubida): Promise<string> {
+  return subirArchivo(archivo, 'perfiles');
+}
+
+/**
+ * `true` si esa URL es de NUESTRO bucket. Sirve para decidir dónde borrar: después de la
+ * migración la base tiene URLs de las dos épocas conviviendo — relativas a disco las viejas,
+ * absolutas a R2 las nuevas— y hay que mandar cada una a su lado.
+ */
+export function esUrlDeR2(url: string): boolean {
+  const config = configR2Desde(env);
+  return config !== undefined && url.startsWith(`${config.publicBaseUrl}/`);
+}
+
+/**
+ * Borra un objeto del bucket a partir de su URL pública. **No lanza**: se usa para compensar
+ * una escritura en base que falló, y ahí el error que importa es el original, no este.
+ */
+export async function borrarArchivo(urlPublica: string): Promise<void> {
+  const config = configR2Desde(env);
+  if (!config || !urlPublica.startsWith(`${config.publicBaseUrl}/`)) return;
+
+  const key = urlPublica.slice(config.publicBaseUrl.length + 1);
+  if (!key) return;
+
+  try {
+    await clienteR2(config).send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+  } catch {
+    // Queda un objeto huérfano en el bucket. Es preferible a tapar el error de arriba.
+  }
 }

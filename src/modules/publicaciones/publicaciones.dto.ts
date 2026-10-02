@@ -1,6 +1,13 @@
 import { z } from 'zod';
+import type { VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
-import { idSchema, textoOpcionalSchema, textoSchema } from '../../shared/validation/schemas';
+import {
+  coordenadaOpcionalSchema,
+  fechaOpcionalSchema,
+  idSchema,
+  listaDeIdsSchema,
+  textoSchema,
+} from '../../shared/validation/schemas';
 import { validarTexto } from '../../shared/validation/text';
 
 /** Hasta 5 fotos por publicación; el orden recibido es el orden de la galería. */
@@ -40,8 +47,11 @@ const booleanoSchema = z
   .optional()
   .transform((valor) => valor === true || valor === 'true');
 
-export const crearPublicacionSchema = z.object({
-  mascotaId: idSchema('La mascota'),
+/**
+ * Lo que se carga al publicar y se puede editar después, con las mismas reglas en los dos
+ * casos. La mascota queda afuera: se elige al crear y no se cambia.
+ */
+const camposEditables = {
   descripcion: textoSchema({
     max: LIMITES.publicacion.descripcion.max,
     etiqueta: 'La descripción',
@@ -50,16 +60,69 @@ export const crearPublicacionSchema = z.object({
     max: LIMITES.publicacion.ubicacion.max,
     etiqueta: 'La ubicación',
   }),
+  // Coordenadas del lugar donde se ofrece la mascota (Módulo 11, HU-11.3). Opcionales: si no
+  // llegan, la publicación se puede ubicar por `ubicacion` pero no entra en el filtro por
+  // distancia. Se envían desde el GPS del dispositivo al publicar.
+  latitud: coordenadaOpcionalSchema('La latitud', -90, 90),
+  longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
   requisitos: listaSchema(LIMITES.publicacion.requisito.max, 'Cada requisito'),
   personalidad: listaSchema(LIMITES.publicacion.personalidad.max, 'Cada rasgo'),
   desparasitado: booleanoSchema,
-  vacunas: textoOpcionalSchema({
-    max: LIMITES.publicacion.vacunas.max,
-    etiqueta: 'Las vacunas',
-  }),
+};
+
+export const crearPublicacionSchema = z.object({
+  mascotaId: idSchema('La mascota'),
+  ...camposEditables,
 });
 
 export type CrearPublicacionDto = z.infer<typeof crearPublicacionSchema>;
+
+/**
+ * En `imagenes` de la edición, el lugar que ocupa cada foto nueva: la primera marca es el
+ * primer archivo de `fotos`, la segunda el segundo, y así.
+ */
+export const MARCADOR_FOTO_NUEVA = 'nueva';
+
+/**
+ * Edición de una publicación: reemplaza todos los datos editables (el formulario manda el
+ * aviso entero, igual que al crearlo). Una lista que no viaja queda vacía, como al crear.
+ *
+ * `imagenes` es la galería final en orden: cada ítem es una foto que la publicación ya
+ * tenía (su URL, tal como la devolvió la API) o `MARCADOR_FOTO_NUEVA` en el lugar de una
+ * de las fotos nuevas. Sin ninguna, hereda la foto de la mascota, como al crear.
+ */
+export const editarPublicacionSchema = z.object({
+  ...camposEditables,
+  imagenes: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((valor) => {
+      if (valor === undefined) return [];
+      return Array.isArray(valor) ? valor : [valor];
+    })
+    .refine((valores) => valores.length <= MAXIMO_IMAGENES, {
+      message: `Podés subir hasta ${MAXIMO_IMAGENES} fotos`,
+    }),
+});
+
+export type EditarPublicacionDto = z.infer<typeof editarPublicacionSchema>;
+
+/**
+ * Cambios de estado manuales:
+ * - PAUSAR: Activa → Pausada.
+ * - REACTIVAR: Pausada → Activa.
+ * - FINALIZAR: Activa o Pausada → Finalizada (terminal).
+ */
+export const ACCIONES_ESTADO_PUBLICACION = ['PAUSAR', 'REACTIVAR', 'FINALIZAR'] as const;
+export type AccionEstadoPublicacion = (typeof ACCIONES_ESTADO_PUBLICACION)[number];
+
+export const cambiarEstadoPublicacionSchema = z.object({
+  accion: z.enum(ACCIONES_ESTADO_PUBLICACION, {
+    errorMap: () => ({ message: 'La acción no es válida' }),
+  }),
+});
+
+export type CambiarEstadoPublicacionDto = z.infer<typeof cambiarEstadoPublicacionSchema>;
 
 /** Tamaño de página del feed y tope duro, para que un cliente no pida la tabla entera. */
 export const FEED_LIMITE_POR_DEFECTO = 20;
@@ -83,28 +146,62 @@ const banderaSchema = z
 const enteroOpcionalSchema = (etiqueta: string) =>
   z.coerce.number().int(`${etiqueta} no es válido`).min(0, `${etiqueta} no es válido`).optional();
 
-export const filtrosFeedSchema = z.object({
-  especieId: z.coerce.number().int().positive('La especie no es válida').optional(),
-  tamanio: z.enum(['PEQUENO', 'MEDIANO', 'GRANDE']).optional(),
-  genero: z.enum(['MACHO', 'HEMBRA']).optional(),
-  /** Años cumplidos, inclusivo. */
-  edadMin: enteroOpcionalSchema('La edad mínima'),
-  /** Años cumplidos, exclusivo: el rango "1–3 años" es `edadMin=1&edadMax=3`. */
-  edadMax: enteroOpcionalSchema('La edad máxima'),
-  castrado: banderaSchema,
-  compatibleNinios: banderaSchema,
-  compatibleOtrasMascotas: banderaSchema,
-  limite: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(FEED_LIMITE_MAXIMO)
-    .optional()
-    .default(FEED_LIMITE_POR_DEFECTO),
-  desplazamiento: z.coerce.number().int().min(0).optional().default(0),
-});
+export const filtrosFeedSchema = z
+  .object({
+    /** Texto libre (HU-11.4): matchea parcialmente título, descripción, nombre de mascota y personalidad. */
+    texto: z.string().trim().max(LIMITES.publicacion.busqueda.max).optional(),
+    /** Orden por fecha de alta (HU-11.2): `recientes` (default) o `antiguas`. */
+    orden: z.enum(['recientes', 'antiguas']).optional().default('recientes'),
+    /** Rango por `fechaAlta`, dos puntas inclusive (HU-11.2). */
+    fechaDesde: fechaOpcionalSchema('fechaDesde'),
+    fechaHasta: fechaOpcionalSchema('fechaHasta'),
+    /** Filtro por cercanía (HU-11.3): coordenadas del usuario y radio en km. */
+    latitud: coordenadaOpcionalSchema('La latitud', -90, 90),
+    longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
+    radioKm: z.coerce
+      .number()
+      .positive('El radio no es válido')
+      .max(LIMITES.publicacion.radioKm.max, 'El radio no es válido')
+      .optional(),
+    especieId: z.coerce.number().int().positive('La especie no es válida').optional(),
+    tamanio: z.enum(['PEQUENO', 'MEDIANO', 'GRANDE']).optional(),
+    genero: z.enum(['MACHO', 'HEMBRA']).optional(),
+    /** Años cumplidos, inclusivo. */
+    edadMin: enteroOpcionalSchema('La edad mínima'),
+    /** Años cumplidos, exclusivo: el rango "1–3 años" es `edadMin=1&edadMax=3`. */
+    edadMax: enteroOpcionalSchema('La edad máxima'),
+    /** Perfiles públicos (spec 023): publicaciones de un refugio o de una persona a título personal. */
+    refugioId: z.coerce.number().int().positive('El refugio no es válido').optional(),
+    usuarioId: z.coerce.number().int().positive('El usuario no es válido').optional(),
+    castrado: banderaSchema,
+    compatibleNinios: banderaSchema,
+    compatibleOtrasMascotas: banderaSchema,
+    limite: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(FEED_LIMITE_MAXIMO)
+      .optional()
+      .default(FEED_LIMITE_POR_DEFECTO),
+    desplazamiento: z.coerce.number().int().min(0).optional().default(0),
+  })
+  .refine(
+    (datos) => !datos.fechaDesde || !datos.fechaHasta || datos.fechaDesde <= datos.fechaHasta,
+    { message: 'La fecha "desde" no puede ser posterior a "hasta"', path: ['fechaHasta'] },
+  );
 
 export type FiltrosFeedDto = z.infer<typeof filtrosFeedSchema>;
+
+/**
+ * Coordenadas opcionales del usuario para la ficha de una publicación (`GET /:id`). Con las
+ * dos, el backend calcula y devuelve la distancia a la ubicación de quien publicó.
+ */
+export const filtrosDetallePublicacionSchema = z.object({
+  latitud: coordenadaOpcionalSchema('La latitud', -90, 90),
+  longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
+});
+
+export type FiltrosDetallePublicacionDto = z.infer<typeof filtrosDetallePublicacionSchema>;
 
 /** Mascota tal como la necesitan la tarjeta del feed y la ficha completa. */
 export interface MascotaPublicadaDto {
@@ -131,21 +228,109 @@ export interface PublicacionFeedDto {
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
-  vacunas: string | null;
+  /**
+   * Medallas de la mascota: salen de su historia clínica, no se cargan en la publicación
+   * (spec 019).
+   */
+  vacunas: VacunaAplicadaDto[];
   /** En orden; la primera es la portada. Rutas relativas al origen de la API. */
   imagenes: string[];
   fechaPublicacion: string;
+  /** Estado del aviso (no el de la mascota). Ver `ESTADO_PUBLICACION`. */
+  estado: EstadoPublicacionDto;
   mascota: MascotaPublicadaDto;
   /** Null cuando publica un adoptante particular y no un refugio. */
-  refugio: { id: number; nombre: string; direccion: string } | null;
+  refugio: {
+    id: number;
+    nombre: string;
+    provincia: string | null;
+    localidad: string | null;
+    calleAltura: string | null;
+    mapaUrl: string | null;
+  } | null;
+  /**
+   * La persona que la publicó, solo cuando no es de un refugio (`refugio` null): la ficha la
+   * muestra en «Publicado por». En una de refugio es null, para no exponer a su personal.
+   */
+  publicadoPor: { id: number; nombre: string; apellido: string; imagenUrl: string | null } | null;
+  /**
+   * Distancia en km entre la ubicación de quien publicó y las coordenadas del usuario que
+   * consulta, cuando las manda (`GET /:id?latitud=&longitud=`). `null` si el usuario no mandó
+   * coordenadas o si la publicación/refugio no tienen ninguna ubicación ubicable.
+   */
+  distanciaKm: number | null;
   /** Si el usuario que consulta ya la tiene guardada. */
   enFavoritos: boolean;
+  /**
+   * Si la mascota es del usuario que consulta (o de su mismo refugio). El feed nunca la
+   * devuelve en `true` porque ya excluye esas publicaciones; la ficha (`GET /:id`) sí puede,
+   * para que el frontend oculte "Solicitar adopción" y el corazón de favoritos sobre la
+   * propia mascota.
+   */
+  esPropia: boolean;
+  /**
+   * Si el usuario la puede editar y cambiar de estado desde el perfil activo: quien la
+   * publicó (perfil personal) o cualquier miembro del refugio dueño (perfil de refugio).
+   * Siempre `false` en el feed.
+   */
+  puedeEditar: boolean;
 }
 
 export interface FeedPublicacionesDto {
   /** Total que matchea los filtros, no el largo de esta página. */
   total: number;
   publicaciones: PublicacionFeedDto[];
+}
+
+/**
+ * Nombres del catálogo `Estado_Publicacion` — el estado del AVISO, no el de la mascota.
+ * - Activa: se ve en el feed y se puede solicitar.
+ * - Pausada: sigue viva pero no aparece en el feed (la pausó quien la gestiona, o la mascota
+ *   pasó a tratamiento o tránsito).
+ * - Finalizada: el aviso quedó cerrado para siempre (lo finalizó quien la gestiona, o la
+ *   mascota fue adoptada o falleció). La mascota se puede volver a publicar en otro aviso.
+ *
+ * Las transiciones manuales son `ACCIONES_ESTADO_PUBLICACION`; las automáticas siguen al
+ * estado de la mascota (`sincronizarConEstadoMascota` en el servicio) y solo pausan o
+ * finalizan: reactivar es siempre a mano.
+ */
+export const ESTADO_PUBLICACION = {
+  ACTIVA: 'Activa',
+  PAUSADA: 'Pausada',
+  FINALIZADA: 'Finalizada',
+} as const;
+export type NombreEstadoPublicacion = (typeof ESTADO_PUBLICACION)[keyof typeof ESTADO_PUBLICACION];
+
+/** Estado vigente de una publicación, con la misma forma que el de la mascota. */
+export interface EstadoPublicacionDto {
+  id: number;
+  nombre: string;
+}
+
+/**
+ * Filtro de "Mis publicaciones": `?estados=1,3` (ids de `Estado_Publicacion`). Sin el
+ * parámetro, o vacío, trae todas.
+ */
+export const filtrosMisPublicacionesSchema = z.object({
+  estados: listaDeIdsSchema('El estado de publicación'),
+});
+
+export type FiltrosMisPublicacionesDto = z.infer<typeof filtrosMisPublicacionesSchema>;
+
+/** Tarjeta de "Mis publicaciones": lo mínimo para la grilla, la ficha se pide aparte. */
+export interface PublicacionPropiaDto {
+  id: number;
+  /** Portada: la primera foto de la publicación, o la de la mascota si no subió propias. */
+  imagenUrl: string | null;
+  fechaPublicacion: string;
+  estado: EstadoPublicacionDto;
+  mascota: {
+    id: number;
+    nombre: string | null;
+    /** `AAAA-MM-DD` o null. La edad se calcula en el cliente. */
+    fechaNacimiento: string | null;
+    especie: { id: number; nombre: string };
+  };
 }
 
 export interface PublicacionCreadaDto {
@@ -156,7 +341,6 @@ export interface PublicacionCreadaDto {
   requisitos: string[];
   personalidad: string[];
   desparasitado: boolean;
-  vacunas: string | null;
   imagenes: string[];
   mascotaId: number;
   usuarioId: number;

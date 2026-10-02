@@ -1,19 +1,23 @@
 import { Router } from 'express';
+import { requiereAmbito } from '../../middlewares/ambito';
 import { autenticar } from '../../middlewares/auth';
 import * as controller from './solicitudes.controller';
 
 export const solicitudesRouter = Router();
 
-// Lado solicitante (HU-7.1 crear, HU-7.3 historial propio).
-solicitudesRouter.post('/', autenticar, controller.crear);
+// Lado solicitante (HU-7.1 crear, HU-7.3 historial propio). Solo desde el perfil personal:
+// desde la vista de refugio no se adopta (ver `shared/ambito.ts`).
+const soloPersonal = [autenticar, requiereAmbito('PERSONAL')];
 
-solicitudesRouter.get('/mias', autenticar, controller.listarMias);
+solicitudesRouter.post('/', soloPersonal, controller.crear);
+
+solicitudesRouter.get('/mias', soloPersonal, controller.listarMias);
 
 // Chequeo previo de las precondiciones, para el cartel de GUI-7.1 en vez del formulario.
-solicitudesRouter.get('/elegibilidad', autenticar, controller.elegibilidad);
+solicitudesRouter.get('/elegibilidad', soloPersonal, controller.elegibilidad);
 
 // Lado de quien PUBLICÓ la mascota (HU-7.4/7.5) — refugio o adoptante particular, no un
-// rol fijo (ver solicitudes.service.ts).
+// rol fijo (ver solicitudes.service.ts). Cada perfil ve solo lo que le llegó a él.
 solicitudesRouter.get('/recibidas', autenticar, controller.listarRecibidas);
 
 // Va al final: `/mias` y `/recibidas` son rutas fijas y este `:id` las capturaría.

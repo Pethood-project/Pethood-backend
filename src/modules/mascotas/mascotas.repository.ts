@@ -1,6 +1,7 @@
-import type { GeneroMascota, TamanioMascota } from '@prisma/client';
+import type { GeneroMascota, TamanioMascota, TipoVacuna } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
+import { ESTADO_PUBLICACION } from '../publicaciones/publicaciones.dto';
 
 export interface DatosNuevaMascota {
   nombre: string;
@@ -15,11 +16,23 @@ export interface DatosNuevaMascota {
   refugioId: number | null;
   usuarioId: number;
   estadoMascotaId: number;
+  /** Vacunas que ya tiene: se dan de alta como registros de su historia clínica. */
+  vacunas: DatosVacunaInicial[];
 }
 
-/** Mascota + su primera fila de Mascota_Estado en una sola transacción. */
+export interface DatosVacunaInicial {
+  tipoVacuna: TipoVacuna;
+  fechaVisita: Date;
+  titulo: string;
+  descripcion: string;
+}
+
+/**
+ * Mascota + su primera fila de Mascota_Estado + los registros de historia clínica de las
+ * vacunas que ya tiene, en una sola transacción: si falla una parte no queda nada a medias.
+ */
 export function crearConEstado(datos: DatosNuevaMascota, usuarioAlta: number) {
-  const { estadoMascotaId, ...mascota } = datos;
+  const { estadoMascotaId, vacunas, ...mascota } = datos;
 
   return prisma.mascota.create({
     data: {
@@ -28,10 +41,18 @@ export function crearConEstado(datos: DatosNuevaMascota, usuarioAlta: number) {
       historicoEstados: {
         create: { estadoMascotaId, ...datosAlta(usuarioAlta) },
       },
+      historiaClinica: {
+        create: vacunas.map((vacuna) => ({
+          ...vacuna,
+          vacunacion: true,
+          ...datosAlta(usuarioAlta),
+        })),
+      },
     },
     include: {
       raza: { include: { especie: true } },
       historicoEstados: { include: { estadoMascota: true } },
+      historiaClinica: { select: { id: true } },
     },
   });
 }
@@ -72,6 +93,29 @@ export interface DatosEdicionMascota {
 /** Mascota activa por id, sin filtrar por dueño: la propiedad la chequea el servicio. */
 export function buscarPorId(mascotaId: number) {
   return prisma.mascota.findFirst({ where: { id: mascotaId, fechaBaja: null } });
+}
+
+/**
+ * Mascota activa por id con las relaciones que necesita la ficha de detalle (HU-6.4),
+ * incluidas sus vacunas vigentes para las medallas.
+ */
+export function buscarPorIdConRelaciones(mascotaId: number) {
+  return prisma.mascota.findFirst({
+    where: { id: mascotaId, fechaBaja: null },
+    include: {
+      raza: { include: { especie: true } },
+      historicoEstados: {
+        where: { fechaBaja: null },
+        include: { estadoMascota: true },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+      historiaClinica: {
+        where: { fechaBaja: null, tipoVacuna: { not: null } },
+        select: { tipoVacuna: true, fechaVisita: true },
+      },
+    },
+  });
 }
 
 export function actualizar(mascotaId: number, datos: DatosEdicionMascota, usuarioModifica: number) {
@@ -148,18 +192,43 @@ export function existePublicacionQueUsaImagen(imagenUrl: string) {
  * - del refugio: todas las del refugio, sin importar qué miembro las cargó. Por eso no
  *   lleva `usuarioId` — si lo llevara, cada miembro vería solo las suyas.
  */
-export function listarPorAmbito(ambito: { usuarioId: number } | { refugioId: number }) {
+export function listarPorAmbito(
+  ambito: { usuarioId: number } | { refugioId: number },
+  estadoIds: number[] = [],
+) {
   const where =
     'refugioId' in ambito ? { refugioId: ambito.refugioId } : { ...ambito, refugioId: null };
 
+  // Sin estados elegidos no se filtra ("ver todas"). Se mira la fila vigente con `some`,
+  // que equivale a mirar la última mientras haya una sola vigente por mascota.
+  const porEstado =
+    estadoIds.length > 0
+      ? { historicoEstados: { some: { fechaBaja: null, estadoMascotaId: { in: estadoIds } } } }
+      : {};
+
   return prisma.mascota.findMany({
-    where: { ...where, fechaBaja: null },
+    where: { ...where, ...porEstado, fechaBaja: null },
     include: {
       raza: { include: { especie: true } },
       historicoEstados: {
         where: { fechaBaja: null },
         include: { estadoMascota: true },
         orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+      // Solo para saber si tiene una publicación en curso (`listarPublicables`): con una
+      // alcanza. Las finalizadas no cuentan: la mascota se puede volver a publicar.
+      publicaciones: {
+        where: {
+          fechaBaja: null,
+          historicoEstados: {
+            some: {
+              fechaBaja: null,
+              estadoPublicacion: { nombre: { not: ESTADO_PUBLICACION.FINALIZADA } },
+            },
+          },
+        },
+        select: { id: true },
         take: 1,
       },
     },

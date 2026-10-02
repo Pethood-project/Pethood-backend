@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
 import { parsearId } from '../../shared/validation/numbers';
-import { subirActualizacionSchema } from './seguimiento.dto';
+import { enviarPreguntaSchema, subirActualizacionSchema } from './seguimiento.dto';
 import * as service from './seguimiento.service';
 
 /** Traduce el primer issue de Zod al formato de error de la API. */
@@ -34,7 +34,7 @@ function idDeParametro(valor: unknown, etiqueta: string): number {
 /** HU-9.2. Todo lo que el usuario tiene en seguimiento, como adoptante o como publicador. */
 export async function listarMios(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    res.json(await service.listarMisSeguimientos(req.usuario!.usuarioId));
+    res.json(await service.listarMisSeguimientos(req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -49,7 +49,13 @@ export async function listarDeSolicitud(
   try {
     const solicitudId = idDeParametro(req.params.solicitudId, 'de la solicitud');
 
-    res.json(await service.obtenerSeguimientosDeSolicitud(solicitudId, req.usuario!.usuarioId));
+    res.json(
+      await service.obtenerSeguimientosDeSolicitud(
+        solicitudId,
+        req.usuario!.usuarioId,
+        req.ambito!,
+      ),
+    );
   } catch (err) {
     next(err);
   }
@@ -64,7 +70,7 @@ export async function obtenerActualizacion(
   try {
     const id = idDeParametro(req.params.id, 'del seguimiento');
 
-    res.json(await service.obtenerActualizacion(id, req.usuario!.usuarioId));
+    res.json(await service.obtenerActualizacion(id, req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -82,10 +88,51 @@ export async function subirActualizacion(
     const resultado = await service.subirActualizacion(
       id,
       parsearOFallar(subirActualizacionSchema, req.body),
-      { usuarioId: req.usuario!.usuarioId, archivo: req.file },
+      { usuarioId: req.usuario!.usuarioId, ambito: req.ambito!, archivo: req.file },
     );
 
     res.status(201).json(resultado);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Spec 011 §6.11. El refugio le manda una pregunta propia al adoptante. */
+export async function enviarPregunta(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const solicitudId = idDeParametro(req.params.solicitudId, 'de la solicitud');
+
+    const resultado = await service.enviarPregunta(
+      solicitudId,
+      parsearOFallar(enviarPreguntaSchema, req.body),
+      { usuarioId: req.usuario!.usuarioId, ambito: req.ambito! },
+    );
+
+    res.status(201).json(resultado);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Spec 011 §6.11. Descarta la pregunta que el refugio dejó para el próximo pedido. */
+export async function cancelarPreguntaProgramada(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const solicitudId = idDeParametro(req.params.solicitudId, 'de la solicitud');
+
+    res.json(
+      await service.cancelarPreguntaProgramada(solicitudId, {
+        usuarioId: req.usuario!.usuarioId,
+        ambito: req.ambito!,
+      }),
+    );
   } catch (err) {
     next(err);
   }

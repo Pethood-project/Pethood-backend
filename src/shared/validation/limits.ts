@@ -14,29 +14,78 @@ export const LIMITES = {
   },
 
   publicacion: {
-    descripcion: { max: 50 },
-    requisito: { max: 25 },
+    /** «Sobre <nombre>» en la ficha: texto libre. Antes ≤50 (REQUISITOS.md), el equipo lo subió. */
+    descripcion: { max: 200 },
+    /** Cada requisito se muestra como medallita en la ficha: 20 para que entre en una línea. */
+    requisito: { max: 20 },
     ubicacion: { max: 50 },
     personalidad: { max: 25 },
-    vacunas: { max: 200 },
     imagenes: { max: 5 },
+    /** Texto libre de la barra de búsqueda de Adoptar (Módulo 11, HU-11.4). */
+    busqueda: { max: 100 },
+    /** Radio del filtro por cercanía, en kilómetros (HU-11.3). */
+    radioKm: { min: 1, max: 500 },
   },
 
   usuario: {
     nombre: { min: 1, max: 50 },
     apellido: { min: 1, max: 50 },
-    ubicacion: { max: 80 },
+    // Dirección estructurada para geocodificar (node-geocoder). Opcionales.
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    calleAltura: { max: 120 },
+    /** Link de Google Maps que el usuario puede pegar/corregir a mano. */
+    mapaUrl: { max: 500 },
   },
 
   refugio: {
     nombre: { min: 2, max: 100 },
-    direccion: { min: 2, max: 150 },
     descripcion: { max: 1000 },
+    // Dirección estructurada para geocodificar (node-geocoder). Opcionales.
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    calleAltura: { max: 120 },
+    /** Link de Google Maps que el miembro del refugio puede pegar/corregir a mano. */
+    mapaUrl: { max: 500 },
   },
 
   /** Solo web-admin (spec 002) — no hay contraparte en la app mobile, no se mirrorea. */
   admin: {
     motivo: { min: 1, max: 500 },
+    /** Respuesta con la que el admin resuelve un reporte (spec 008, HU-3.7). */
+    respuestaReporte: { min: 1, max: 500 },
+  },
+
+  /** Reporte de moderación (spec 008, HU-3.1 a HU-3.3). Texto libre. Espejo en el frontend mobile. */
+  reporte: {
+    motivo: { min: 5, max: 500 },
+  },
+
+  /** Formulario de contacto público (spec 015, HU-15.2). */
+  consultaSoporte: {
+    nombreCompleto: { min: 2, max: 100 },
+    email: { max: 100 },
+    asunto: { min: 5, max: 100 },
+    mensaje: { min: 10, max: 1000 },
+  },
+
+  /** Solo web-admin (spec 015, HU-15.3) — no hay contraparte en la app mobile, no se mirrorea. */
+  faq: {
+    pregunta: { min: 5, max: 200 },
+    respuesta: { min: 5, max: 2000 },
+    orden: { min: 1, max: 999 },
+  },
+
+  /** Solo web-admin (ABM de catálogos) — no hay contraparte en la app mobile, no se mirrorea. */
+  catalogo: {
+    nombre: { min: 2, max: 50 },
+    descripcion: { max: 200 },
+    secuenciaDias: { min: 1, max: 365 },
+  },
+
+  faqCategoria: {
+    nombre: { min: 2, max: 50 },
+    descripcion: { max: 200 },
   },
 
   fecha: { anioMinimo: 1900 },
@@ -44,6 +93,39 @@ export const LIMITES = {
   imagen: {
     tamanioMaximoBytes: 5 * 1024 * 1024,
     formatos: ['image/jpeg', 'image/png', 'image/webp'],
+    /** Recorte (crop) mínimo aceptado antes de comprimir, para no guardar un recuadro casi vacío. */
+    recorteMinimoPx: 10,
+  },
+
+  /**
+   * Video adjunto de un mensaje de chat. Hoy es el ÚNICO lugar del proyecto que acepta
+   * video: el resto de los módulos sigue siendo sólo imagen o pdf.
+   *
+   * **⚠️ EXCEPCIÓN EXPLÍCITA a los 5 MB de REQUISITOS.md §4.** Ese tope es la regla
+   * transversal para imágenes y documentos, y **para video no alcanza**: un teléfono graba
+   * 1080p a unos 13 Mbps, así que en 5 MB entran **3 segundos**. La duración útil que pidió
+   * el equipo es 15 s, que a 1080p pesan ~25 MB; 30 MB deja margen sin habilitar un 4K de 15 s
+   * (~84 MB), que se rechaza con un mensaje claro.
+   *
+   * Bajar el peso en vez de subir el tope **no es una opción disponible**: recomprimir en el
+   * servidor necesita `ffmpeg` y hacerlo en el cliente necesita un módulo nativo de
+   * transcodificación, que rompería las pruebas con Expo Go. `expo-image-picker` sólo deja
+   * bajar la calidad de grabación en iOS, no en Android.
+   *
+   * **Las imágenes siguen con su tope de 5 MB**: este número es el techo de multer para el
+   * request, y `validarTamanioAdjuntos` aplica el límite que corresponde a cada archivo.
+   *
+   * **`duracionMaximaSegundos` lo hace cumplir el CLIENTE, no el backend.** Medir la
+   * duración en el servidor necesita `ffmpeg`. El backend hace cumplir lo que sí puede
+   * verificar barato: formato y peso.
+   *
+   * Los tres formatos son los que producen los clientes reales: Android graba `mp4`, iOS
+   * graba `mov` (`video/quicktime`) y el navegador suele dar `webm`.
+   */
+  video: {
+    tamanioMaximoBytes: 30 * 1024 * 1024,
+    duracionMaximaSegundos: 15,
+    formatos: ['video/mp4', 'video/quicktime', 'video/webm'],
   },
 
   /** Comprobante de historia clínica: además de imagen, admite pdf (REQUISITOS.md §4). */
@@ -82,6 +164,18 @@ export const LIMITES = {
    */
   seguimiento: {
     descripcion: { min: 1, max: 1000 },
+    /** Pregunta que escribe el refugio a mano (spec 011 §6.11). */
+    pregunta: { min: 5, max: 200 },
+  },
+
+  /**
+   * Reseña (Módulo 10, HU-10.1). La puntuación es obligatoria de 1 a 5; el comentario es
+   * opcional y comparte techo con el comentario de solicitud (500), que es el campo de texto
+   * libre comparable más cercano. Espejo en el frontend mobile.
+   */
+  resena: {
+    puntuacion: { min: 1, max: 5 },
+    comentario: { max: 500 },
   },
 
   /**
@@ -94,7 +188,50 @@ export const LIMITES = {
    */
   mensaje: {
     contenido: { min: 0, max: 1000 },
+    /**
+     * Cuántas fotos admite un mensaje. El artboard 37 muestra una grilla de dos miniaturas
+     * con un "+3" encima de la segunda, o sea cinco: ese es el tope.
+     */
+    fotos: { maximo: 5 },
+    /**
+     * Cuántos videos admite un mensaje, y con qué puede convivir.
+     *
+     * Uno solo y sin mezclar con fotos: la grilla del artboard 37 tiene disposiciones
+     * distintas para 1, 2, 3 y 4+ miniaturas, y meter un video en el medio obliga a
+     * resolver el visor, la miniatura y la validación de un caso que ninguna HU pidió.
+     * El día que haga falta, se levanta acá.
+     */
+    videos: { maximo: 1, mezclaConFotos: false },
     /** Tamaño de página del historial y su techo. Ver "Paginación" en docs/api-chat-sala.md. */
     pagina: { porDefecto: 30, maximo: 50 },
+  },
+
+  /** Aviso de mascota perdida o encontrada (spec 020, HU-13.1). */
+  animalPerdido: {
+    /** Lo fija la HU. Obligatorio sólo en un aviso "Perdido": eso lo decide el servicio. */
+    nombre: { max: 30 },
+    /** Lo fija la HU. */
+    descripcion: { max: 300 },
+    /**
+     * Dónde se perdió o se encontró, con los mismos techos que la dirección del perfil:
+     * provincia y localidad del catálogo de georef, y un aclaratorio libre y opcional.
+     */
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    referencia: { max: 120 },
+    /** Fotos por aviso: la primera es la portada de la tarjeta, el resto va en la galería. */
+    imagenes: { max: 5 },
+    latitud: { min: -90, max: 90 },
+    longitud: { min: -180, max: 180 },
+    /** Link de Google Maps que se pega a mano para corregir el lugar. Mismo techo que el perfil. */
+    mapaUrl: { max: 500 },
+    /** Cuántas provincias se pueden elegir a la vez en el filtro del portal: todas. */
+    filtroProvincias: { maximo: 24 },
+    /** Cuántas localidades se pueden elegir a la vez en el filtro del portal. */
+    filtroLocalidades: { maximo: 20 },
+    /** Radio del filtro por cercanía, en km. Mismo techo que el de publicaciones (HU-11.3). */
+    radioKm: { min: 1, max: 500 },
+    /** Tamaño de página del portal y su techo (paginación por cursor). */
+    pagina: { porDefecto: 20, maximo: 50 },
   },
 } as const;

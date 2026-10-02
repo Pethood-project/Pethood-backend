@@ -35,7 +35,7 @@ export async function crear(req: Request, res: Response, next: NextFunction): Pr
     const registro = await service.crearHistoriaClinica(
       mascotaId,
       parsearOFallar(crearHistoriaClinicaSchema, req.body),
-      { usuarioId: req.usuario!.usuarioId, archivo: req.file },
+      { usuarioId: req.usuario!.usuarioId, ambito: req.ambito!, archivo: req.file },
     );
 
     res.status(201).json(registro);
@@ -49,7 +49,7 @@ export async function listar(req: Request, res: Response, next: NextFunction): P
   try {
     const mascotaId = idDeParametro(req.params.mascotaId, 'la mascota');
 
-    res.json(await service.listarHistorial(mascotaId, req.usuario!.usuarioId));
+    res.json(await service.listarHistorial(mascotaId, req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -60,7 +60,7 @@ export async function obtener(req: Request, res: Response, next: NextFunction): 
   try {
     const id = idDeParametro(req.params.id, 'la historia clínica');
 
-    res.json(await service.obtenerHistoriaClinica(id, req.usuario!.usuarioId));
+    res.json(await service.obtenerHistoriaClinica(id, req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }
@@ -74,7 +74,7 @@ export async function editar(req: Request, res: Response, next: NextFunction): P
     const registro = await service.editarHistoriaClinica(
       id,
       parsearOFallar(editarHistoriaClinicaSchema, req.body),
-      { usuarioId: req.usuario!.usuarioId, archivo: req.file },
+      { usuarioId: req.usuario!.usuarioId, ambito: req.ambito!, archivo: req.file },
     );
 
     res.json(registro);
@@ -88,7 +88,7 @@ export async function eliminar(req: Request, res: Response, next: NextFunction):
   try {
     const id = idDeParametro(req.params.id, 'la historia clínica');
 
-    res.json(await service.eliminarHistoriaClinica(id, req.usuario!.usuarioId));
+    res.json(await service.eliminarHistoriaClinica(id, req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }

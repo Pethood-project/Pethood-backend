@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../../src/middlewares/errorHandler';
 import * as repo from '../../../src/modules/mascotas/mascotas.repository';
 import * as service from '../../../src/modules/mascotas/mascotas.service';
+import { obtenerPublicacionActivaIdDeMascota } from '../../../src/modules/publicaciones/publicaciones.service';
 import { borrarImagen, guardarImagen } from '../../../src/shared/storage';
 import { registrarAuditoria } from '../../../src/shared/logAuditoria';
 import type { CrearMascotaDto } from '../../../src/modules/mascotas/mascotas.dto';
 
 vi.mock('../../../src/modules/mascotas/mascotas.repository');
+vi.mock('../../../src/modules/publicaciones/publicaciones.service');
 vi.mock('../../../src/shared/storage');
 vi.mock('../../../src/shared/logAuditoria');
 
@@ -29,6 +31,7 @@ const DATOS_ADOPTANTE: CrearMascotaDto = {
   tamanio: 'MEDIANO',
   especieId: 1,
   razaId: 2,
+  vacunas: [],
 };
 
 /** Arma lo que devolvería el repository tras crear, con el estado pedido. */
@@ -45,6 +48,7 @@ function mascotaCreada(estado: { id: number; nombre: string }, refugioId: number
     usuarioId: 2,
     raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
     historicoEstados: [{ estadoMascota: estado }],
+    historiaClinica: [] as { id?: number; tipoVacuna?: string; fechaVisita?: Date }[],
   };
 }
 
@@ -60,14 +64,17 @@ beforeEach(() => {
     id: 2,
     especieId: 1,
     nombre: 'Labrador',
+    especie: { id: 1, nombre: 'Perro' },
   } as never);
   vi.mocked(guardarImagen).mockResolvedValue('/api/v1/archivos/mascotas/x.jpg');
+  vi.mocked(obtenerPublicacionActivaIdDeMascota).mockResolvedValue(null);
 });
 
 /** Fila cruda de Mascota tal como la devuelve buscarPorId, sin relaciones. */
 const MASCOTA_GUARDADA = {
   id: 10,
   usuarioId: 2,
+  refugioId: null,
   imagenUrl: '/api/v1/archivos/mascotas/vieja.jpg',
 };
 
@@ -78,14 +85,18 @@ function solicitudEn(nombreEstado: string) {
 
 describe('crearMascota — foto', () => {
   it('rechaza el alta si no vino una foto', async () => {
-    await expect(service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2 })).rejects.toMatchObject({
+    await expect(
+      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, ambito: 'PERSONAL' }),
+    ).rejects.toMatchObject({
       codigo: 'FOTO_REQUERIDA',
       mensaje: 'Debe agregar al menos una foto de la mascota',
     });
   });
 
   it('no guarda la imagen si la validación falla antes', async () => {
-    await service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2 }).catch(() => undefined);
+    await service
+      .crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, ambito: 'PERSONAL' })
+      .catch(() => undefined);
 
     expect(guardarImagen).not.toHaveBeenCalled();
   });
@@ -95,7 +106,7 @@ describe('crearMascota — foto', () => {
     vi.mocked(repo.crearConEstado).mockRejectedValue(new Error('base caída'));
 
     await expect(
-      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, archivo: ARCHIVO }),
+      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO }),
     ).rejects.toThrow('base caída');
 
     expect(borrarImagen).toHaveBeenCalledWith('/api/v1/archivos/mascotas/x.jpg');
@@ -107,7 +118,7 @@ describe('crearMascota — usuario', () => {
     vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, verificado: false } as never);
 
     await expect(
-      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, archivo: ARCHIVO }),
+      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO }),
     ).rejects.toMatchObject({ codigo: 'USUARIO_NO_VERIFICADO' });
   });
 
@@ -125,7 +136,7 @@ describe('crearMascota — especie y raza', () => {
     vi.mocked(repo.buscarRaza).mockResolvedValue({ id: 2, especieId: 9 } as never);
 
     await expect(
-      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, archivo: ARCHIVO }),
+      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO }),
     ).rejects.toMatchObject({ mensaje: 'La raza no corresponde a la especie elegida' });
   });
 
@@ -133,7 +144,7 @@ describe('crearMascota — especie y raza', () => {
     vi.mocked(repo.buscarRaza).mockResolvedValue(null as never);
 
     await expect(
-      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, archivo: ARCHIVO }),
+      service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO }),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO' });
   });
 });
@@ -158,7 +169,7 @@ describe('crearMascota — estado inicial del adoptante', () => {
 
     const creada = await service.crearMascota(
       { ...DATOS_ADOPTANTE, destino: 'PROPIA' },
-      { usuarioId: 2, archivo: ARCHIVO },
+      { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO },
     );
 
     expect(repo.buscarEstadoMascotaPorNombre).toHaveBeenCalledWith('Adoptado');
@@ -169,7 +180,11 @@ describe('crearMascota — estado inicial del adoptante', () => {
     vi.mocked(repo.buscarEstadoMascotaPorNombre).mockResolvedValue(ESTADOS.Disponible as never);
     vi.mocked(repo.crearConEstado).mockResolvedValue(mascotaCreada(ESTADOS.Disponible) as never);
 
-    await service.crearMascota(DATOS_ADOPTANTE, { usuarioId: 2, archivo: ARCHIVO });
+    await service.crearMascota(DATOS_ADOPTANTE, {
+      usuarioId: 2,
+      ambito: 'PERSONAL',
+      archivo: ARCHIVO,
+    });
 
     expect(vi.mocked(repo.crearConEstado).mock.calls[0]![0].refugioId).toBeNull();
   });
@@ -186,6 +201,7 @@ describe('crearMascota — estado elegido por el refugio', () => {
     tamanio: 'GRANDE',
     especieId: 1,
     razaId: 2,
+    vacunas: [],
   };
 
   beforeEach(() => {
@@ -262,7 +278,7 @@ describe('editarMascota — propiedad (HU-6.2)', () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(null as never);
 
     await expect(
-      service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2 }),
+      service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2, ambito: 'PERSONAL' }),
     ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
   });
 
@@ -270,14 +286,16 @@ describe('editarMascota — propiedad (HU-6.2)', () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue({ ...MASCOTA_GUARDADA, usuarioId: 99 } as never);
 
     await expect(
-      service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2 }),
+      service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2, ambito: 'PERSONAL' }),
     ).rejects.toMatchObject({ codigo: 'NO_AUTORIZADO', httpStatus: 403 });
   });
 
   it('no escribe nada si el dueño no coincide', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue({ ...MASCOTA_GUARDADA, usuarioId: 99 } as never);
 
-    await service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2 }).catch(() => undefined);
+    await service
+      .editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2, ambito: 'PERSONAL' })
+      .catch(() => undefined);
 
     expect(repo.actualizar).not.toHaveBeenCalled();
   });
@@ -290,14 +308,16 @@ describe('editarMascota — edición parcial', () => {
   });
 
   it('rechaza un PATCH sin ningún cambio', async () => {
-    await expect(service.editarMascota(10, {}, { usuarioId: 2 })).rejects.toMatchObject({
+    await expect(
+      service.editarMascota(10, {}, { usuarioId: 2, ambito: 'PERSONAL' }),
+    ).rejects.toMatchObject({
       codigo: 'VALIDACION',
       httpStatus: 400,
     });
   });
 
   it('deja en undefined los campos que no llegaron, para que Prisma no los toque', async () => {
-    await service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2 });
+    await service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2, ambito: 'PERSONAL' });
 
     const escrito = vi.mocked(repo.actualizar).mock.calls[0]![1];
 
@@ -308,13 +328,13 @@ describe('editarMascota — edición parcial', () => {
   });
 
   it('no apaga la castración cuando el campo no vino', async () => {
-    await service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2 });
+    await service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2, ambito: 'PERSONAL' });
 
     expect(vi.mocked(repo.actualizar).mock.calls[0]![1].castrado).toBeUndefined();
   });
 
   it('una descripción en null sí limpia la columna', async () => {
-    await service.editarMascota(10, { descripcion: null }, { usuarioId: 2 });
+    await service.editarMascota(10, { descripcion: null }, { usuarioId: 2, ambito: 'PERSONAL' });
 
     expect(vi.mocked(repo.actualizar).mock.calls[0]![1].descripcion).toBeNull();
   });
@@ -323,12 +343,16 @@ describe('editarMascota — edición parcial', () => {
     vi.mocked(repo.buscarRaza).mockResolvedValue({ id: 7, especieId: 9 } as never);
 
     await expect(
-      service.editarMascota(10, { razaId: 7, especieId: 1 }, { usuarioId: 2 }),
+      service.editarMascota(10, { razaId: 7, especieId: 1 }, { usuarioId: 2, ambito: 'PERSONAL' }),
     ).rejects.toMatchObject({ mensaje: 'La raza no corresponde a la especie elegida' });
   });
 
   it('registra en auditoría que la mascota se editó', async () => {
-    await service.editarMascota(10, { nombre: 'Fido II', peso: 13 }, { usuarioId: 2 });
+    await service.editarMascota(
+      10,
+      { nombre: 'Fido II', peso: 13 },
+      { usuarioId: 2, ambito: 'PERSONAL' },
+    );
 
     expect(registrarAuditoria).toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'EDITAR', entidad: 'Mascota', entidadId: 10 }),
@@ -346,9 +370,9 @@ describe('editarMascota — reemplazo de foto', () => {
   it('borra la foto nueva si la escritura en base falla', async () => {
     vi.mocked(repo.actualizar).mockRejectedValue(new Error('base caída'));
 
-    await expect(service.editarMascota(10, {}, { usuarioId: 2, archivo: ARCHIVO })).rejects.toThrow(
-      'base caída',
-    );
+    await expect(
+      service.editarMascota(10, {}, { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO }),
+    ).rejects.toThrow('base caída');
 
     expect(borrarImagen).toHaveBeenCalledWith('/api/v1/archivos/mascotas/nueva.jpg');
   });
@@ -356,7 +380,7 @@ describe('editarMascota — reemplazo de foto', () => {
   it('borra la foto vieja si ninguna publicación la usa', async () => {
     vi.mocked(repo.existePublicacionQueUsaImagen).mockResolvedValue(null as never);
 
-    await service.editarMascota(10, {}, { usuarioId: 2, archivo: ARCHIVO });
+    await service.editarMascota(10, {}, { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO });
 
     expect(borrarImagen).toHaveBeenCalledWith('/api/v1/archivos/mascotas/vieja.jpg');
   });
@@ -364,7 +388,7 @@ describe('editarMascota — reemplazo de foto', () => {
   it('conserva la foto vieja si una publicación la sigue apuntando', async () => {
     vi.mocked(repo.existePublicacionQueUsaImagen).mockResolvedValue({ id: 3 } as never);
 
-    await service.editarMascota(10, {}, { usuarioId: 2, archivo: ARCHIVO });
+    await service.editarMascota(10, {}, { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO });
 
     expect(borrarImagen).not.toHaveBeenCalled();
   });
@@ -372,7 +396,11 @@ describe('editarMascota — reemplazo de foto', () => {
   it('una foto sola ya es un cambio válido, sin ningún campo de texto', async () => {
     vi.mocked(repo.existePublicacionQueUsaImagen).mockResolvedValue(null as never);
 
-    const editada = await service.editarMascota(10, {}, { usuarioId: 2, archivo: ARCHIVO });
+    const editada = await service.editarMascota(
+      10,
+      {},
+      { usuarioId: 2, ambito: 'PERSONAL', archivo: ARCHIVO },
+    );
 
     expect(editada.id).toBe(10);
     expect(vi.mocked(repo.actualizar).mock.calls[0]![1].imagenUrl).toBe(
@@ -391,7 +419,7 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
   it('404 si la mascota no existe', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(null as never);
 
-    await expect(service.eliminarMascota(10, 2)).rejects.toMatchObject({
+    await expect(service.eliminarMascota(10, 2, 'PERSONAL')).rejects.toMatchObject({
       codigo: 'NO_ENCONTRADO',
       httpStatus: 404,
     });
@@ -400,14 +428,14 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
   it('403 si la mascota es de otro usuario', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue({ ...MASCOTA_GUARDADA, usuarioId: 99 } as never);
 
-    await expect(service.eliminarMascota(10, 2)).rejects.toMatchObject({
+    await expect(service.eliminarMascota(10, 2, 'PERSONAL')).rejects.toMatchObject({
       codigo: 'NO_AUTORIZADO',
       httpStatus: 403,
     });
   });
 
   it('da de baja la mascota y arrastra sus publicaciones activas', async () => {
-    const resultado = await service.eliminarMascota(10, 2);
+    const resultado = await service.eliminarMascota(10, 2, 'PERSONAL');
 
     expect(repo.darDeBajaConPublicaciones).toHaveBeenCalledWith(10, 2);
     expect(resultado).toEqual({ id: 10, publicacionesDadasDeBaja: 1 });
@@ -418,7 +446,7 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
       solicitudEn('Pendiente'),
     ] as never);
 
-    await expect(service.eliminarMascota(10, 2)).rejects.toMatchObject({
+    await expect(service.eliminarMascota(10, 2, 'PERSONAL')).rejects.toMatchObject({
       codigo: 'SOLICITUDES_ABIERTAS',
       httpStatus: 409,
     });
@@ -429,7 +457,7 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
       solicitudEn('En_Revision'),
     ] as never);
 
-    await expect(service.eliminarMascota(10, 2)).rejects.toMatchObject({
+    await expect(service.eliminarMascota(10, 2, 'PERSONAL')).rejects.toMatchObject({
       codigo: 'SOLICITUDES_ABIERTAS',
     });
   });
@@ -439,7 +467,7 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
       solicitudEn('Pendiente'),
     ] as never);
 
-    await service.eliminarMascota(10, 2).catch(() => undefined);
+    await service.eliminarMascota(10, 2, 'PERSONAL').catch(() => undefined);
 
     expect(repo.darDeBajaConPublicaciones).not.toHaveBeenCalled();
   });
@@ -450,6 +478,292 @@ describe('eliminarMascota — baja lógica (HU-6.3)', () => {
       solicitudEn('Aprobada'),
     ] as never);
 
-    await expect(service.eliminarMascota(10, 2)).resolves.toMatchObject({ id: 10 });
+    await expect(service.eliminarMascota(10, 2, 'PERSONAL')).resolves.toMatchObject({ id: 10 });
+  });
+});
+
+describe('crearMascota — vacunas iniciales (spec 019)', () => {
+  beforeEach(() => {
+    vi.mocked(repo.buscarEstadoMascotaPorNombre).mockResolvedValue(ESTADOS.Disponible as never);
+    vi.mocked(repo.crearConEstado).mockResolvedValue(mascotaCreada(ESTADOS.Disponible) as never);
+  });
+
+  it('las da de alta en la historia clínica con el nombre y la descripción del plan', async () => {
+    await service.crearMascota(
+      {
+        ...DATOS_ADOPTANTE,
+        vacunas: [
+          { tipo: 'PRIMOVACUNACION', fecha: new Date(2022, 4, 1) },
+          { tipo: 'ANTIRRABICA', fecha: new Date(2022, 7, 1) },
+        ],
+      },
+      { usuarioId: 2, archivo: ARCHIVO },
+    );
+
+    const vacunas = vi.mocked(repo.crearConEstado).mock.calls[0]![0].vacunas;
+    expect(vacunas).toEqual([
+      expect.objectContaining({
+        tipoVacuna: 'PRIMOVACUNACION',
+        fechaVisita: new Date(2022, 4, 1),
+        titulo: 'Primovacunación',
+      }),
+      expect.objectContaining({ tipoVacuna: 'ANTIRRABICA', titulo: 'Antirrábica' }),
+    ]);
+    expect(vacunas[1]!.descripcion).toContain('obligatoria por ley');
+  });
+
+  it('rechaza una vacuna que no es del plan de la especie', async () => {
+    await expect(
+      service.crearMascota(
+        {
+          ...DATOS_ADOPTANTE,
+          vacunas: [{ tipo: 'TRIVALENTE_FELINA', fecha: new Date(2022, 4, 1) }],
+        },
+        { usuarioId: 2, archivo: ARCHIVO },
+      ),
+    ).rejects.toMatchObject({ codigo: 'VALIDACION', httpStatus: 400 });
+    expect(guardarImagen).not.toHaveBeenCalled();
+  });
+
+  it('rechaza la misma vacuna dos veces', async () => {
+    await expect(
+      service.crearMascota(
+        {
+          ...DATOS_ADOPTANTE,
+          vacunas: [
+            { tipo: 'ANTIRRABICA', fecha: new Date(2022, 7, 1) },
+            { tipo: 'ANTIRRABICA', fecha: new Date(2023, 7, 1) },
+          ],
+        },
+        { usuarioId: 2, archivo: ARCHIVO },
+      ),
+    ).rejects.toMatchObject({ mensaje: 'No podés cargar la misma vacuna dos veces' });
+  });
+
+  it('rechaza una vacuna anterior al nacimiento', async () => {
+    await expect(
+      service.crearMascota(
+        { ...DATOS_ADOPTANTE, vacunas: [{ tipo: 'ANTIRRABICA', fecha: new Date(2022, 0, 1) }] },
+        { usuarioId: 2, archivo: ARCHIVO },
+      ),
+    ).rejects.toMatchObject({
+      mensaje: 'La fecha de la vacuna Antirrábica no puede ser anterior al nacimiento',
+    });
+  });
+});
+
+describe('obtenerMascota — ficha individual (HU-6.4)', () => {
+  it('404 si la mascota no existe', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(null as never);
+
+    await expect(service.obtenerMascota(10, 2, 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+      httpStatus: 404,
+    });
+  });
+
+  it('404 si la mascota no tiene un estado vigente', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue({
+      ...mascotaCreada(ESTADOS.Disponible),
+      historicoEstados: [],
+    } as never);
+
+    await expect(service.obtenerMascota(10, 2, 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('devuelve la ficha al dueño', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible) as never,
+    );
+
+    await expect(service.obtenerMascota(10, 2, 'PERSONAL')).resolves.toMatchObject({ id: 10 });
+  });
+
+  it('404 si no es el dueño y no pertenece al mismo refugio', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible, 1) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 9, refugioId: null } as never);
+
+    await expect(service.obtenerMascota(10, 9, 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+      httpStatus: 404,
+    });
+  });
+
+  it('404 si pertenece a otro refugio', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible, 1) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 9, refugioId: 2 } as never);
+
+    await expect(service.obtenerMascota(10, 9, 'REFUGIO')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('un compañero del mismo refugio sí puede ver la ficha aunque no la haya creado', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible, 1) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 9, refugioId: 1 } as never);
+
+    await expect(service.obtenerMascota(10, 9, 'REFUGIO')).resolves.toMatchObject({ id: 10 });
+  });
+
+  it('desde el perfil personal no ve una mascota del refugio, aunque la haya cargado él', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible, 1) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+
+    await expect(service.obtenerMascota(10, 2, 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('desde la vista de refugio no ve sus mascotas personales', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible) as never,
+    );
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+
+    await expect(service.obtenerMascota(10, 2, 'REFUGIO')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+  });
+
+  it('sin publicación activa, publicacionActivaId viaja en null', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible) as never,
+    );
+
+    await expect(service.obtenerMascota(10, 2, 'PERSONAL')).resolves.toMatchObject({
+      publicacionActivaId: null,
+    });
+  });
+
+  it('devuelve una medalla por vacuna vigente, con la aplicación más reciente', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue({
+      ...mascotaCreada(ESTADOS.Disponible),
+      historiaClinica: [
+        { tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2023, 7, 1) },
+        { tipoVacuna: 'PRIMOVACUNACION', fechaVisita: new Date(2022, 4, 1) },
+        { tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2024, 7, 1) },
+      ],
+    } as never);
+
+    const ficha = await service.obtenerMascota(10, 2, 'PERSONAL');
+
+    // En el orden del calendario, no en el de carga.
+    expect(ficha.vacunas).toEqual([
+      expect.objectContaining({ tipo: 'PRIMOVACUNACION', fechaAplicacion: '2022-05-01' }),
+      expect.objectContaining({ tipo: 'ANTIRRABICA', fechaAplicacion: '2024-08-01' }),
+    ]);
+  });
+
+  it('con publicación activa, devuelve su id para el botón "Ver publicación asociada"', async () => {
+    vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue(
+      mascotaCreada(ESTADOS.Disponible) as never,
+    );
+    vi.mocked(obtenerPublicacionActivaIdDeMascota).mockResolvedValue(55);
+
+    await expect(service.obtenerMascota(10, 2, 'PERSONAL')).resolves.toMatchObject({
+      publicacionActivaId: 55,
+    });
+  });
+});
+
+describe('switch refugio/adoptante — cada perfil gestiona solo lo suyo', () => {
+  it('desde el perfil personal no se edita una mascota del refugio, aunque la haya cargado él', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue({ ...MASCOTA_GUARDADA, refugioId: 1 } as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+
+    await expect(
+      service.editarMascota(10, { nombre: 'Fido II' }, { usuarioId: 2, ambito: 'PERSONAL' }),
+    ).rejects.toMatchObject({ codigo: 'NO_ENCONTRADO', httpStatus: 404 });
+    expect(repo.actualizar).not.toHaveBeenCalled();
+  });
+
+  it('desde la vista de refugio no se elimina una mascota personal', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(MASCOTA_GUARDADA as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+
+    await expect(service.eliminarMascota(10, 2, 'REFUGIO')).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+    });
+    expect(repo.darDeBajaConPublicaciones).not.toHaveBeenCalled();
+  });
+
+  it('el listado personal filtra por el usuario y el de refugio por el refugio', async () => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([] as never);
+
+    await service.listarMisMascotas(2, 'PERSONAL');
+    await service.listarMisMascotas(2, 'REFUGIO');
+
+    expect(repo.listarPorAmbito).toHaveBeenNthCalledWith(1, { usuarioId: 2 }, []);
+    expect(repo.listarPorAmbito).toHaveBeenNthCalledWith(2, { refugioId: 1 }, []);
+  });
+
+  it('el filtro por estado llega al repository con todos los estados elegidos', async () => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([] as never);
+
+    await service.listarMisMascotas(2, 'REFUGIO', { estados: [1, 5] });
+
+    expect(repo.listarPorAmbito).toHaveBeenCalledWith({ refugioId: 1 }, [1, 5]);
+  });
+});
+
+describe('listarPublicables — selector de "Nueva publicación"', () => {
+  /** Fila de `listarPorAmbito`: mascota con estado vigente y sus publicaciones vivas. */
+  function fila(
+    id: number,
+    estado: { id: number; nombre: string },
+    { usuarioId = 2, publicada = false, refugioId = null as number | null } = {},
+  ) {
+    return {
+      ...mascotaCreada(estado, refugioId),
+      id,
+      usuarioId,
+      publicaciones: publicada ? [{ id: 99 }] : [],
+    };
+  }
+
+  it('solo ofrece las que habilitan publicar y todavía no tienen publicación viva', async () => {
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([
+      fila(1, ESTADOS.Disponible),
+      fila(2, ESTADOS.En_Transito),
+      fila(3, ESTADOS.Disponible, { publicada: true }),
+      fila(4, ESTADOS.En_Tratamiento),
+      fila(5, ESTADOS.Adoptado),
+    ] as never);
+
+    const publicables = await service.listarPublicables(2, 'PERSONAL');
+
+    expect(publicables.map((mascota) => mascota.id)).toEqual([1, 2]);
+    expect(repo.listarPorAmbito).toHaveBeenCalledWith({ usuarioId: 2 }, []);
+  });
+
+  it('en la vista de refugio no ofrece las que cargó otro miembro: el alta las rechazaría', async () => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: 2, refugioId: 1 } as never);
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([
+      fila(1, ESTADOS.Disponible, { refugioId: 1 }),
+      fila(2, ESTADOS.Disponible, { refugioId: 1, usuarioId: 8 }),
+    ] as never);
+
+    const publicables = await service.listarPublicables(2, 'REFUGIO');
+
+    expect(publicables.map((mascota) => mascota.id)).toEqual([1]);
+    expect(repo.listarPorAmbito).toHaveBeenCalledWith({ refugioId: 1 }, []);
+  });
+
+  it('sin mascotas publicables devuelve una lista vacía, no un error', async () => {
+    vi.mocked(repo.listarPorAmbito).mockResolvedValue([] as never);
+
+    await expect(service.listarPublicables(2, 'PERSONAL')).resolves.toEqual([]);
   });
 });

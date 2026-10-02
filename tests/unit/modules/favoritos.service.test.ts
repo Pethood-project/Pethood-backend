@@ -12,8 +12,8 @@ const MASCOTA = 42;
 
 const FECHA_AGREGADO = new Date('2026-08-19T15:00:00.000Z');
 
-function mascotaActiva(usuarioId = DUENIO) {
-  return { id: MASCOTA, usuarioId, fechaBaja: null };
+function mascotaActiva(usuarioId = DUENIO, refugioId: number | null = null) {
+  return { id: MASCOTA, usuarioId, refugioId, fechaBaja: null };
 }
 
 function favorito(id = 1, fechaAlta = FECHA_AGREGADO) {
@@ -34,6 +34,8 @@ function favoritoConMascota(opciones: {
   publicacionId?: number | null;
   /** Solicitud viva del usuario sobre esa publicación, si la tiene. */
   solicitudId?: number | null;
+  /** Refugio dueño; `null` es la mascota de un adoptante particular. */
+  refugio?: { id: number; nombre: string } | null;
 }) {
   const {
     id,
@@ -43,6 +45,7 @@ function favoritoConMascota(opciones: {
     fechaNacimiento = new Date(2022, 2, 15),
     publicacionId = 5,
     solicitudId = null,
+    refugio = null,
   } = opciones;
 
   return {
@@ -56,6 +59,7 @@ function favoritoConMascota(opciones: {
       fechaNacimiento,
       imagenUrl: '/api/v1/archivos/mascotas/x.jpg',
       raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
+      refugio,
       historicoEstados: estado ? [{ estadoMascota: estado }] : [],
       publicaciones:
         publicacionId === null
@@ -81,6 +85,7 @@ beforeEach(() => {
   vi.resetAllMocks();
 
   vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(mascotaActiva() as never);
+  vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: null } as never);
   vi.mocked(repo.buscarPublicacionActiva).mockResolvedValue({ id: 5 } as never);
   vi.mocked(repo.buscarActivo).mockResolvedValue(null as never);
   vi.mocked(repo.crear).mockResolvedValue(favorito() as never);
@@ -116,6 +121,35 @@ describe('agregarFavorito', () => {
       httpStatus: 403,
     });
     expect(repo.crear).not.toHaveBeenCalled();
+  });
+
+  it('rechaza guardar una mascota del propio refugio, aunque la haya cargado otro miembro: desde el perfil personal lo del refugio no se ve', async () => {
+    vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(mascotaActiva(DUENIO, 1) as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 1 } as never);
+
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toMatchObject({
+      codigo: 'MASCOTA_PROPIA',
+      httpStatus: 403,
+    });
+    expect(repo.crear).not.toHaveBeenCalled();
+  });
+
+  it('permite guardar una mascota de refugio si el usuario pertenece a otro refugio', async () => {
+    vi.mocked(repo.buscarMascotaActiva).mockResolvedValue(mascotaActiva(DUENIO, 1) as never);
+    vi.mocked(repo.buscarUsuario).mockResolvedValue({ id: USUARIO, refugioId: 2 } as never);
+
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).resolves.toMatchObject({
+      yaEstaba: false,
+    });
+  });
+
+  it('rechaza si el usuario no existe', async () => {
+    vi.mocked(repo.buscarUsuario).mockResolvedValue(null as never);
+
+    await expect(service.agregarFavorito(MASCOTA, USUARIO)).rejects.toMatchObject({
+      codigo: 'NO_ENCONTRADO',
+      httpStatus: 404,
+    });
   });
 
   it('rechaza una mascota sin publicación activa', async () => {
@@ -223,6 +257,30 @@ describe('listarFavoritos', () => {
     const { favoritos } = await service.listarFavoritos(USUARIO);
 
     expect(favoritos[0]).toMatchObject({ publicacionId: 88, solicitudAbiertaId: 1042 });
+  });
+
+  // La tarjeta de favoritos de Inicio muestra de qué refugio es la mascota.
+  it('expone el refugio dueño, o null si es de un particular', async () => {
+    vi.mocked(repo.listarVisiblesDeUsuario).mockResolvedValue([
+      favoritoConMascota({
+        id: 1,
+        mascotaId: 42,
+        fechaAlta: FECHA_AGREGADO,
+        estado: { id: 1, nombre: 'Disponible' },
+        refugio: { id: 7, nombre: 'Refugio Esperanza' },
+      }),
+      favoritoConMascota({
+        id: 2,
+        mascotaId: 43,
+        fechaAlta: FECHA_AGREGADO,
+        estado: { id: 1, nombre: 'Disponible' },
+      }),
+    ] as never);
+
+    const { favoritos } = await service.listarFavoritos(USUARIO);
+
+    expect(favoritos[0]!.refugio).toEqual({ id: 7, nombre: 'Refugio Esperanza' });
+    expect(favoritos[1]!.refugio).toBeNull();
   });
 
   it('sin publicación viva no hay nada que solicitar', async () => {

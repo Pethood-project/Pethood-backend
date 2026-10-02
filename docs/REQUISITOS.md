@@ -209,8 +209,9 @@ Todos los filtros son de selección múltiple (ver tabla de validez, sección 4)
 
 ### Módulo 15: Soporte
 
-- **HU-15.1 Consulta de manual de usuario y FAQs** — contenido estático, tipo landing page.
-- **HU-15.2 Canal de contacto y formulario de soporte**.
+- **HU-15.1 Consulta de manual de usuario y FAQs** — pública, sin sesión. El manual es texto estático (frontend); las FAQs salen del catálogo de HU-15.3.
+- **HU-15.2 Canal de contacto y formulario de soporte** — público, sin sesión. Las consultas se guardan en `Consulta_Soporte` y las lee el admin en web-admin (sin envío de mails por ahora).
+- **HU-15.3 Gestión de FAQs (contenido administrable)** — catálogo mantenible desde web-admin sin tocar código, modelado con `Faq` + `Faq_Categoria` (ver `MODELO_DATOS.md`). Spec 015.
 
 ## 7. Reglas de validación detalladas — casos más ricos
 
@@ -218,7 +219,7 @@ Todos los filtros son de selección múltiple (ver tabla de validez, sección 4)
 
 Campos base para ambos: Foto (obligatoria, explorador nativo o cámara), Nombre (2-25 caracteres, trim, obligatorio), Fecha de nacimiento (calendario, no futura, obligatoria), Sexo (dropdown Macho/Hembra, obligatorio), Peso (numérico, 1 decimal, acepta `.` o `,`), Tamaño (Pequeño/Mediano/Grande), Especie (dropdown que habilita Raza dependiente), Raza (filtrada dinámicamente según especie).
 
-**Solo para refugio, campos adicionales:** Estado (Disponible / En tratamiento / En tránsito), Descripción para la publicación (obligatoria, ≤50 caracteres, trim), Requisitos del adoptante (tag input tipo chips, cada tag ≤25 caracteres), Ubicación (obligatoria, ≤50 caracteres, trim).
+**Solo para refugio, campos adicionales:** Estado (Disponible / En tratamiento / En tránsito), Descripción para la publicación (obligatoria, ≤50 caracteres, trim — el equipo la subió a ≤200 el 2026-09-28 porque la ficha la muestra como texto libre en «Sobre <nombre>», ver spec 018 §9), Requisitos del adoptante (tag input tipo chips, cada tag ≤25 caracteres — el equipo lo bajó a ≤20 el 2026-09-28 para mostrarlos como medallitas en la ficha, ver spec 019 §9), Ubicación (obligatoria, ≤50 caracteres, trim).
 
 **Reglas de habilitación de botones:**
 - El botón "Crear mascota" se habilita solo cuando todos los campos base son válidos.
@@ -279,7 +280,7 @@ Ver tabla completa en el PDF original (sección 20.2). Resumen de mapeo HU → e
 - Módulo 12 (campañas): `Campaña`, `Usuario`, `Estado_Mascota` (¿posible referencia cruzada rara en la matriz original entre Campaña y Estado_Mascota — revisar si es error del documento fuente o si hay una relación real no evidente en el diagrama de clases).
 - Módulo 13 (perdidas y encontradas): `Usuario`, `Animal_Perdido`, `Estado_Animal_Perdido`.
 - Módulo 14 (dashboards): agregaciones sobre todo lo anterior.
-- Módulo 15 (soporte): sin entidad de dominio, contenido estático.
+- Módulo 15 (soporte): `Consulta_Soporte`, `Faq_Categoria`, `Faq` (sin relación con las demás entidades). No usa `Reporte_Problema`, que es de moderación (módulo 3).
 
 ## 10. Ambigüedades detectadas en el documento fuente (no resolver solo)
 

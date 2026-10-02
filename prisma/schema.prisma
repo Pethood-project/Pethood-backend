@@ -16,8 +16,10 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Conexión sin pooler: la usan las migraciones (PgBouncer no las soporta). En local es igual a DATABASE_URL.
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────── ENUMS ───────────────
@@ -30,10 +32,45 @@ enum GeneroMascota {
   HEMBRA
 }
 
+// Qué es un mensaje del chat (HU-5.2).
+//
+// TEXTO es todo lo que escribe una persona, con o sin fotos. SOLICITUD es la tarjeta que
+// PetHood inserta en la sala cuando se envía una solicitud de adopción o tránsito: la emite
+// el usuario SISTEMA y lleva solicitud_id, para que el cliente pinte el estado y la mascota
+// sin pedir nada más.
+//
+// Es un enum de Prisma y no una tabla de catálogo porque son valores del dominio que el
+// código ramifica, como GeneroMascota, y no una lista que el administrador edite.
+enum TipoMensaje {
+  TEXTO
+  SOLICITUD
+
+  @@map("tipo_mensaje")
+}
+
 enum TamanioMascota {
   PEQUENO
   MEDIANO
   GRANDE
+}
+
+// Vacuna de un registro de historia clínica (spec 019). El plan de vacunación de perros y
+// gatos es fijo y el código ramifica por el valor (especie que la admite, color de la
+// medalla en la app), por eso es enum y no un catálogo editable. El nombre visible, la
+// especie y la descripción de cada una viven en `src/shared/vacunas.ts`.
+//
+// ANTIRRABICA es una sola para las dos especies: es la misma vacuna y la medalla tiene
+// que verse igual en un perro que en un gato.
+enum TipoVacuna {
+  PRIMOVACUNACION
+  MULTIPLE
+  REFUERZO_MULTIPLE
+  TRIVALENTE_FELINA
+  REFUERZO_TRIVALENTE_LEUCEMIA
+  REFUERZO_LEUCEMIA
+  ANTIRRABICA
+
+  @@map("tipo_vacuna")
 }
 
 // ─────────────── CATÁLOGOS ───────────────
@@ -51,7 +88,8 @@ model Especie {
   usuarioBaja         Int?      @map("especie_usuario_baja")
   fechaBaja           DateTime? @map("especie_fecha_baja")
 
-  razas Raza[]
+  razas            Raza[]
+  animalesPerdidos AnimalPerdido[]
 
   @@map("especie")
 }
@@ -90,6 +128,27 @@ model EstadoMascota {
   historicos MascotaEstado[]
 
   @@map("estado_mascota")
+}
+
+// Estado del AVISO, independiente del de la mascota: Activa, Pausada, Finalizada. Hoy las
+// transiciones son automáticas y siguen al estado de la mascota (ver
+// `estadoPublicacionSegunMascota` en publicaciones.service.ts); cuando exista la edición de
+// publicaciones se suman las manuales (pausar, finalizar, reactivar).
+model EstadoPublicacion {
+  id          Int     @id @default(autoincrement()) @map("estado_publicacion_id")
+  nombre      String  @unique @map("estado_publicacion_nombre")
+  descripcion String? @map("estado_publicacion_descripcion")
+
+  usuarioAlta         Int       @map("estado_publicacion_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("estado_publicacion_fecha_alta")
+  usuarioModificacion Int?      @map("estado_publicacion_usuario_modificacion")
+  fechaModificacion   DateTime? @map("estado_publicacion_fecha_modificacion")
+  usuarioBaja         Int?      @map("estado_publicacion_usuario_baja")
+  fechaBaja           DateTime? @map("estado_publicacion_fecha_baja")
+
+  historicos PublicacionEstado[]
+
+  @@map("estado_publicacion")
 }
 
 model EstadoUsuario {
@@ -215,23 +274,33 @@ model Rol {
 // ─────────────── USUARIOS ───────────────
 
 model Usuario {
-  id               Int       @id @default(autoincrement()) @map("usuario_id")
-  nombre           String    @map("usuario_nombre")
-  apellido         String    @map("usuario_apellido")
-  email            String    @unique @map("usuario_email")
+  id              Int       @id @default(autoincrement()) @map("usuario_id")
+  nombre          String    @map("usuario_nombre")
+  apellido        String    @map("usuario_apellido")
+  email           String    @unique @map("usuario_email")
   // Nullable: las cuentas creadas solo con Google no tienen contraseña local.
-  contrasena       String?   @map("usuario_contrasena")
-  telefono         String?   @map("usuario_telefono")
+  contrasena      String?   @map("usuario_contrasena")
+  telefono        String?   @map("usuario_telefono")
   // Nullable: el registro mobile actual no pide DNI; Google OAuth tampoco.
-  dni              String?   @unique @map("usuario_dni")
-  fechaNacimiento  DateTime? @map("usuario_fecha_nacimiento")
-  googleId         String?   @unique @map("usuario_google_id")
-  verificado       Boolean   @default(false) @map("usuario_verificado")
-  imagenUrl        String?   @map("usuario_imagen_url")
-  // Barrio / ciudad del perfil (GUI-15). Nullable para cuentas nuevas o de Google.
-  ubicacion        String?   @map("usuario_ubicacion")
-  refugioId        Int?      @map("refugio_id")
-  estadoId         Int       @map("estado_id")
+  dni             String?   @unique @map("usuario_dni")
+  fechaNacimiento DateTime? @map("usuario_fecha_nacimiento")
+  googleId        String?   @unique @map("usuario_google_id")
+  verificado      Boolean   @default(false) @map("usuario_verificado")
+  imagenUrl       String?   @map("usuario_imagen_url")
+  // Dirección estructurada del perfil, para geocodificar (node-geocoder). El texto que se
+  // muestra es la concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
+  provincia       String?   @map("usuario_provincia")
+  localidad       String?   @map("usuario_localidad")
+  calleAltura     String?   @map("usuario_calle_altura")
+  // URL de Google Maps y coordenadas resultantes de la geocodificación. Las coordenadas se
+  // guardan aparte para calcular distancia (Haversine) sin parsear la URL.
+  mapaUrl         String?   @map("usuario_mapa_url")
+  latitud         Float?    @map("usuario_latitud")
+  longitud        Float?    @map("usuario_longitud")
+  // Si el usuario confirmó que el link de Maps apunta a su dirección real.
+  ubicacionVerificada Boolean @default(false) @map("usuario_ubicacion_verificada")
+  refugioId       Int?      @map("refugio_id")
+  estadoId        Int       @map("estado_id")
 
   usuarioAlta         Int       @map("usuario_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("usuario_fecha_alta")
@@ -284,7 +353,20 @@ model RolUsuario {
 model Refugio {
   id          Int     @id @default(autoincrement()) @map("refugio_id")
   nombre      String  @map("refugio_nombre")
-  direccion   String  @map("refugio_direccion")
+  // Dirección estructurada, para geocodificar (node-geocoder). El texto que se muestra es la
+  // concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
+  provincia   String? @map("refugio_provincia")
+  localidad   String? @map("refugio_localidad")
+  calleAltura String? @map("refugio_calle_altura")
+  // Enlace a Google Maps del refugio (Módulo 11): se muestra en el detalle de la mascota y
+  // sus coordenadas, cuando el link las incluye, alimentan el filtro por cercanía.
+  mapaUrl     String? @map("refugio_mapa_url")
+  // Coordenadas persistidas al geocodificar la dirección, para no depender de parsear
+  // `mapa_url` en el camino crítico del feed.
+  latitud     Float?  @map("refugio_latitud")
+  longitud    Float?  @map("refugio_longitud")
+  // Si el refugio confirmó que el link de Maps apunta a su dirección real.
+  ubicacionVerificada Boolean @default(false) @map("refugio_ubicacion_verificada")
   telefono    String? @map("refugio_telefono")
   email       String? @map("refugio_email")
   descripcion String? @map("refugio_descripcion")
@@ -380,18 +462,21 @@ model MascotaEstado {
 // primera es la portada. `imagenUrl` se mantiene con esa portada, para no romper lo que ya
 // lee ese campo.
 model Publicacion {
-  id            Int      @id @default(autoincrement()) @map("publicacion_id")
-  titulo        String   @map("publicacion_titulo")
-  descripcion   String?  @map("publicacion_descripcion")
-  ubicacion     String?  @map("publicacion_ubicacion")
-  requisitos    String[] @map("publicacion_requisitos")
-  personalidad  String[] @map("publicacion_personalidad")
-  desparasitado Boolean  @default(false) @map("publicacion_desparasitado")
-  vacunas       String?  @map("publicacion_vacunas")
-  imagenes      String[] @map("publicacion_imagenes")
-  imagenUrl     String?  @map("publicacion_imagen_url")
-  mascotaId     Int      @map("mascota_id")
-  usuarioId     Int      @map("usuario_id")
+  id                Int      @id @default(autoincrement()) @map("publicacion_id")
+  titulo            String   @map("publicacion_titulo")
+  descripcion       String?  @map("publicacion_descripcion")
+  ubicacion         String?  @map("publicacion_ubicacion")
+  // Coordenadas capturadas al publicar (opcional). Habilitan el filtro geoespacial del feed
+  // (Módulo 11, HU-11.3). Nullable: las publicaciones previas a esta HU no las tienen.
+  ubicacionLatitud  Decimal? @map("publicacion_ubicacion_latitud") @db.Decimal(9, 6)
+  ubicacionLongitud Decimal? @map("publicacion_ubicacion_longitud") @db.Decimal(9, 6)
+  requisitos        String[] @map("publicacion_requisitos")
+  personalidad      String[] @map("publicacion_personalidad")
+  desparasitado     Boolean  @default(false) @map("publicacion_desparasitado")
+  imagenes          String[] @map("publicacion_imagenes")
+  imagenUrl         String?  @map("publicacion_imagen_url")
+  mascotaId         Int      @map("mascota_id")
+  usuarioId         Int      @map("usuario_id")
 
   usuarioAlta         Int       @map("publicacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("publicacion_fecha_alta")
@@ -403,9 +488,34 @@ model Publicacion {
   mascota Mascota @relation(fields: [mascotaId], references: [id])
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
-  solicitudes Solicitud[]
+  historicoEstados PublicacionEstado[]
+  solicitudes      Solicitud[]
 
   @@map("publicacion")
+}
+
+// Histórico N:1 de estados de una publicación. Mismo patrón que MascotaEstado: una sola fila
+// activa (fecha_baja nula) por publicación; cambiar de estado es baja de la vigente + alta de
+// una nueva, así queda el historial completo. Sin par de modificación propio.
+//
+// La unicidad de la fila vigente la garantiza un índice PARCIAL que Prisma no sabe expresar y
+// vive en `migrations/20260925125459_estado_publicacion`: `publicacion_estado_activo_uq`,
+// único (publicacion_id) WHERE fecha_baja IS NULL.
+model PublicacionEstado {
+  id                  Int @id @default(autoincrement()) @map("publicacion_estado_id")
+  publicacionId       Int @map("publicacion_id")
+  estadoPublicacionId Int @map("estado_publicacion_id")
+
+  usuarioAlta Int       @map("publicacion_estado_usuario_alta")
+  fechaAlta   DateTime  @default(now()) @map("publicacion_estado_fecha_alta")
+  usuarioBaja Int?      @map("publicacion_estado_usuario_baja")
+  fechaBaja   DateTime? @map("publicacion_estado_fecha_baja")
+
+  publicacion       Publicacion       @relation(fields: [publicacionId], references: [id])
+  estadoPublicacion EstadoPublicacion @relation(fields: [estadoPublicacionId], references: [id])
+
+  @@index([publicacionId])
+  @@map("publicacion_estado")
 }
 
 // Además del índice de abajo, la tabla tiene dos índices PARCIALES que Prisma no sabe
@@ -473,8 +583,12 @@ model Solicitud {
   tipoSolicitud TipoSolicitud @relation(fields: [tipoSolicitudId], references: [id])
   hogar         Hogar?        @relation(fields: [hogarId], references: [id])
 
-  historicoEstados SolicitudEstado[]
-  seguimientos     Seguimiento[]
+  historicoEstados     SolicitudEstado[]
+  seguimientos         Seguimiento[]
+  preguntasSeguimiento PreguntaSeguimiento[]
+  chats                Chat[]
+  mensajes             Mensaje[]
+  resenas              Resena[]
 
   @@map("solicitud")
 }
@@ -500,15 +614,19 @@ model SolicitudEstado {
 // ─────────────── HISTORIA CLÍNICA ───────────────
 
 model HistoriaClinica {
-  id               Int       @id @default(autoincrement()) @map("historia_clinica_id")
-  fechaVisita      DateTime  @map("historia_clinica_fecha_visita")
-  fechaProxima     DateTime? @map("historia_clinica_fecha_proxima")
-  requiereRevision Boolean   @default(false) @map("historia_clinica_requiere_revision")
-  vacunacion       Boolean   @default(false) @map("historia_clinica_vacunacion")
-  titulo           String    @map("historia_clinica_titulo")
-  descripcion      String    @map("historia_clinica_descripcion")
-  documentoUrl     String?   @map("historia_clinica_documento_url")
-  mascotaId        Int       @map("mascota_id")
+  id               Int         @id @default(autoincrement()) @map("historia_clinica_id")
+  fechaVisita      DateTime    @map("historia_clinica_fecha_visita")
+  fechaProxima     DateTime?   @map("historia_clinica_fecha_proxima")
+  requiereRevision Boolean     @default(false) @map("historia_clinica_requiere_revision")
+  vacunacion       Boolean     @default(false) @map("historia_clinica_vacunacion")
+  // Qué vacuna se aplicó (spec 019). Va junto con `vacunacion = true`; las vacunas de la
+  // mascota (sus medallas) salen de los registros vigentes con este campo cargado. Nulo en
+  // los registros que no son vacuna y en las vacunas cargadas antes de que existiera.
+  tipoVacuna       TipoVacuna? @map("historia_clinica_tipo_vacuna")
+  titulo           String      @map("historia_clinica_titulo")
+  descripcion      String      @map("historia_clinica_descripcion")
+  documentoUrl     String?     @map("historia_clinica_documento_url")
+  mascotaId        Int         @map("mascota_id")
 
   // Regla crítica: inmutable. No hay UPDATE sobre un registro persistido — "modificar" es
   // baja lógica + alta de uno nuevo. usuarioModificacion/fechaModificacion no deberían
@@ -528,10 +646,14 @@ model HistoriaClinica {
 // ─────────────── SEGUIMIENTO POST-ADOPCIÓN ───────────────
 
 model PreguntaSeguimiento {
-  id         Int     @id @default(autoincrement()) @map("pregunta_seguimiento_id")
-  texto      String  @map("pregunta_seguimiento_texto")
-  posicion   Int     @map("pregunta_seguimiento_posicion")
-  esAdopcion Boolean @map("pregunta_seguimiento_es_adopcion")
+  id          Int     @id @default(autoincrement()) @map("pregunta_seguimiento_id")
+  texto       String  @map("pregunta_seguimiento_texto")
+  posicion    Int     @map("pregunta_seguimiento_posicion")
+  esAdopcion  Boolean @map("pregunta_seguimiento_es_adopcion")
+  /// La pregunta fija del primer pedido automático ("¿Qué tal estuvo la primera noche en casa?").
+  esInicial   Boolean @default(false) @map("pregunta_seguimiento_es_inicial")
+  /// Null = pregunta del catálogo. Con valor = pregunta escrita por el refugio para esa solicitud.
+  solicitudId Int?    @map("solicitud_id")
 
   usuarioAlta         Int       @map("pregunta_seguimiento_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("pregunta_seguimiento_fecha_alta")
@@ -540,6 +662,7 @@ model PreguntaSeguimiento {
   usuarioBaja         Int?      @map("pregunta_seguimiento_usuario_baja")
   fechaBaja           DateTime? @map("pregunta_seguimiento_fecha_baja")
 
+  solicitud    Solicitud?    @relation(fields: [solicitudId], references: [id])
   seguimientos Seguimiento[]
 
   @@map("pregunta_seguimiento")
@@ -552,6 +675,8 @@ model Seguimiento {
   plazo                 DateTime? @map("seguimiento_plazo")
   solicitudId           Int       @map("solicitud_id")
   preguntaSeguimientoId Int       @map("pregunta_seguimiento_id")
+  /// Pedido enviado a mano por el refugio: no ocupa un lugar en la secuencia de días.
+  esManual              Boolean   @default(false) @map("seguimiento_es_manual")
 
   usuarioAlta         Int       @map("seguimiento_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("seguimiento_fecha_alta")
@@ -568,6 +693,20 @@ model Seguimiento {
 
 // ─────────────── REPUTACIÓN ───────────────
 
+// La reseña la habilita una transacción CONCRETADA: por eso `solicitudId`. La puntuación es
+// obligatoria (1-5) y el comentario opcional. Solo alta y baja lógica: nunca se edita el
+// contenido de una reseña ya creada (HU-10.6).
+//
+// El receptor es exactamente uno de los dos FKs: `refugioReportadoId` cuando se reseña a un
+// refugio, `usuarioReportadoId` cuando se reseña a una persona (adoptante o quien ofreció
+// hogar de tránsito). El flujo (adopción vs. tránsito) se deriva del `tipoSolicitud` de la
+// solicitud que habilitó la reseña, así no hay un enum que pueda divergir.
+//
+// Un índice PARCIAL único, que Prisma no sabe expresar y vive en la migración
+// `20260927120000_resena_solicitud`, garantiza UNA reseña activa por autor y solicitud:
+// `resena_solicitud_autor_activo_uq` único (solicitud_id, resena_usuario_autor)
+// WHERE resena_fecha_baja IS NULL. Las filas sembradas sin solicitud quedan con NULL y no
+// chocan entre sí (Postgres trata cada NULL como distinto).
 model Resena {
   id                 Int     @id @default(autoincrement()) @map("resena_id")
   puntuacion         Int     @map("resena_puntuacion")
@@ -575,6 +714,7 @@ model Resena {
   usuarioAutorId     Int     @map("resena_usuario_autor")
   refugioReportadoId Int?    @map("refugio_reportado_id")
   usuarioReportadoId Int?    @map("usuario_reportado_id")
+  solicitudId        Int?    @map("solicitud_id")
 
   usuarioAlta         Int       @map("resena_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("resena_fecha_alta")
@@ -583,10 +723,12 @@ model Resena {
   usuarioBaja         Int?      @map("resena_usuario_baja")
   fechaBaja           DateTime? @map("resena_fecha_baja")
 
-  autor            Usuario  @relation("ResenaAutor", fields: [usuarioAutorId], references: [id])
-  refugioReportado Refugio? @relation("ResenaReportado", fields: [refugioReportadoId], references: [id])
-  usuarioReportado Usuario? @relation("ResenaReportado", fields: [usuarioReportadoId], references: [id])
+  autor            Usuario    @relation("ResenaAutor", fields: [usuarioAutorId], references: [id])
+  refugioReportado Refugio?   @relation("ResenaReportado", fields: [refugioReportadoId], references: [id])
+  usuarioReportado Usuario?   @relation("ResenaReportado", fields: [usuarioReportadoId], references: [id])
+  solicitud        Solicitud? @relation(fields: [solicitudId], references: [id])
 
+  @@index([solicitudId])
   @@map("resena")
 }
 
@@ -610,12 +752,18 @@ model Chat {
   tipo      String? @map("chat_tipo") // valores sin confirmar — ver nota en MODELO_DATOS.md
   refugioId Int?    @map("refugio_id")
 
+  // Solicitud que habilitó la sala (CONSTITUTION §7: no hay chat sin interacción previa).
+  // Nullable: las salas de coordinación por mascota perdida (HU-13.2) y las anteriores a
+  // esta HU no salen de una solicitud.
+  solicitudId Int? @map("solicitud_id")
+
   usuarioAlta Int       @map("chat_usuario_alta")
   fechaAlta   DateTime  @default(now()) @map("chat_fecha_alta")
   usuarioBaja Int?      @map("chat_usuario_baja")
   fechaBaja   DateTime? @map("chat_fecha_baja")
 
-  refugio Refugio? @relation(fields: [refugioId], references: [id])
+  refugio   Refugio?   @relation(fields: [refugioId], references: [id])
+  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
 
   participantes UsuarioChat[]
   mensajes      Mensaje[]
@@ -633,6 +781,16 @@ model UsuarioChat {
   id        Int @id @default(autoincrement()) @map("usuario_chat_id")
   chatId    Int @map("chat_id")
   usuarioId Int @map("usuario_id")
+
+  // Hasta qué momento este participante tiene la sala leída y entregada. Un mensaje ajeno
+  // cuenta como no leído si su `mensaje_fecha_alta` es posterior a `ultima_lectura`.
+  //
+  // Van acá y no en `Mensaje` porque el estado es POR PARTICIPANTE: `mensaje_leido` es un
+  // booleano único por mensaje, sin dueño, y con tres o más personas en la sala el primero
+  // que abre le baja el badge al resto. Además es una sola escritura por sala abierta en
+  // lugar de un UPDATE masivo sobre `mensaje`. Nullable: nunca leyó ni recibió nada.
+  ultimaLectura DateTime? @map("usuario_chat_ultima_lectura")
+  ultimaEntrega DateTime? @map("usuario_chat_ultima_entrega")
 
   usuarioAlta         Int       @map("usuario_chat_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("usuario_chat_fecha_alta")
@@ -664,19 +822,37 @@ model UsuarioChat {
 // dos (los no leídos de alguien son los mensajes que no emitió él), pero NO soportaría un
 // chat grupal. Ver "Pendientes" en docs/api-chats.md.
 model Mensaje {
-  id        Int     @id @default(autoincrement()) @map("mensaje_id")
-  contenido String  @map("mensaje_contenido")
-  leido     Boolean @default(false) @map("mensaje_leido")
-  imagenUrl String? @map("mensaje_imagen_url")
-  chatId    Int     @map("chat_id")
-  usuarioId Int     @map("usuario_id")
+  id        Int    @id @default(autoincrement()) @map("mensaje_id")
+  contenido String @map("mensaje_contenido")
+
+  // OBSOLETO desde HU-5.2 (brechas de chat): lo reemplazan usuario_chat_ultima_lectura y
+  // usuario_chat_ultima_entrega, que son POR PARTICIPANTE. Se mantiene poblado para no
+  // romper lecturas viejas, pero nada del código lo consulta.
+  leido Boolean @default(false) @map("mensaje_leido")
+
+  // Primera imagen del mensaje, desnormalizada: la usa el preview del listado (HU-5.1) sin
+  // tener que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`.
+  imagenUrl String?  @map("mensaje_imagen_url")
+  imagenes  String[] @map("mensaje_imagenes")
+
+  tipo TipoMensaje @default(TEXTO) @map("mensaje_tipo")
+
+  // Sólo en los mensajes de tipo SOLICITUD: la tarjeta que se pinta en la sala.
+  solicitudId Int? @map("solicitud_id")
+
+  chatId    Int @map("chat_id")
+  usuarioId Int @map("usuario_id")
 
   usuarioAlta Int      @map("mensaje_usuario_alta")
   fechaAlta   DateTime @default(now()) @map("mensaje_fecha_alta")
 
-  chat    Chat    @relation(fields: [chatId], references: [id])
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  chat      Chat       @relation(fields: [chatId], references: [id])
+  usuario   Usuario    @relation(fields: [usuarioId], references: [id])
+  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
 
+  // Conteo de no leídos con el modelo nuevo: "mensajes de la sala que no emití yo y son
+  // posteriores a mi última lectura". Los índices parciales de HU-5.1 siguen en SQL a mano.
+  @@index([chatId, usuarioId, fechaAlta])
   @@map("mensaje")
 }
 
@@ -715,7 +891,7 @@ model Hogar {
   /// "Balcon" | "Patio" | "Jardin" | "Ninguno" (GUI-7.1.1 paso 2).
   espacioExterior String? @map("hogar_espacio_exterior")
 
-  tieneMascotas Boolean @default(false) @map("hogar_tiene_mascotas")
+  tieneMascotas   Boolean @default(false) @map("hogar_tiene_mascotas")
   /// Texto libre que solo se pide cuando `tieneMascotas` es verdadero.
   detalleMascotas String? @map("hogar_detalle_mascotas")
 
@@ -797,15 +973,57 @@ model Donacion {
 
 // ─────────────── MASCOTAS PERDIDAS Y ENCONTRADAS ───────────────
 
+// Aviso de un animal perdido o encontrado (spec 020, HU-13.1).
+//
+// `nombre`, el lugar y `especieId` no vienen del diagrama de clases: los pide la HU (el nombre
+// de hasta 30 caracteres y los filtros por localidad y especie). Son nullables en base, igual
+// que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la impone el DTO y el
+// servicio: así no invalidan los avisos cargados antes y no bloquean otros flujos.
+//
+// - `nombre`: obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar, porque
+//   quien encuentra un animal no sabe cómo se llama.
+// - `provincia`, `localidad` y `referencia`: dónde se perdió o se encontró, con el mismo
+//   criterio que la dirección del perfil (Módulo 11): provincia y localidad salen del catálogo
+//   de georef del cliente (`constants/Provincias.ts`) y se guardan como texto; `referencia` es
+//   el aclaratorio libre y opcional ("cerca de la plaza Italia").
+// - `lugarLatitud`/`lugarLongitud`: el lugar geocodificado con `node-geocoder` al publicar
+//   (shared/geocoding.ts). Son las que se exponen (distancia, link a Google Maps). Nulas si el
+//   geocoder no encontró nada.
+// - `especieId`: FK directa y no derivada de `mascotaId` → raza → especie, porque un animal
+//   encontrado no tiene Mascota asociada.
+// - `fechaSuceso`: el día en que se perdió o se encontró, que no tiene por qué ser el día en
+//   que se publicó el aviso (`fechaAlta`). Lo pide el campo "Fecha" del formulario (pantalla
+//   26 del diseño). Sólo el día, sin hora, igual que `mascota_fecha_nacimiento`.
+// - `imagenes`: hasta 5 fotos, y el orden del array ES el de la galería del detalle. Mismo par
+//   que `publicacion_imagenes`: `imagenUrl` se mantiene con la PRIMERA, que es la portada de
+//   la tarjeta del portal.
+//
+// `latitud`/`longitud` NO son la ubicación del animal: son las coordenadas del dispositivo al
+// momento de reportar (MODELO_DATOS.md). NUNCA se exponen: dicen dónde estaba quien reportó.
+// Sólo se usan para el filtro por cercanía de los avisos cuyo lugar no se pudo geocodificar.
+//
+// Además del índice de abajo, la tabla tiene un índice PARCIAL que Prisma no sabe expresar y
+// vive en `migrations/20260929120000_hu131_animal_perdido_nombre_ubicacion_especie`:
+// `animal_perdido_listado_idx` — (fecha_alta DESC, animal_perdido_id DESC) WHERE fecha_baja
+// IS NULL, que sostiene el orden y el cursor del portal.
 model AnimalPerdido {
   id                    Int       @id @default(autoincrement()) @map("animal_perdido_id")
+  nombre                String?   @map("animal_perdido_nombre")
   descripcion           String    @map("animal_perdido_descripcion")
   imagenUrl             String    @map("animal_perdido_imagen_url")
+  imagenes              String[]  @map("animal_perdido_imagenes")
+  provincia             String?   @map("animal_perdido_provincia")
+  localidad             String?   @map("animal_perdido_localidad")
+  referencia            String?   @map("animal_perdido_referencia")
+  lugarLatitud          Float?    @map("animal_perdido_lugar_latitud")
+  lugarLongitud         Float?    @map("animal_perdido_lugar_longitud")
+  fechaSuceso           DateTime? @map("animal_perdido_fecha_suceso")
   latitud               Float     @map("animal_perdido_latitud")
   longitud              Float     @map("animal_perdido_longitud")
   fechaResuelto         DateTime? @map("animal_perdido_fecha_resuelto")
   usuarioReportanteId   Int       @map("usuario_reportante_id")
   mascotaId             Int?      @map("mascota_id")
+  especieId             Int?      @map("especie_id")
   estadoAnimalPerdidoId Int       @map("estado_animal_perdido_id")
 
   usuarioAlta         Int       @map("animal_perdido_usuario_alta")
@@ -817,21 +1035,45 @@ model AnimalPerdido {
 
   usuarioReportante   Usuario             @relation(fields: [usuarioReportanteId], references: [id])
   mascota             Mascota?            @relation(fields: [mascotaId], references: [id])
+  especie             Especie?            @relation(fields: [especieId], references: [id])
   estadoAnimalPerdido EstadoAnimalPerdido @relation(fields: [estadoAnimalPerdidoId], references: [id])
 
+  @@index([especieId])
+  // Filtro por provincia y localidad del portal.
+  @@index([provincia, localidad])
   @@map("animal_perdido")
 }
 
-// ─────────────── MODERACIÓN Y REPORTES ───────────────
-// Sin FKs por ahora (así quedó en MODELO_DATOS.md) — pendiente de confirmar antes de Fase 9
-// del ROADMAP (ver "Entidades cuya existencia formal hay que confirmar" en el doc).
+// ─────────────── MODERACIÓN Y REPORTES (spec 008) ───────────────
+
+// Qué se reporta (HU-3.1 a HU-3.3). Enum de Prisma y no tabla de catálogo: el service ramifica
+// por el valor (cómo se resuelve y valida cada objeto). Agregar un tipo es un valor nuevo acá
+// (`ALTER TYPE ... ADD VALUE`) más su resolver en `reportes.service.ts`.
+enum TipoReporte {
+  PUBLICACION
+  USUARIO
+  REFUGIO
+  RESENA
+  ANIMAL_PERDIDO
+  CAMPANIA
+  MENSAJE
+
+  @@map("tipo_reporte")
+}
+
+// `objeto_id` apunta al id de la tabla que indica `tipo`, SIN FK: es polimórfico. No queda
+// colgado porque nada se borra físicamente (regla transversal 1). Reportante = `usuario_alta`.
+// Índice único parcial `reporte_problema_pendiente_uq` (migración): un solo reporte pendiente
+// por (reportante, tipo, objeto).
 
 model ReporteProblema {
-  id             Int     @id @default(autoincrement()) @map("reporte_problema_id")
-  motivo         String  @map("reporte_problema_motivo")
-  respuesta      String? @map("reporte_problema_respuesta")
-  resuelto       Boolean @default(false) @map("reporte_problema_resuelto")
-  mensajeSistema String? @map("reporte_problema_mensaje_sistema")
+  id             Int         @id @default(autoincrement()) @map("reporte_problema_id")
+  motivo         String      @map("reporte_problema_motivo")
+  respuesta      String?     @map("reporte_problema_respuesta")
+  resuelto       Boolean     @default(false) @map("reporte_problema_resuelto")
+  mensajeSistema String?     @map("reporte_problema_mensaje_sistema")
+  tipo           TipoReporte @map("reporte_problema_tipo")
+  objetoId       Int         @map("reporte_problema_objeto_id")
 
   usuarioAlta         Int       @map("reporte_problema_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("reporte_problema_fecha_alta")
@@ -840,7 +1082,65 @@ model ReporteProblema {
   usuarioBaja         Int?      @map("reporte_problema_usuario_baja")
   fechaBaja           DateTime? @map("reporte_problema_fecha_baja")
 
+  @@index([tipo, objetoId])
   @@map("reporte_problema")
+}
+
+// ─────────────── SOPORTE (spec 015) ───────────────
+
+// Formulario de contacto público (HU-15.2). Sin sesión, así que usuario_alta = SISTEMA.
+model ConsultaSoporte {
+  id             Int     @id @default(autoincrement()) @map("consulta_soporte_id")
+  nombreCompleto String  @map("consulta_soporte_nombre_completo")
+  email          String  @map("consulta_soporte_email")
+  asunto         String  @map("consulta_soporte_asunto")
+  mensaje        String  @map("consulta_soporte_mensaje")
+  resuelta       Boolean @default(false) @map("consulta_soporte_resuelta")
+
+  usuarioAlta         Int       @map("consulta_soporte_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("consulta_soporte_fecha_alta")
+  usuarioModificacion Int?      @map("consulta_soporte_usuario_modificacion")
+  fechaModificacion   DateTime? @map("consulta_soporte_fecha_modificacion")
+  usuarioBaja         Int?      @map("consulta_soporte_usuario_baja")
+  fechaBaja           DateTime? @map("consulta_soporte_fecha_baja")
+
+  @@map("consulta_soporte")
+}
+
+model FaqCategoria {
+  id          Int     @id @default(autoincrement()) @map("faq_categoria_id")
+  nombre      String  @map("faq_categoria_nombre")
+  descripcion String? @map("faq_categoria_descripcion")
+
+  usuarioAlta         Int       @map("faq_categoria_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("faq_categoria_fecha_alta")
+  usuarioModificacion Int?      @map("faq_categoria_usuario_modificacion")
+  fechaModificacion   DateTime? @map("faq_categoria_fecha_modificacion")
+  usuarioBaja         Int?      @map("faq_categoria_usuario_baja")
+  fechaBaja           DateTime? @map("faq_categoria_fecha_baja")
+
+  faqs Faq[]
+
+  @@map("faq_categoria")
+}
+
+model Faq {
+  id             Int    @id @default(autoincrement()) @map("faq_id")
+  pregunta       String @map("faq_pregunta")
+  respuesta      String @map("faq_respuesta")
+  orden          Int    @map("faq_orden")
+  faqCategoriaId Int    @map("faq_categoria_id")
+
+  usuarioAlta         Int       @map("faq_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("faq_fecha_alta")
+  usuarioModificacion Int?      @map("faq_usuario_modificacion")
+  fechaModificacion   DateTime? @map("faq_fecha_modificacion")
+  usuarioBaja         Int?      @map("faq_usuario_baja")
+  fechaBaja           DateTime? @map("faq_fecha_baja")
+
+  faqCategoria FaqCategoria @relation(fields: [faqCategoriaId], references: [id])
+
+  @@map("faq")
 }
 
 // El log de auditoría de CONSTITUTION.md §4 ("Operaciones críticas registran entrada en

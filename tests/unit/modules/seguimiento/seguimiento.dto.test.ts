@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { subirActualizacionSchema } from '../../../../src/modules/seguimiento/seguimiento.dto';
+import {
+  enviarPreguntaSchema,
+  subirActualizacionSchema,
+} from '../../../../src/modules/seguimiento/seguimiento.dto';
 import { LIMITES } from '../../../../src/shared/validation/limits';
 
 /** Los mensajes de HU-9.1 son texto literal de la consigna: si cambian, cambia la evaluación. */
@@ -30,5 +33,16 @@ describe('subirActualizacionSchema (HU-9.1)', () => {
     const resultado = subirActualizacionSchema.parse({ descripcion: '  Come bien  ' });
 
     expect(resultado.descripcion).toBe('Come bien');
+  });
+});
+
+describe('enviarPreguntaSchema (spec 011 §6.11)', () => {
+  it('exige la pregunta y respeta sus límites', () => {
+    const { min, max } = LIMITES.seguimiento.pregunta;
+
+    expect(enviarPreguntaSchema.safeParse({ texto: '  ' }).success).toBe(false);
+    expect(enviarPreguntaSchema.safeParse({ texto: 'a'.repeat(min - 1) }).success).toBe(false);
+    expect(enviarPreguntaSchema.safeParse({ texto: 'a'.repeat(max + 1) }).success).toBe(false);
+    expect(enviarPreguntaSchema.parse({ texto: ' ¿Duerme bien? ' }).texto).toBe('¿Duerme bien?');
   });
 });

@@ -193,6 +193,7 @@ Solicitud de un refugio/adoptante ajeno (`404`, indistinguible de "no existe" pa
 
 ## 9. Notas y decisiones
 
+- 2026-09-29: **`GET /favoritos` suma `refugio: { id, nombre } | null`** en cada tarjeta (`null` si la mascota es de un adoptante particular). Lo pide el rediseño de la pantalla de Inicio del adoptante, que muestra en el carrusel de favoritos de qué refugio es cada mascota ("1 año · Refugio Esperanza"). Es un campo agregado: los clientes que no lo leen no cambian.
 - 2026-09-09: HU-7.1 y HU-7.3 implementadas, backend y mobile. Decisiones que quedaron:
   - **Un hogar vigente por usuario** en vez de uno por solicitud (§3). Discutido y confirmado: la alternativa habilitaba declarar dos casas distintas a la vez y dejaba ambiguo a qué hogar se refiere el seguimiento post-adopción. El razonamiento completo, en §3.
   - **El período de tránsito va en `Solicitud`**, no en `Hogar`: es de esa solicitud, y `hogar_inicio_disponibilidad`/`fin_disponibilidad` se pisarían entre dos tránsitos.

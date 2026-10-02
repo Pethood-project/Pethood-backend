@@ -1,0 +1,253 @@
+{
+  "info": {
+    "name": "PETHOOD - PRU-08 y PRU-09",
+    "description": "Evidencia de pruebas de control de acceso.\n\nPRU-08: el Refugio no puede exportar reportes del Administrador.\nPRU-09: el Adoptante no puede editar una mascota del Refugio.\n\nEjecutar las carpetas en orden (de arriba hacia abajo). Los tokens y el id de Max se guardan solos en las variables de la colección.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api/v1" },
+    { "key": "password", "value": "Pethood123" },
+    { "key": "tokenAdmin", "value": "" },
+    { "key": "tokenRefugio", "value": "" },
+    { "key": "tokenAdoptante", "value": "" },
+    { "key": "idMascotaMax", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0 - Logins",
+      "item": [
+        {
+          "name": "Login Refugio (refugio@pethood.test)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login OK (200)', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('tokenRefugio', body.token);",
+                  "pm.test('Rol MIEMBRO_REFUGIO, sin ADMIN', () => {",
+                  "  pm.expect(body.usuario.roles).to.not.include('ADMIN');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"refugio@pethood.test\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login Administrador (admin@pethood.test)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login OK (200)', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('tokenAdmin', body.token);",
+                  "pm.test('Rol ADMIN', () => pm.expect(body.usuario.roles).to.include('ADMIN'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@pethood.test\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login Adoptante (adoptante@pethood.test)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login OK (200)', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('tokenAdoptante', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"adoptante@pethood.test\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "PRU-08 - Refugio no exporta reportes del Admin",
+      "item": [
+        {
+          "name": "PRU-08 Paso 2 - Exportar usuarios con token del REFUGIO (espera 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Rechazado con 403', () => pm.response.to.have.status(403));",
+                  "const body = pm.response.json();",
+                  "pm.test('Código ROL_NO_AUTORIZADO', () => pm.expect(body.error.codigo).to.eql('ROL_NO_AUTORIZADO'));",
+                  "pm.test('No se generó ningún CSV', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.not.include('text/csv');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tokenRefugio}}" }],
+            "url": "{{baseUrl}}/admin/dashboard/exportar/usuarios"
+          }
+        },
+        {
+          "name": "PRU-08 Paso 6 - Exportar usuarios con token del ADMIN (control, espera 200 + CSV)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Descarga OK (200)', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un CSV', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv');",
+                  "});",
+                  "pm.test('Se descarga como usuarios.csv', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Disposition')).to.include('usuarios');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tokenAdmin}}" }],
+            "url": "{{baseUrl}}/admin/dashboard/exportar/usuarios"
+          }
+        }
+      ]
+    },
+    {
+      "name": "PRU-09 - Adoptante no edita mascota del Refugio",
+      "item": [
+        {
+          "name": "PRU-09 Paso 1 - Obtener id de Max (listado del refugio)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Listado OK (200)', () => pm.response.to.have.status(200));",
+                  "const max = pm.response.json().find(m => m.nombre === 'Max');",
+                  "pm.test('Max existe en el refugio', () => pm.expect(max).to.exist);",
+                  "pm.collectionVariables.set('idMascotaMax', max.id);",
+                  "console.log('idMascotaMax =', max.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tokenRefugio}}" }],
+            "url": "{{baseUrl}}/mascotas/mias"
+          }
+        },
+        {
+          "name": "PRU-09 Paso 4 - PATCH Max con token del ADOPTANTE (espera 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Rechazado con 403', () => pm.response.to.have.status(403));",
+                  "const body = pm.response.json();",
+                  "pm.test('Código NO_AUTORIZADO', () => pm.expect(body.error.codigo).to.eql('NO_AUTORIZADO'));",
+                  "pm.test('Mensaje: Esa mascota no es tuya', () => pm.expect(body.error.mensaje).to.eql('Esa mascota no es tuya'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{tokenAdoptante}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"MaxHackeado\"\n}" },
+            "url": "{{baseUrl}}/mascotas/{{idMascotaMax}}"
+          }
+        },
+        {
+          "name": "PRU-09 Paso 6 - Consultar Max en el backend (sigue intacto)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Consulta OK (200)', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('El nombre sigue siendo Max', () => pm.expect(body.nombre).to.eql('Max'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{tokenRefugio}}" }],
+            "url": "{{baseUrl}}/mascotas/{{idMascotaMax}}"
+          }
+        },
+        {
+          "name": "PRU-09 Paso 8 - PATCH Max con token del REFUGIO (control, espera 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Modificación aplicada (200)', () => pm.response.to.have.status(200));",
+                  "pm.test('El peso quedó en 31', () => pm.expect(Number(pm.response.json().peso)).to.eql(31));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{tokenRefugio}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"peso\": 31\n}" },
+            "url": "{{baseUrl}}/mascotas/{{idMascotaMax}}"
+          }
+        }
+      ]
+    }
+  ]
+}

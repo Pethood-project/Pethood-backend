@@ -6,12 +6,18 @@
  * "Quien publicó la mascota" no es siempre un refugio: un adoptante particular también
  * puede ofrecer una mascota propia en adopción (`mascotas.dto.ts`, actor ADOPTANTE +
  * destino ADOPCION). Por eso la autorización se resuelve por actor, no por rol:
- * - mascota de un refugio (`refugioId` no nulo) -> cualquier miembro de ESE refugio,
- *   igual criterio que `mascotas.repository.listarPorAmbito` y el dashboard de refugio.
- * - mascota personal (`refugioId` nulo) -> solo quien la publicó.
+ * - mascota de un refugio (`refugioId` no nulo) -> cualquier miembro de ESE refugio, desde
+ *   la vista de refugio; igual criterio que `mascotas.repository.listarPorAmbito` y el
+ *   dashboard de refugio.
+ * - mascota personal (`refugioId` nulo) -> solo quien la publicó, desde su perfil personal.
+ *
+ * Solicitar (y ver lo solicitado) es siempre del perfil personal: desde la vista de refugio
+ * no se adopta. Ver `shared/ambito.ts`.
  */
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
+import * as chats from '../chats/chats.service';
+import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import type {
@@ -30,24 +36,22 @@ import type {
 } from './solicitudes.dto';
 import * as repo from './solicitudes.repository';
 
-type Actor = { id: number; refugioId: number | null };
+type Actor = { id: number; refugioId: number | null; ambito: Ambito };
 type SolicitudConDetalle = NonNullable<Awaited<ReturnType<typeof repo.buscarConDetalle>>>;
 type MascotaDeSolicitud = SolicitudConDetalle['publicacion']['mascota'];
 
-async function resolverActor(usuarioId: number): Promise<Actor> {
+async function resolverActor(usuarioId: number, ambito: Ambito): Promise<Actor> {
   const usuario = await repo.buscarUsuarioConRefugio(usuarioId);
 
   if (!usuario) {
     throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
   }
 
-  return { id: usuario.id, refugioId: usuario.refugioId };
+  return { id: usuario.id, refugioId: usuario.refugioId, ambito };
 }
 
 function esPropiaDelActor(mascota: MascotaDeSolicitud, actor: Actor): boolean {
-  return mascota.refugioId !== null
-    ? mascota.refugioId === actor.refugioId
-    : mascota.usuarioId === actor.id;
+  return esMascotaDelAmbito(mascota, actor, actor.ambito);
 }
 
 /**
@@ -77,11 +81,13 @@ const gestionablePor =
 /**
  * El detalle lo ven las dos puntas: quien publicó la mascota (HU-7.5) y el propio
  * solicitante, que necesita seguir el estado de lo que mandó (HU-7.3, GUI "Mi Solicitud").
+ * Lo que mandó lo ve desde su perfil personal, que es desde donde se solicita.
  */
 const visiblePor =
   (actor: Actor) =>
   (solicitud: SolicitudConDetalle): boolean =>
-    solicitud.usuarioId === actor.id || esPropiaDelActor(solicitud.publicacion.mascota, actor);
+    (actor.ambito === 'PERSONAL' && solicitud.usuarioId === actor.id) ||
+    esPropiaDelActor(solicitud.publicacion.mascota, actor);
 
 /**
  * El período va como `AAAA-MM-DD` y no como instante ISO: es un día del calendario, y un
@@ -187,6 +193,11 @@ const ESPACIOS_CON_PATIO = ['Patio', 'Jardin'];
  * decir cosas distintas: los dos caminos leen de acá.
  */
 const BLOQUEOS = {
+  PUBLICACION_PROPIA: {
+    codigo: 'PUBLICACION_PROPIA',
+    mensaje: 'No podés solicitar tu propia mascota',
+    estado: 403,
+  },
   NO_VERIFICADO: {
     codigo: 'USUARIO_NO_VERIFICADO',
     mensaje: 'Tenés que verificarte antes de solicitar una adopción',
@@ -214,6 +225,8 @@ type MotivoBloqueo = keyof typeof BLOQUEOS;
  *
  * `publicacionId` es opcional: sin él solo se evalúa al usuario (sirve para habilitar o
  * no el botón en un listado); con él se agrega la solicitud duplicada.
+ *
+ * Solo se llega desde el perfil personal (la ruta lo exige): el refugio no adopta.
  */
 async function evaluarElegibilidad(
   usuarioId: number,
@@ -231,8 +244,20 @@ async function evaluarElegibilidad(
     ? await repo.buscarVivaDeUsuarioEnPublicacion(usuarioId, publicacionId)
     : null;
 
-  const motivo: MotivoBloqueo | null =
-    FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR && !usuario.verificado
+  // Se resuelve acá (y no solo al crear) para que el botón de la ficha ya nazca oculto o
+  // deshabilitado sobre la propia mascota, en vez de dejar que el usuario complete el
+  // formulario y recién se entere con el 403 del POST. "Propia" incluye lo de su refugio —
+  // ver `shared/ambito.ts`.
+  const publicacion = publicacionId
+    ? await repo.buscarPublicacionParaSolicitar(publicacionId)
+    : null;
+  const esPropia = publicacion
+    ? esMascotaPropia(publicacion.mascota, { id: usuario.id, refugioId: usuario.refugioId })
+    : false;
+
+  const motivo: MotivoBloqueo | null = esPropia
+    ? 'PUBLICACION_PROPIA'
+    : FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR && !usuario.verificado
       ? 'NO_VERIFICADO'
       : abierta
         ? 'YA_SOLICITADA'
@@ -296,6 +321,18 @@ function aDatosHogar(hogar: HogarDto): repo.DatosHogar {
 /** Estado del que sale una mascota que todavía se puede solicitar. */
 const ESTADO_SOLICITABLE = 'Disponible';
 
+/** Solo un aviso activo recibe solicitudes: uno pausado o finalizado está fuera del feed. */
+const ESTADO_PUBLICACION_SOLICITABLE = 'Activa';
+
+/** Tipo de solicitud que, al aprobarse, transfiere la mascota al adoptante (HU-7.4). */
+const TIPO_SOLICITUD_ADOPCION = 'Adopcion';
+
+/**
+ * Comentario que queda en las demás solicitudes "Pendiente" de la publicación cuando una
+ * adopción se aprueba: se rechazan solas porque la mascota ya tiene un hogar.
+ */
+const COMENTARIO_RECHAZO_POR_ADOPCION = 'La mascota fue adoptada por otra persona';
+
 export async function crearSolicitud(
   datos: CrearSolicitudDto,
   usuarioId: number,
@@ -308,14 +345,23 @@ export async function crearSolicitud(
     throw new AppError('NO_ENCONTRADO', 'La publicación no existe', 404);
   }
 
-  // Misma regla que favoritos: sobre la propia mascota no hay nada que solicitar.
-  if (publicacion.mascota.usuarioId === usuarioId) {
-    throw new AppError('PUBLICACION_PROPIA', 'No podés solicitar tu propia mascota', 403);
-  }
+  // La propia (mascota personal o del mismo refugio) ya cortó arriba en
+  // `exigirPuedeSolicitar` con PUBLICACION_PROPIA — mismo criterio que favoritos.
 
   const estadoMascota = publicacion.mascota.historicoEstados[0]?.estadoMascota.nombre;
   if (estadoMascota !== ESTADO_SOLICITABLE) {
     throw new AppError('MASCOTA_NO_DISPONIBLE', 'Esta mascota ya no está disponible', 409);
+  }
+
+  // Desde que la publicación se puede pausar a mano, la mascota puede estar disponible con
+  // el aviso pausado: manda el aviso.
+  const estadoPublicacion = publicacion.historicoEstados[0]?.estadoPublicacion.nombre;
+  if (estadoPublicacion !== ESTADO_PUBLICACION_SOLICITABLE) {
+    throw new AppError(
+      'PUBLICACION_NO_ACTIVA',
+      'Esta publicación no está recibiendo solicitudes en este momento',
+      409,
+    );
   }
 
   const tipo = await repo.buscarTipoSolicitudPorNombre(datos.tipoSolicitud);
@@ -353,6 +399,16 @@ export async function crearSolicitud(
     detalle: `${datos.tipoSolicitud} sobre publicación ${datos.publicacionId}`,
   });
 
+  // CONSTITUTION §7: la solicitud ES la interacción previa que habilita el chat, así que la
+  // sala se abre acá y con la tarjeta del pedido ya adentro.
+  //
+  // No se espera ni se propaga el error: la solicitud está creada y confirmada al usuario;
+  // que la sala no se haya podido abrir no puede convertir eso en un 500. Si falla, el chat
+  // simplemente no existe todavía y se puede abrir en el próximo intento.
+  await chats.asegurarChatDeSolicitud(creada.id).catch((err: unknown) => {
+    console.error('No se pudo abrir el chat de la solicitud', creada.id, err);
+  });
+
   return aDetalleDto(creada);
 }
 
@@ -380,8 +436,12 @@ export async function listarMias(
 function filtrarPorEstadoYFecha<
   T extends { fechaAlta: Date; historicoEstados: { estadoSolicitud: { nombre: string } }[] },
 >(solicitudes: T[], filtros: FiltrosRecibidasDto | FiltrosMiasDto): T[] {
+  // `estado` (uno) y `estados` (varios) se suman; sin ninguno, no se filtra por estado.
+  const estados: string[] = filtros.estado ? [...filtros.estados, filtros.estado] : filtros.estados;
+
   return solicitudes.filter((s) => {
-    if (filtros.estado && s.historicoEstados[0]?.estadoSolicitud.nombre !== filtros.estado) {
+    const vigente = s.historicoEstados[0]?.estadoSolicitud.nombre;
+    if (estados.length > 0 && (vigente === undefined || !estados.includes(vigente))) {
       return false;
     }
     if (filtros.fechaDesde && s.fechaAlta < filtros.fechaDesde) return false;
@@ -393,8 +453,9 @@ function filtrarPorEstadoYFecha<
 export async function obtenerDetalle(
   solicitudId: number,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<SolicitudDetalleDto> {
-  const actor = await resolverActor(usuarioId);
+  const actor = await resolverActor(usuarioId, ambito);
   const solicitud = await exigirSolicitud(solicitudId, visiblePor(actor));
 
   return aDetalleDto(solicitud);
@@ -405,9 +466,10 @@ export async function obtenerDetalle(
 // `repo.listarDelActor`.
 export async function listarRecibidas(
   usuarioId: number,
+  ambito: Ambito,
   filtros: FiltrosRecibidasDto,
 ): Promise<ListaSolicitudesRecibidasDto> {
-  const actor = await resolverActor(usuarioId);
+  const actor = await resolverActor(usuarioId, ambito);
   const todas = await repo.listarDelActor(actor);
   const filtradas = filtrarPorEstadoYFecha(todas, filtros);
 
@@ -420,8 +482,9 @@ export async function resolverSolicitud(
   solicitudId: number,
   datos: ResolverSolicitudDto,
   usuarioId: number,
+  ambito: Ambito,
 ): Promise<SolicitudDetalleDto> {
-  const actor = await resolverActor(usuarioId);
+  const actor = await resolverActor(usuarioId, ambito);
   const solicitud = await exigirSolicitud(solicitudId, gestionablePor(actor));
 
   const vigenteAlLeer = solicitud.historicoEstados[0]!.estadoSolicitud;
@@ -432,6 +495,13 @@ export async function resolverSolicitud(
   const nuevoEstado = await repo.buscarEstadoSolicitudPorNombre(datos.estado);
   if (!nuevoEstado) {
     throw new AppError('ERROR_INTERNO', `Falta el estado "${datos.estado}" en el catálogo`, 500);
+  }
+
+  // Aprobar una solicitud de ADOPCIÓN no es sólo cambiar el estado: hay que darle la mascota
+  // al adoptante. El tránsito es temporal (la mascota vuelve al refugio), así que sólo se
+  // resuelve. Ver `aprobarAdopcion`.
+  if (datos.estado === 'Aprobada' && solicitud.tipoSolicitud.nombre === TIPO_SOLICITUD_ADOPCION) {
+    return aprobarAdopcion(solicitud, nuevoEstado.id, datos.comentario, usuarioId);
   }
 
   // Revalida "Pendiente" atómicamente al escribir: si otro PATCH concurrente ya la
@@ -457,4 +527,103 @@ export async function resolverSolicitud(
   });
 
   return aDetalleDto(actualizada);
+}
+
+/**
+ * Aprobación de una adopción (HU-7.4): resuelve la solicitud, crea la mascota propia del
+ * adoptante, pasa la mascota publicada a "Adoptado", finaliza la publicación y rechaza las
+ * demás solicitudes pendientes — todo en una transacción (`repo.aprobarAdopcion`).
+ */
+async function aprobarAdopcion(
+  solicitud: SolicitudConDetalle,
+  estadoAprobadaId: number,
+  comentario: string | null,
+  usuarioId: number,
+): Promise<SolicitudDetalleDto> {
+  const [estadoRechazada, estadoMascotaAdoptado, estadoPublicacionFinalizada] = await Promise.all([
+    repo.buscarEstadoSolicitudPorNombre('Rechazada'),
+    repo.buscarEstadoMascotaPorNombre('Adoptado'),
+    repo.buscarEstadoPublicacionPorNombre('Finalizada'),
+  ]);
+
+  if (!estadoRechazada || !estadoMascotaAdoptado || !estadoPublicacionFinalizada) {
+    throw new AppError(
+      'ERROR_INTERNO',
+      'Faltan estados en el catálogo para aprobar la adopción',
+      500,
+    );
+  }
+
+  const mascota = solicitud.publicacion.mascota;
+
+  const resultado = await repo.aprobarAdopcion(solicitud.id, usuarioId, {
+    estadoAprobadaId,
+    estadoRechazadaId: estadoRechazada.id,
+    estadoMascotaAdoptadoId: estadoMascotaAdoptado.id,
+    estadoPublicacionFinalizadaId: estadoPublicacionFinalizada.id,
+    comentario,
+    comentarioRechazo: COMENTARIO_RECHAZO_POR_ADOPCION,
+    publicacionId: solicitud.publicacionId,
+    mascotaOrigenId: mascota.id,
+    mascotaOrigen: {
+      nombre: mascota.nombre,
+      fechaNacimiento: mascota.fechaNacimiento,
+      genero: mascota.genero,
+      peso: mascota.peso,
+      tamanio: mascota.tamanio,
+      castrado: mascota.castrado,
+      descripcion: mascota.descripcion,
+      imagenUrl: mascota.imagenUrl,
+      razaId: mascota.razaId,
+    },
+    adoptanteId: solicitud.usuarioId,
+  });
+
+  if (!resultado) {
+    throw new AppError('SOLICITUD_YA_RESUELTA', 'Esta solicitud ya fue resuelta', 409);
+  }
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'APROBAR',
+    entidad: 'Solicitud',
+    entidadId: solicitud.id,
+    detalle: `Pendiente -> Aprobada (adopción, mascota ${mascota.id} -> usuario ${solicitud.usuarioId})`,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CREAR',
+    entidad: 'Mascota',
+    entidadId: resultado.mascotaAdoptadaId,
+    detalle: `adoptada por usuario ${solicitud.usuarioId} (solicitud ${solicitud.id})`,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Mascota',
+    entidadId: mascota.id,
+    detalle: 'Adoptado (adopción aprobada)',
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Publicacion',
+    entidadId: solicitud.publicacionId,
+    detalle: 'Finalizada (adopción aprobada)',
+  });
+
+  for (const rechazadaId of resultado.solicitudesRechazadas) {
+    await registrarAuditoria({
+      usuarioId,
+      accion: 'RECHAZAR',
+      entidad: 'Solicitud',
+      entidadId: rechazadaId,
+      detalle: 'Rechazada al aprobarse otra solicitud de la misma publicación',
+    });
+  }
+
+  return aDetalleDto(resultado.solicitud);
 }

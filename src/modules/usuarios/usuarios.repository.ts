@@ -2,15 +2,22 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { AppError } from '../../middlewares/errorHandler';
+import type { Ambito } from '../../shared/ambito';
 
 const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'] as const;
 
 const includePerfil = {
   estado: true,
   roles: { include: { rol: true } },
+  // Mismo dato que devuelve el login: si no viniera acá, refrescar el perfil lo borraría de
+  // la sesión (y el encabezado de Chats se quedaría sin el nombre del refugio).
+  refugio: {
+    select: { id: true, nombre: true, fechaBaja: true, estado: { select: { nombre: true } } },
+  },
   _count: {
     select: {
-      mascotas: { where: { fechaBaja: null } },
+      // Las mascotas no se cuentan acá: dependen del perfil con el que se mira (personal o
+      // refugio), ver `contarMascotasDelAmbito`.
       // El filtro por `mascota` no es opcional: tiene que dar el mismo número que
       // `GET /favoritos`, que descarta las mascotas dadas de baja. Sin él, al eliminarse
       // una mascota guardada el perfil muestra "5" y GUI-12 lista 4.
@@ -26,7 +33,15 @@ export interface DatosActualizarPerfil {
   apellido: string;
   email: string;
   telefono: string;
-  ubicacion: string;
+  provincia: string | null;
+  localidad: string | null;
+  calleAltura: string | null;
+  // Opcionales: si no se geocodificó una dirección nueva, no se tocan (así no se borra un
+  // link de Maps cargado a mano).
+  mapaUrl?: string;
+  latitud?: number;
+  longitud?: number;
+  ubicacionVerificada?: boolean;
   imagenUrl?: string;
 }
 
@@ -46,6 +61,22 @@ export async function buscarPerfil(usuarioId: number): Promise<UsuarioPerfil | n
     where: { id: usuarioId, fechaBaja: null },
     include: includePerfil,
   });
+}
+
+/**
+ * Mismo criterio que `GET /mascotas/mias` para el perfil pedido (ver `shared/ambito.ts`),
+ * para que el contador de Mi Perfil no pueda discrepar del listado.
+ */
+export function contarMascotasDelAmbito(
+  usuario: { id: number; refugioId: number | null },
+  ambito: Ambito,
+): Promise<number> {
+  const where: Prisma.MascotaWhereInput =
+    ambito === 'REFUGIO'
+      ? { fechaBaja: null, refugioId: usuario.refugioId ?? -1 }
+      : { fechaBaja: null, usuarioId: usuario.id, refugioId: null };
+
+  return prisma.mascota.count({ where });
 }
 
 export async function buscarPorEmail(email: string): Promise<{ id: number } | null> {
@@ -75,7 +106,19 @@ export async function actualizarPerfil(
         apellido: datos.apellido,
         email: datos.email,
         telefono: datos.telefono,
-        ubicacion: datos.ubicacion,
+        provincia: datos.provincia,
+        localidad: datos.localidad,
+        calleAltura: datos.calleAltura,
+        ...(datos.mapaUrl !== undefined
+          ? {
+              mapaUrl: datos.mapaUrl,
+              latitud: datos.latitud ?? null,
+              longitud: datos.longitud ?? null,
+            }
+          : {}),
+        ...(datos.ubicacionVerificada !== undefined
+          ? { ubicacionVerificada: datos.ubicacionVerificada }
+          : {}),
         ...(datos.imagenUrl ? { imagenUrl: datos.imagenUrl } : {}),
         ...datosModificacion(usuarioId),
       },
@@ -84,6 +127,29 @@ export async function actualizarPerfil(
   } catch (error) {
     mapearErrorUnico(error);
   }
+}
+
+export interface DatosUbicacion {
+  mapaUrl: string;
+  latitud: number;
+  longitud: number;
+}
+
+/** Actualiza solo el link del mapa y sus coordenadas, sin tocar el resto del perfil. */
+export async function actualizarUbicacion(
+  usuarioId: number,
+  datos: DatosUbicacion,
+): Promise<UsuarioPerfil> {
+  return prisma.usuario.update({
+    where: { id: usuarioId },
+    data: {
+      ...datos,
+      // El link cargado a mano lo eligió el usuario: queda verificado.
+      ubicacionVerificada: true,
+      ...datosModificacion(usuarioId),
+    },
+    include: includePerfil,
+  });
 }
 
 export async function actualizarContrasena(usuarioId: number, hash: string): Promise<void> {
@@ -193,5 +259,24 @@ export async function darDeBajaCuenta(
       where: { id: usuarioId },
       data: { estadoId: estadoInactivoId, ...baja },
     });
+  });
+}
+
+/** Lo mínimo para el perfil público (spec 023): sin email, teléfono, DNI ni dirección exacta. */
+export function buscarPerfilPublico(id: number) {
+  return prisma.usuario.findFirst({
+    where: { id, fechaBaja: null },
+    select: {
+      id: true,
+      nombre: true,
+      apellido: true,
+      email: true,
+      imagenUrl: true,
+      verificado: true,
+      provincia: true,
+      localidad: true,
+      fechaAlta: true,
+      estado: { select: { nombre: true } },
+    },
   });
 }

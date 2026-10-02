@@ -49,13 +49,28 @@ export function emitirMensajeNuevo(mensaje: MensajeDto, participantesIds: number
 }
 
 /**
- * Avisa a la sala que alguien leyó la conversación (doble check del emisor).
+ * Avisa a la sala que alguien leyó la conversación (doble tilde pintado del emisor).
  *
  * Va a la sala del chat y no a las personales porque sólo le importa a quien tiene la
  * pantalla abierta: el que no la tiene abierta ve el estado correcto cuando entra.
+ *
+ * `hasta` es la fecha del último mensaje que quedó cubierto: con él, el cliente sabe qué
+ * burbujas pintar sin tener que asumir que la lectura alcanzó a toda la sala.
  */
-export function emitirLeido(chatId: number, usuarioId: number): void {
-  io?.to(salaChat(chatId)).emit(EVENTOS.LEIDO, { chatId, usuarioId });
+export function emitirLeido(chatId: number, usuarioId: number, hasta: string): void {
+  io?.to(salaChat(chatId)).emit(EVENTOS.LEIDO, { chatId, usuarioId, hasta });
+}
+
+/**
+ * Avisa a la sala que a alguien LE LLEGARON los mensajes: el segundo tilde.
+ *
+ * Misma sala y mismo payload que `emitirLeido`, porque es el mismo hecho contado un paso
+ * antes. Se emite aunque el destinatario no tenga la conversación abierta —de eso se trata
+ * la entrega—, pero sólo lo escucha quien está mirando la sala, que es el único que tiene
+ * burbujas que actualizar.
+ */
+export function emitirEntregado(chatId: number, usuarioId: number, hasta: string): void {
+  io?.to(salaChat(chatId)).emit(EVENTOS.ENTREGADO, { chatId, usuarioId, hasta });
 }
 
 /**

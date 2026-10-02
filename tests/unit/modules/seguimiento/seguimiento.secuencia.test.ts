@@ -5,6 +5,7 @@ import {
   elegirPregunta,
   pedidosExigiblesA,
   plazoDeRespuesta,
+  preguntasNoRepetibles,
   programaDeSeguimiento,
   proximoAviso,
   sumarDias,
@@ -141,5 +142,21 @@ describe('elegirPregunta', () => {
 
   it('acota el índice aunque el aleatorio devuelva 1', () => {
     expect(elegirPregunta(PREGUNTAS, [], () => 1)).toEqual({ id: 3 });
+  });
+});
+
+describe('preguntasNoRepetibles', () => {
+  const AHORA = new Date('2026-01-10T12:00:00.000Z');
+  const ANTES = new Date('2026-01-09T12:00:00.000Z');
+  const DESPUES = new Date('2026-01-11T12:00:00.000Z');
+
+  it('bloquea las respondidas y la que espera respuesta; libera las vencidas sin respuesta', () => {
+    const pedidos = [
+      { preguntaSeguimientoId: 1, descripcion: 'Durmió bien', plazo: ANTES },
+      { preguntaSeguimientoId: 2, descripcion: null, plazo: ANTES },
+      { preguntaSeguimientoId: 3, descripcion: null, plazo: DESPUES },
+    ];
+
+    expect(preguntasNoRepetibles(pedidos, AHORA)).toEqual([1, 3]);
   });
 });

@@ -24,6 +24,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 - **Especie** (`especie_id PK`) — ej. Perro, Gato.
 - **Raza** (`raza_id PK`, FK a `especie_id`) — depende de la especie seleccionada (el frontend debe filtrar razas dinámicamente al elegir especie).
 - **Estado_Mascota** (`estado_mascota_id PK`) — valores: Disponible, En_Tratamiento, Adoptado, Fallecido, En_Transito (ver nota de negocio).
+- **Estado_Publicacion** (`estado_publicacion_id PK`) — valores: Activa, Pausada, Finalizada. Es el estado del aviso, no el de la mascota (ver `Publicacion_Estado`). **Agregado fuera del diagrama de clases (2026-09-25)**: pendiente reflejarlo en el diagrama del grupo.
 - **Estado_Usuario** (`estado_usuario_id PK`).
 - **Estado_Refugio** (`estado_refugio_id PK`).
 - **Estado_Solicitud** (`estado_solicitud_id PK`).
@@ -38,7 +39,11 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 
 ### Usuario
 
-`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, `usuario_ubicacion` (nullable — barrio/ciudad del perfil, GUI-15), FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+
+**Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de perfil):** `usuario_provincia`, `usuario_localidad`, `usuario_calle_altura` (texto, nullable — dirección estructurada que carga el usuario), `usuario_mapa_url` (texto, nullable — URL de Google Maps generada al geocodificar), `usuario_latitud` / `usuario_longitud` (`Float`, nullable — coordenadas resultantes) y `usuario_ubicacion_verificada` (boolean — si el usuario confirmó que el link apunta a su dirección). El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Las coordenadas se guardan aparte de la URL para calcular la distancia al refugio con Haversine (`distanciaKm`, `src/shared/geo.ts`) sin parsear el link. La geocodificación la hace `src/shared/geocoding.ts` con `node-geocoder` (proveedor `openstreetmap` por defecto o `google`, ver `GEOCODER_PROVIDER`/`GEOCODER_API_KEY`).
+
+> **Campo eliminado (2026-09-29):** `usuario_ubicacion` (barrio/ciudad, GUI-15). Lo reemplaza la dirección estructurada de arriba.
 
 Relaciones: 1 Usuario → N Mascota, N Publicacion, N Solicitud, N Favorito, N Notificacion, N Hogar, N Reseña (como autor), N Donacion, N Campaña, N Usuario_Chat, N Mensaje, N Rol_Usuario, N Animal_Perdido (como reportante).
 
@@ -48,7 +53,13 @@ Tabla intermedia N:N entre Usuario y Rol. `usuario_id FK NOT NULL`, `rol_id FK N
 
 ### Refugio
 
-`refugio_id PK`, `refugio_nombre`, `refugio_direccion`, `refugio_telefono`, `refugio_email`, `refugio_descripcion`, `refugio_verificado`, `refugio_imagen_url`, FK `estado_id` (→ Estado_Refugio).
+`refugio_id PK`, `refugio_nombre`, `refugio_telefono`, `refugio_email`, `refugio_descripcion`, `refugio_verificado`, `refugio_imagen_url`, FK `estado_id` (→ Estado_Refugio).
+
+**Campo agregado fuera del diagrama de clases (2026-09-28, Módulo 11):** `refugio_mapa_url` (texto, nullable) — enlace a Google Maps del refugio. Se muestra como ícono de ubicación en el detalle de la mascota y, cuando el link incluye coordenadas, alimenta el filtro por cercanía del feed. La extracción de coordenadas la hace `src/shared/geo.ts`: `coordenadasDeMapsUrl` para links completos y `resolverCoordenadasDeMapsUrl` para links cortos (`maps.app.goo.gl`), que sigue la redirección con caché y tope de tiempo.
+
+**Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de refugio):** `refugio_provincia`, `refugio_localidad`, `refugio_calle_altura` (texto, nullable — dirección estructurada), `refugio_latitud` / `refugio_longitud` (`Float`, nullable — coordenadas geocodificadas) y `refugio_ubicacion_verificada` (boolean — si el refugio confirmó que el link apunta a su dirección). `refugio_mapa_url` se genera al geocodificar (`https://www.google.com/maps?q=<lat>,<lng>`) y las coordenadas se persisten para no depender de parsear el link en el camino crítico del feed. El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Misma utilidad que el usuario: `src/shared/geocoding.ts`.
+
+> **Campo eliminado (2026-09-29):** `refugio_direccion` (texto libre). Lo reemplaza la dirección estructurada de arriba.
 
 Relaciones: 1 Refugio → N Campaña, 1 Refugio → N Reseña (como reportado/ `refugio_reportado_id` en Reseña).
 
@@ -74,26 +85,61 @@ Ver catálogos arriba.
 
 ### Publicacion
 
-`publicacion_id PK`, `publicacion_titulo`, `publicacion_descripcion` (máx. 50 caracteres, trim), `publicacion_ubicacion`, `publicacion_requisitos`, `publicacion_imagen_url`, FK `mascota_id FK NOT NULL`, FK `usuario_id FK NOT NULL`.
+`publicacion_id PK`, `publicacion_titulo`, `publicacion_descripcion` (máx. 200 caracteres desde el 2026-09-28, antes 50; trim), `publicacion_ubicacion`, `publicacion_requisitos`, `publicacion_imagen_url`, FK `mascota_id FK NOT NULL`, FK `usuario_id FK NOT NULL`.
 
-**Campos agregados fuera del diagrama de clases (2026-08-13, HU-6.1):** `publicacion_ubicacion` (texto libre ≤50 caracteres con trim, AC-27) y `publicacion_requisitos` (`text[]`, los "Requisitos del adoptante" del tag input de AC-26, cada etiqueta ≤25 caracteres). Los requisitos se modelan como array plano y no como tabla hija porque cada uno es solo una etiqueta de texto libre sin atributos ni ciclo de vida propio. Pendiente: reflejarlos en el diagrama de clases del grupo.
+**Campos agregados fuera del diagrama de clases (2026-08-13, HU-6.1):** `publicacion_ubicacion` (texto libre ≤50 caracteres con trim, AC-27) y `publicacion_requisitos` (`text[]`, los "Requisitos del adoptante" del tag input de AC-26, cada etiqueta ≤20 caracteres desde el 2026-09-28; antes ≤25). Los requisitos se modelan como array plano y no como tabla hija porque cada uno es solo una etiqueta de texto libre sin atributos ni ciclo de vida propio. Pendiente: reflejarlos en el diagrama de clases del grupo.
 
 **Campos agregados por el diseño de GUI-24 (2026-08-17):** tampoco están en el diagrama de clases.
 
 | Campo | Tipo | Para qué |
-|---|---|---|
+| --- | --- | --- |
 | `publicacion_imagenes` | `text[]` | Hasta 5 fotos. **El orden del array es el orden de la galería**: la primera es la portada. `publicacion_imagen_url` se mantiene sincronizado con esa portada para no romper lo que ya lee ese campo. Si no se suben fotos propias, se hereda la de la mascota. |
 | `publicacion_personalidad` | `text[]` | Rasgos elegidos como pastillas (≤25 caracteres cada uno). Hoy las opciones están fijas en el frontend; cuando se definan, deberían pasar a ser un catálogo como Especie o Raza. |
 | `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
-| `publicacion_vacunas` | `text` | Texto libre ≤200. **Provisional**: el diseño muestra pastillas por vacuna (Rabia, Parvovirus, Moquillo, Triple) y conceptualmente esto pertenece a `Historia_Clinica` (Módulo 8, Fase 6). Se guarda como texto hasta que ese módulo exista. |
 
-**A revisar con el equipo:** los datos de salud (desparasitado, vacunas) viven hoy en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`. Cuando se implemente la Fase 6, evaluar migrarlos.
+**Vacunas (2026-09-27, spec 019):** `publicacion_vacunas` (texto libre) se eliminó. Las vacunas son de la mascota y viven en `Historia_Clinica` (`historia_clinica_tipo_vacuna`); la publicación las muestra leyéndolas de ahí.
+
+**Campos agregados por el Módulo 11 (2026-09-27, HU-11.3):**
+
+| Campo | Tipo | Para qué |
+| --- | --- | --- |
+| `publicacion_ubicacion_latitud` | `Decimal(9,6)` nullable | Coordenada capturada con el GPS al publicar. Habilita el filtro por cercanía del feed. |
+| `publicacion_ubicacion_longitud` | `Decimal(9,6)` nullable | Ídem. |
+
+Ambos son nullable: las publicaciones anteriores no las tienen. Cuando faltan, la publicación se sigue pudiendo ubicar por `publicacion_ubicacion` (texto libre), pero no entra en el filtro por distancia. Se agregaron fuera del diagrama de clases; pendiente reflejarlos. La decisión de solicitar GPS (contra el criterio original de "no GPS") es del equipo — ver `DEUDA_TECNICA.md`.
+
+**A revisar con el equipo:** `publicacion_desparasitado` sigue en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`, como pasó con las vacunas.
 
 **Pendiente de definición:** `publicacion_titulo` es NOT NULL en el schema, pero el formulario de GUI-24 (AC-25 a AC-28) no pide un título — solo descripción, requisitos y ubicación. Confirmar con el equipo si el título se deriva del nombre de la mascota o si falta el campo en la pantalla.
 
 Relaciones: 1 Publicacion → N Solicitud, N Favorito (vía Mascota), 1 Publicacion → N Reseña (visibles en contexto de publicación/solicitud).
 
 Regla de negocio: máximo 5 publicaciones activas simultáneas por adoptante particular (quota anti-spam).
+
+Relaciones de estado: 1 Publicacion → N Publicacion_Estado (histórico; una sola fila vigente).
+
+### Publicacion_Estado
+
+Histórico N:1 de estados de una publicación, mismo patrón que `Mascota_Estado`. `publicacion_estado_id PK`, FK `publicacion_id FK NOT NULL`, FK `estado_publicacion_id FK NOT NULL` + auditoría (alta/baja, sin campo de modificación propio). Cambiar de estado es baja de la fila vigente + alta de una nueva, así queda el historial completo. Un índice único **parcial** (`publicacion_estado_activo_uq`, sólo en la migración) garantiza una sola fila vigente por publicación. **Agregado fuera del diagrama de clases (2026-09-25).**
+
+**Toda publicación nace con estado**, según el de su mascota en ese momento:
+
+| Mascota | Publicación | Efecto |
+| --- | --- | --- |
+| `Disponible` | `Activa` | se ve en el feed y se puede solicitar |
+| `En_Transito`, `En_Tratamiento` | `Pausada` | sigue viva, pero fuera del feed |
+| `Adoptado`, `Fallecido` | `Finalizada` | aviso cerrado |
+
+Después del alta el estado cambia de dos formas (spec 018):
+
+- **Manual**, por quien gestiona la publicación: pausar (Activa → Pausada), reactivar (Pausada → Activa, con la mascota `Disponible` y dentro de la quota) y finalizar (Activa o Pausada → Finalizada).
+- **Automática**, siguiendo a la mascota con la misma tabla, pero **solo para pausar o finalizar**: una mascota que vuelve a `Disponible` no reactiva sola su publicación.
+
+`Finalizada` es terminal: no se edita ni vuelve a cambiar de estado. La mascota sí se puede publicar de nuevo en otra publicación, que reemplaza a la finalizada: al crearla, las finalizadas anteriores de esa mascota se dan de baja (lógica) en la misma transacción. Por eso "la publicación de una mascota" es la **en curso** (Activa o Pausada).
+
+El feed muestra sólo las publicaciones `Activa`, sólo esas reciben solicitudes, y la quota de 5 publicaciones activas cuenta sólo esas. Las publicaciones que existían antes de este cambio recibieron su estado con la misma regla en la migración `20260925125459_estado_publicacion`.
+
+**Pendiente:** eliminar una publicación (baja lógica). Ver `DEUDA_TECNICA.md` ítem 16.
 
 ### Favorito
 
@@ -121,35 +167,49 @@ Ver catálogos. Incluye `tipo_solicitud_secuencia_dias` para parametrizar ventan
 
 `historia_clinica_id PK`, `historia_clinica_fecha_visita`, `historia_clinica_fecha_proxima`, `historia_clinica_requiere_revision`, `historia_clinica_vacunacion`, `historia_clinica_titulo`, `historia_clinica_descripcion`, `historia_clinica_documento_url`, FK `mascota_id FK NOT NULL`.
 
+**Campo agregado fuera del diagrama de clases (2026-09-27, spec 019):** `historia_clinica_tipo_vacuna` (enum `tipo_vacuna`, nullable) — qué vacuna del plan de vacunación se aplicó: `PRIMOVACUNACION`, `MULTIPLE`, `REFUERZO_MULTIPLE`, `TRIVALENTE_FELINA`, `REFUERZO_TRIVALENTE_LEUCEMIA`, `REFUERZO_LEUCEMIA`, `ANTIRRABICA`. Va junto con `historia_clinica_vacunacion = true`; nulo en los registros que no son vacuna. Las vacunas de una mascota (sus medallas) son sus registros vigentes con este campo cargado. Es enum y no catálogo porque el plan es fijo y el código ramifica por tipo (especie que lo admite, color de la medalla). Pendiente: reflejarlo en el diagrama de clases del grupo.
+
 **Regla de negocio crítica: inmutabilidad.** No existe operación de UPDATE sobre un registro de historia clínica ya persistido. "Modificar" = dar de baja lógica del registro erróneo + crear uno nuevo. El campo de fecha de modificación genérico no debería usarse nunca en la práctica para esta entidad (si aparece poblado, es una señal de bug).
 
 ### Seguimiento
 
-`seguimiento_id PK`, `seguimiento_descripcion`, `seguimiento_foto_url`, `seguimiento_plazo`, FK `solicitud_id FK NOT NULL`, FK `pregunta_seguimiento_id FK NOT NULL`.
+`seguimiento_id PK`, `seguimiento_descripcion`, `seguimiento_foto_url`, `seguimiento_plazo`, `seguimiento_es_manual: boolean` (pedido enviado a mano por el refugio, fuera de la secuencia de días), FK `solicitud_id FK NOT NULL`, FK `pregunta_seguimiento_id FK NOT NULL`.
 
 **Regla de negocio crítica: anti-fraude.** La foto de evidencia (`seguimiento_foto_url`) debe originarse exclusivamente desde la API de cámara nativa del dispositivo — el frontend mobile debe bloquear el acceso a la galería para este campo específico.
 
 ### Pregunta_Seguimiento
 
-`pregunta_seguimiento_id PK`, `pregunta_seguimiento_texto`, `pregunta_seguimiento_posicion`, `pregunta_seguimiento_es_adopcion: boolean` (distingue si la pregunta aplica a flujo de adopción o de tránsito).
+`pregunta_seguimiento_id PK`, `pregunta_seguimiento_texto`, `pregunta_seguimiento_posicion`, `pregunta_seguimiento_es_adopcion: boolean` (distingue si la pregunta aplica a flujo de adopción o de tránsito), `pregunta_seguimiento_es_inicial: boolean` (la pregunta fija del primer pedido), FK `solicitud_id` (nullable).
+
+Con `solicitud_id` null la fila es del **catálogo** que se sortea. Con valor, es una pregunta que el refugio escribió para esa solicitud (spec 011 §6.11) y nunca se sortea.
 
 ### Reseña
 
-`reseña_id PK`, `reseña_puntuacion` (1-5), `reseña_comentario`, FK `reseña_usuario_autor FK NOT NULL` (autor), FK `refugio_reportado_id` (nullable), FK `usuario_reportado_id` (nullable).
+`reseña_id PK`, `reseña_puntuacion` (1-5), `reseña_comentario`, FK `reseña_usuario_autor FK NOT NULL` (autor), FK `refugio_reportado_id` (nullable), FK `usuario_reportado_id` (nullable), FK `solicitud_id` (nullable — la transacción que la habilita).
 
-**Nota sobre auditoría:** en el diagrama, Reseña tiene alta y modificación pero **no tiene campos de baja separados visibles como el resto** — sin embargo HU-10.6 ("Dar de baja reseñas") indica que sí soporta baja lógica. Tratarla igual que el resto de entidades con baja lógica estándar. Nunca se edita el contenido de una reseña ya creada (solo alta y baja, sin endpoint de update de contenido).
+**Campo agregado fuera del diagrama de clases (2026-09-27, Módulo 10):** `solicitud_id`. El diagrama solo tenía emisor/receptor, pero HU-10.1 exige que la reseña la habilite una transacción finalizada; sin ese vínculo no hay forma de validar la precondición (que las dos partes hayan cerrado una adopción/tránsito) ni de impedir reseñas entre desconocidos. Es nullable en base por compatibilidad con las reseñas ya sembradas, pero **obligatorio en el DTO** de alta. El flujo reseñado (adoptante→refugio, refugio→adoptante, refugio→hogar de tránsito) se deriva del `tipoSolicitud` de esa solicitud, y el receptor de cuál de los dos FKs (`refugio_reportado_id` o `usuario_reportado_id`) está poblado. Pendiente: reflejarlo en el diagrama de clases del grupo.
+
+**Nota sobre auditoría:** en el diagrama, Reseña tiene alta y modificación pero **no tiene campos de baja separados visibles como el resto** — sin embargo HU-10.6 ("Dar de baja reseñas") indica que sí soporta baja lógica. Tratarla igual que el resto de entidades con baja lógica estándar. Nunca se edita el contenido de una reseña ya creada (solo alta y baja, sin endpoint de update de contenido). Un índice único **parcial** (`resena_solicitud_autor_activo_uq`, solo en la migración) garantiza una sola reseña activa por autor y solicitud.
 
 ### Chat
 
-`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto), FK `refugio_id` (nullable)
+`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable).
+
+`solicitud_id` es la solicitud que habilitó la sala (CONSTITUTION §7: no hay chat sin interacción previa). Es nullable porque las salas de coordinación por mascota perdida (HU-13.2) no salen de una solicitud. Un índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL` evita dos salas para la misma solicitud.
 
 ### Usuario_Chat
 
-Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id FK NOT NULL`, `usuario_id FK NOT NULL` + auditoría.
+Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id FK NOT NULL`, `usuario_id FK NOT NULL`, `usuario_chat_ultima_lectura` (nullable), `usuario_chat_ultima_entrega` (nullable) + auditoría.
+
+**Las dos marcas de tiempo son el estado de lectura y entrega de la sala, por participante.** Un mensaje ajeno cuenta como no leído si su `mensaje_fecha_alta` es posterior a `usuario_chat_ultima_lectura`; `ultima_entrega` es el mismo hecho un paso antes (le llegó al dispositivo, no lo abrió). Van acá y no en `Mensaje` porque `mensaje_leido` es un booleano **sin dueño**: con tres o más personas en la sala, el primero que abre le baja el contador al resto. Además es una escritura por sala en lugar de un UPDATE masivo sobre `mensaje`.
 
 ### Mensaje
 
-`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor).
+`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable).
+
+- **`mensaje_leido` quedó obsoleto.** Lo reemplazan las marcas de `Usuario_Chat`. Se sigue poblando para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo.
+- **`mensaje_imagen_url` es la PRIMERA de `mensaje_imagenes`**, desnormalizada para que el preview del listado no tenga que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`. Un mensaje admite hasta 5 fotos (`LIMITES.mensaje.fotos.maximo`).
+- **`mensaje_tipo = SOLICITUD`** es la tarjeta que PetHood inserta en la sala al enviarse una solicitud: la emite el usuario SISTEMA y lleva `solicitud_id`. No es una burbuja de texto y su `mensaje_contenido` va vacío — el texto lo pone la UI.
 
 **Nota de auditoría — excepción:** el mensaje **solo tiene alta**, no baja (consistente con la nota del documento de requisitos: "El mensaje solo va a tener alta, y el chat va a tener alta y baja"). No implementar endpoint de borrado de mensaje individual.
 
@@ -170,7 +230,7 @@ Representa el hogar de tránsito de un usuario/adoptante — no es una entidad d
 **Campos agregados fuera del diagrama de clases (HU-7.1)** — el formulario de solicitud pregunta cosas que el diagrama no contemplaba; ver `REQUISITOS.md` §10:
 
 | Campo | Tipo | Qué responde |
-|---|---|---|
+| --- | --- | --- |
 | `hogar_espacio_exterior` | texto: `Balcon` \| `Patio` \| `Jardin` \| `Ninguno` | "¿Tenés espacios al aire libre?" |
 | `hogar_detalle_mascotas` | texto, nullable | "¿Cuáles?", solo si `hogar_tiene_mascotas` |
 | `hogar_tiene_ninios` | boolean | "¿Vive algún niño en tu casa?" |
@@ -201,9 +261,21 @@ Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
 
 ### Animal_Perdido
 
-`animal_perdido_id PK`, `animal_perdido_descripcion`, `animal_perdido_imagen_url`, `animal_perdido_latitud`, `animal_perdido_longitud`, `animal_perdido_fecha_resuelto`, FK `usuario_reportante_id FK NOT NULL`, FK `mascota_id` (nullable — puede reportarse un animal encontrado que no está registrado como Mascota propia de nadie en el sistema), FK `animal_perdido_estado_animal_perdido FK NOT NULL`.
+`animal_perdido_id PK`, `animal_perdido_nombre` (nullable), `animal_perdido_descripcion`, `animal_perdido_imagen_url`, `animal_perdido_imagenes` (TEXT[]), `animal_perdido_provincia` (nullable), `animal_perdido_localidad` (nullable), `animal_perdido_referencia` (nullable), `animal_perdido_lugar_latitud` (nullable), `animal_perdido_lugar_longitud` (nullable), `animal_perdido_fecha_suceso` (nullable), `animal_perdido_latitud`, `animal_perdido_longitud`, `animal_perdido_fecha_resuelto`, FK `usuario_reportante_id FK NOT NULL`, FK `mascota_id` (nullable — puede reportarse un animal encontrado que no está registrado como Mascota propia de nadie en el sistema), FK `especie_id` (nullable), FK `animal_perdido_estado_animal_perdido FK NOT NULL`.
 
-**Resuelto:** `animal_perdido_latitud` / `animal_perdido_longitud` se mantienen — sí se captura la coordenada al reportar un animal perdido/encontrado (ej. desde el GPS del dispositivo al momento del reporte). Lo que **no existe** es un mapa interactivo en la UI: el usuario busca y visualiza por ubicación administrativa (Provincia/Localidad), no por un mapa con pines. No quitar estos campos del modelo ni reemplazarlos por FK a Provincia/Localidad — conviven ambos: lat/long como dato del reporte, Provincia/Localidad como criterio de filtro para el usuario.
+**Campos agregados fuera del diagrama de clases (2026-09-29 y 2026-09-30, HU-13.1, spec 020):** `animal_perdido_nombre`, las columnas del lugar y `especie_id` **no figuran en el diagrama de clases original**, pero los pide la HU: el nombre de hasta 30 caracteres y los filtros del portal por lugar y por especie. Son nullables en base, igual que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la imponen el DTO y el servicio:
+
+- `animal_perdido_nombre`: obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar, porque quien encuentra un animal no sabe cómo se llama.
+- `animal_perdido_provincia` / `animal_perdido_localidad`: dónde se perdió o se encontró, con el mismo criterio que `usuario_provincia` / `usuario_localidad`: texto que sale del catálogo de georef embebido en el cliente (no hay tablas de provincias ni localidades, ver `DEUDA_TECNICA.md` ítem 21). Obligatorias en el alta. Índice `(provincia, localidad)` para el filtro del portal. Reemplazaron el 2026-09-30 a `animal_perdido_ubicacion` (texto libre del primer corte), cuyo contenido la migración pasó a `localidad`.
+- `animal_perdido_referencia`: aclaración libre y opcional del lugar ("frente a la plaza"), hasta 120 caracteres. Hace el papel de `calle_altura` en la dirección del perfil.
+- `animal_perdido_lugar_latitud` / `animal_perdido_lugar_longitud`: el lugar geocodificado al publicar (`node-geocoder`, primero con la referencia y después sin ella). `NULL` si el geocoder no lo encontró. Alimentan la distancia, el filtro por cercanía y el link a Google Maps del aviso. **No confundir** con `animal_perdido_latitud` / `_longitud`, que son las del teléfono de quien reportó.
+- `especie_id`: FK directa y no derivada de `mascota_id` → raza → especie, porque un animal encontrado no tiene Mascota asociada.
+- `animal_perdido_fecha_suceso`: día en que se perdió o se encontró (campo "Fecha" del formulario, pantalla 26 del diseño). No es la fecha de publicación, que sigue siendo `animal_perdido_fecha_alta`. Obligatoria en el alta y no futura.
+- `animal_perdido_imagenes`: de 1 a 5 fotos. **El orden del array es el de la galería del detalle.** Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`: `animal_perdido_imagen_url` es la PRIMERA, la portada de la tarjeta del portal.
+
+Pendiente: reflejarlos en el diagrama de clases del grupo.
+
+**Resuelto:** `animal_perdido_latitud` / `animal_perdido_longitud` se mantienen — sí se captura la coordenada al reportar un animal perdido/encontrado (ej. desde el GPS del dispositivo al momento del reporte). Lo que **no existe** es un mapa interactivo en la UI: el usuario busca y visualiza por ubicación administrativa (Provincia/Localidad), no por un mapa con pines. No quitar estos campos del modelo ni reemplazarlos por FK a Provincia/Localidad — conviven ambos: lat/long como dato del reporte, Provincia/Localidad como criterio de filtro para el usuario. Las del teléfono **nunca se exponen** en la API: sólo sirven de respaldo del filtro por cercanía cuando el lugar no se pudo geocodificar (2026-09-30).
 
 ### Estado_Animal_Perdido
 
@@ -211,11 +283,25 @@ Ver catálogos.
 
 ### Reporte_Problema
 
-`reporte_problema_id`, `reporte_problema_motivo`, `rporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema` y sus datos de auditoría. No hay relación con ninguna tabla.
+`reporte_problema_id`, `reporte_problema_motivo`, `reporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema`, `reporte_problema_tipo` (enum `tipo_reporte`: `PUBLICACION`, `USUARIO`, `REFUGIO`, `RESENA`, `ANIMAL_PERDIDO`, `CAMPANIA`, `MENSAJE`), `reporte_problema_objeto_id` y sus datos de auditoría. Vínculo **polimórfico sin FK**: `objeto_id` es el id de la tabla que indica `tipo` (no queda colgado porque no hay DELETE físico). El reportante es `usuario_alta`. Un solo reporte pendiente por (reportante, tipo, objeto). Ver spec 008.
+
+### Consulta_Soporte
+
+`consulta_soporte_id PK`, `consulta_soporte_nombre_completo`, `consulta_soporte_email`, `consulta_soporte_asunto`, `consulta_soporte_mensaje`, `consulta_soporte_resuelta` (boolean, default `false`) + auditoría. Mensajes del formulario de contacto (HU-15.2), enviados por cualquier persona sin sesión. El admin los lee y los marca como resueltos en web-admin. Sin relación con ninguna tabla: al no haber usuario autenticado, `usuario_alta` es el usuario SISTEMA. No confundir con `Reporte_Problema` (moderación, HU-3).
+
+### Faq_Categoria
+
+`faq_categoria_id PK`, `faq_categoria_nombre`, `faq_categoria_descripcion` + auditoría. Catálogo de agrupación de preguntas frecuentes (ej. Adopciones, Refugios, Cuenta).
+
+### Faq
+
+`faq_id PK`, `faq_pregunta`, `faq_respuesta`, `faq_orden`, FK `faq_categoria_id FK NOT NULL` + auditoría.
+
+**HU-15.3:** contenido administrable por web-admin, sin tocar código. Ver spec 015.
 
 ## Entidades cuya existencia formal hay que confirmar
 
-- **Reporte_Problema**: aparece nombrada explícitamente en la matriz de trazabilidad del documento de requisitos (HU-3.1 a HU-3.7, "Moderación y Reportes") asociada a Usuario, Publicacion y Reseña, pero **no aparece dibujada como entidad propia en las capturas del diagrama de clases** revisadas. Antes de la Fase 9 del roadmap, confirmar con el equipo si ya existe en una versión más actualizada del diagrama o si hay que modelarla desde cero (sugerencia mínima: `reporte_id PK`, `reporte_motivo`, `reporte_estado`, FK polimórfica o FKs nullable a `publicacion_id` / `usuario_reportado_id` / `reseña_id` + auditoría).
+- **Reporte_Problema**: aparece nombrada explícitamente en la matriz de trazabilidad del documento de requisitos (HU-3.1 a HU-3.7, "Moderación y Reportes") asociada a Usuario, Publicacion y Reseña, pero **no aparece dibujada como entidad propia en las capturas del diagrama de clases** revisadas. Se modeló con `tipo` + `objeto_id` polimórfico (spec 008, 2026-10-01); **a confirmar con el equipo** contra el diagrama.
 
 ## Resumen de cardinalidades clave (para no perderlas al migrar)
 
@@ -246,6 +332,10 @@ Ver catálogos.
   -> Mascota
   -> Usuario (creador)
 
+- Publicacion_Estado
+  -> Publicacion
+  -> Estado_Publicacion
+
 - Favorito
   -> Usuario
   -> Mascota
@@ -266,10 +356,14 @@ Ver catálogos.
   -> Solicitud
   -> Pregunta_Seguimiento
 
+- Pregunta_Seguimiento
+  -> Solicitud (opcional: solo las preguntas escritas por el refugio)
+
 - Reseña
   -> Usuario (autor, vía `reseña_usuario_autor`)
   -> Refugio (reportado, opcional)
   -> Usuario (reportado, opcional)
+  -> Solicitud (transacción que la habilita)
 
 - Chat
   -> Refugio (opcional)
@@ -299,7 +393,11 @@ Ver catálogos.
 - Animal_Perdido
   -> Usuario (reportante)
   -> Mascota (opcional)
+  -> Especie (opcional en base, obligatoria en el alta — spec 020)
   -> Estado_Animal_Perdido
+
+- Faq
+  -> Faq_Categoria
 
 ## Cómo usar este documento desde Claude Code
 

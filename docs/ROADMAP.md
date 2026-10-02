@@ -185,9 +185,9 @@ Depende de que TODAS las fases anteriores tengan datos que agregar — se recomi
 
 ## Fase 13 — Soporte y ayuda (Módulo 15)
 
-**HUs:** HU-15.1 (manual de usuario y FAQs), HU-15.2 (canal de contacto).
+**HUs:** HU-15.1 (manual de usuario y FAQs), HU-15.2 (canal de contacto), HU-15.3 (gestión de FAQs). Spec 015.
 
-Es contenido mayormente estático (landing/FAQ). Se puede hacer en cualquier momento, en paralelo, sin bloquear nada. Bajo prioridad.
+Manual estático en el frontend; FAQs y consultas de contacto en base, administradas desde web-admin. Se puede hacer en cualquier momento, en paralelo, sin bloquear nada. Bajo prioridad.
 
 ## Orden resumido
 
