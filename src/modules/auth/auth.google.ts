@@ -113,9 +113,14 @@ export function validarStateOAuth(state: string | undefined): void {
 export async function verificarIdTokenGoogle(idToken: string): Promise<PerfilGoogle> {
   const clientId = exigirClientIdGoogle();
   const client = new OAuth2Client(clientId);
+  // El APK pide el token con el client ID de Android y Expo Go / web con el de tipo web:
+  // Google pone en `aud` el que se usó, así que se aceptan los dos.
+  const audiencias = env.GOOGLE_ANDROID_CLIENT_ID
+    ? [clientId, env.GOOGLE_ANDROID_CLIENT_ID]
+    : [clientId];
 
   try {
-    const ticket = await client.verifyIdToken({ idToken, audience: clientId });
+    const ticket = await client.verifyIdToken({ idToken, audience: audiencias });
     return mapearPerfil(ticket.getPayload() ?? {});
   } catch (error) {
     if (error instanceof AppError) throw error;

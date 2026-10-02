@@ -22,6 +22,8 @@ const envSchema = z.object({
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   GOOGLE_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  // Client ID de tipo Android: el idToken que obtiene el APK trae este ID como `aud`.
+  GOOGLE_ANDROID_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_REDIRECT_URI: z.preprocess(emptyToUndefined, z.string().url().optional()),
   FRONTEND_WEB_URL: z.string().url().default('http://localhost:3001'),
