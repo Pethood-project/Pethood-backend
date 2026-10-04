@@ -200,7 +200,7 @@ Con `solicitud_id` null la fila es del **catálogo** que se sortea. Con valor, e
 - `solicitud_id` — la solicitud de adopción o tránsito que la habilitó. Índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL`: evita dos salas para la misma solicitud.
 - `animal_perdido_id` — el aviso de mascota perdida/encontrada cuyo reclamo la abrió (HU-13.2, spec 024).
 
-Las dos son nullables y en la práctica nunca se llenan juntas, porque sólo se escribe la del hecho que creó la fila. Con las dos en `null` es una sala anterior a HU-5.2. (Nada en base lo impide: anotado en `DEUDA_TECNICA.md`, ítem 32.)
+Las dos son nullables y en la práctica nunca se llenan juntas, porque sólo se escribe la del hecho que creó la fila. Con las dos en `null` es una sala anterior a HU-5.2. (Nada en base lo impide: anotado en `DEUDA_TECNICA.md`, ítem 33.)
 
 **La sala es siempre entre las partes**, tanto para una solicitud como para un reclamo: una segunda solicitud al mismo refugio, o el reclamo de un aviso de alguien con quien ya se hablaba, caen en la conversación que ya existía. Por eso **lo que se habló vive en `Mensaje`** y no acá: una sala puede acumular dos solicitudes, dos avisos, o una de cada uno. La sala de un reclamo lleva `refugio_id` en `null` — el aviso es de la persona, no de su refugio.
 

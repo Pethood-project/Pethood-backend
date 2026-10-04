@@ -260,7 +260,7 @@ después de revisar cómo se veía el resultado en el listado de chats.
 
 Anotada en [`docs/DEUDA_TECNICA.md`](../DEUDA_TECNICA.md):
 
-- **Ítem 32** — `Chat` tiene dos FK de origen (`solicitud_id` y `animal_perdido_id`) que en la
+- **Ítem 33** — `Chat` tiene dos FK de origen (`solicitud_id` y `animal_perdido_id`) que en la
   práctica nunca se llenan juntas, pero nada en base lo impide.
 
 Y sigue abierta la **28** (el dueño de un aviso no puede retirarlo), que es de HU-13.3.
