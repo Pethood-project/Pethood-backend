@@ -1,13 +1,14 @@
 /**
- * Avisos de mascotas perdidas y encontradas (spec 020, HU-13.1): alta y portal.
+ * Avisos de mascotas perdidas y encontradas: alta y portal (spec 020, HU-13.1), reclamo con
+ * chat de reencuentro y cierre del caso (spec 024, HU-13.2).
  *
  * **El aviso es de la PERSONA que lo carga**, sea adoptante o miembro de un refugio, y desde
  * cualquiera de sus dos perfiles: el perfil activo (`X-Ambito`) no cambia nada. Es la misma
  * lógica que el chat de reencuentro (HU-13.2), que es entre personas y nunca lleva
  * `refugioId`.
  *
- * Fuera de esta HU, y anotado en la spec: el botón "Abrir chat" (HU-13.2) y el paso a
- * "Resuelto", la edición y la baja del aviso (HU-13.3).
+ * Y lo que gestiona quien lo publicó (HU-13.3, desde "Mis publicaciones"): verlo, editarlo y
+ * eliminarlo. Quedan afuera el histórico de estados y la reapertura de un caso resuelto.
  */
 import { AppError } from '../../middlewares/errorHandler';
 import { distanciaKm, resolverCoordenadasDeMapsUrl, type Coordenadas } from '../../shared/geo';
@@ -21,10 +22,17 @@ import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import { aFechaISO } from '../../shared/validation/dates';
-import { ESTADOS_ANIMAL_PERDIDO_EN_ALTA } from '../catalogos/catalogos.service';
+import {
+  ESTADO_ANIMAL_PERDIDO_RESUELTO,
+  ESTADOS_ANIMAL_PERDIDO_EN_ALTA,
+} from '../catalogos/catalogos.service';
+import * as chats from '../chats/chats.service';
+import { MARCADOR_FOTO_NUEVA } from '../publicaciones/publicaciones.dto';
 import type {
   AvisoDto,
   CrearAvisoDto,
+  EditarAvisoDto,
+  ReclamoDto,
   FiltrosAvisosDto,
   ListaAvisosDto,
   LugarEnMapaDto,
@@ -95,6 +103,7 @@ function aDto(
     referencia: aviso.referencia,
     distanciaKm: usuario && lugar ? Math.round(distanciaKm(usuario, lugar) * 10) / 10 : null,
     mapaUrl: mapaUrlDe(aviso),
+    lugar,
     estado: { id: aviso.estadoAnimalPerdido.id, nombre: aviso.estadoAnimalPerdido.nombre },
     especie: aviso.especie ? { id: aviso.especie.id, nombre: aviso.especie.nombre } : null,
     // Sólo el día, como `fechaNacimiento`: con hora, un día cargado en Argentina podría
@@ -323,6 +332,364 @@ export async function listarUbicaciones(): Promise<ProvinciaConLocalidadesDto[]>
       provincia,
       localidades: [...localidades].sort(alfabetico),
     }));
+}
+
+/**
+ * El aviso en condiciones de ser reclamado o cerrado, o un error explicando por qué no.
+ *
+ * Las dos acciones de HU-13.2 comparten estas tres validaciones: que el aviso exista, que no
+ * esté dado de baja y que el caso no esté ya cerrado. Lo que cambia es quién puede hacer
+ * cada una, y eso lo chequea cada función.
+ */
+async function exigirAvisoAbierto(id: number) {
+  const aviso = await repo.buscarParaReclamo(id);
+
+  if (!aviso || aviso.fechaBaja) {
+    throw new AppError('NO_ENCONTRADO', 'No encontramos ese aviso', 404);
+  }
+
+  if (aviso.estadoAnimalPerdido.nombre === ESTADO_ANIMAL_PERDIDO_RESUELTO) {
+    throw new AppError('AVISO_RESUELTO', 'Este caso ya está resuelto', 409);
+  }
+
+  return aviso;
+}
+
+/**
+ * HU-13.2: reclamar un aviso abre la sala de reencuentro con quien lo publicó.
+ *
+ * La sala es por aviso y por reclamante: ver `chats.asegurarChatDeReclamo`, que es donde
+ * vive esa regla. Acá quedan las validaciones del aviso, que es la entidad de este módulo.
+ *
+ * **Idempotente**: el botón "Enviar mensaje" no se esconde después del primer reclamo, así
+ * que volver a tocarlo devuelve la misma sala en vez de abrir otra. Por eso responde 200 y
+ * no 201 — ver el contrato.
+ *
+ * El ámbito del pedido NO se mira: el aviso es de la persona y la sala también, así que un
+ * miembro de refugio reclama como persona aunque esté mirando la app en vista refugio. Es la
+ * misma razón por la que el alta no exige ámbito.
+ */
+export async function reclamarAviso(id: number, reclamanteId: number): Promise<ReclamoDto> {
+  const aviso = await exigirAvisoAbierto(id);
+
+  // El front ya esconde el botón con `esPropio`; esto cubre a quien llame a la API directo.
+  // Es 400 y no 403: no es un permiso que le falte, es un pedido que no tiene sentido.
+  if (aviso.usuarioReportanteId === reclamanteId) {
+    throw new AppError('RECLAMO_PROPIO', 'Este aviso es tuyo: no podés reclamarlo', 400);
+  }
+
+  // Una cuenta dada de baja no puede recibir mensajes. El chat ya rechaza escribirle a un
+  // contacto inactivo, pero abrir una sala muerta y mandar al usuario ahí es peor que
+  // decírselo acá.
+  if (aviso.usuarioReportante.fechaBaja) {
+    throw new AppError(
+      'REPORTANTE_INACTIVO',
+      'No podemos abrir la conversación: la cuenta de quien publicó el aviso fue dada de baja',
+      409,
+    );
+  }
+
+  const { chatId, nueva } = await chats.asegurarChatDeReclamo(
+    id,
+    reclamanteId,
+    aviso.usuarioReportanteId,
+  );
+
+  await registrarAuditoria({
+    usuarioId: reclamanteId,
+    accion: 'RECLAMAR',
+    entidad: 'AnimalPerdido',
+    entidadId: id,
+    detalle: `chat=${chatId} nueva=${nueva}`,
+  });
+
+  return { chatId, nueva };
+}
+
+/**
+ * HU-13.2: el reportante marca que el animal volvió y el caso se cierra.
+ *
+ * **Cierra el caso, no la conversación.** REQUISITOS §13 describe HU-13.3 como "cierra el caso
+ * y el chat asociado"; esa segunda mitad se descartó por decisión del equipo del 2026-10-01
+ * (ver spec 024 §9): desde que el reclamo entra en la conversación que ya existía con esa
+ * persona, cerrarla cortaría charlas que no tienen nada que ver con el aviso. Y aunque fuera
+ * una sala dedicada, silenciarla justo cuando el caso se resolvió es lo peor para coordinar la
+ * entrega real del animal, que no termina cuando alguien toca el botón.
+ *
+ * Lo que sí hace: el estado pasa a Resuelto y se llena `fecha_resuelto`. El portal lo marca
+ * con "Volvió con su dueño", que es el criterio de aceptación de la HU.
+ *
+ * Sólo el reportante: es su caso. Un reclamante que crea que ya está no cierra nada.
+ *
+ * Lo que NO hace, y es HU-13.3: reabrir un caso cerrado, pasar de Perdido a Encontrado o
+ * guardar el histórico de estados. Por eso "Resuelto" es terminal por ahora.
+ */
+export async function marcarResuelto(id: number, usuarioId: number): Promise<AvisoDto> {
+  const aviso = await exigirAvisoAbierto(id);
+
+  if (aviso.usuarioReportanteId !== usuarioId) {
+    throw new AppError('SIN_PERMISO', 'Sólo quien publicó el aviso puede resolverlo', 403);
+  }
+
+  const resuelto = await repo.buscarEstadoPorNombre(ESTADO_ANIMAL_PERDIDO_RESUELTO);
+
+  // El catálogo viene sembrado con los tres estados; si falta, es un problema de datos y no
+  // algo que el usuario pueda arreglar.
+  if (!resuelto) {
+    throw new AppError('ESTADO_INVALIDO', 'No pudimos resolver el aviso', 500);
+  }
+
+  const actualizado = await repo.marcarResuelto({
+    id,
+    estadoId: resuelto.id,
+    usuarioId,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'RESOLVER',
+    entidad: 'AnimalPerdido',
+    entidadId: id,
+    detalle: `estado=${resuelto.nombre}`,
+  });
+
+  return aDto(actualizado, usuarioId);
+}
+
+// ─────────────── HU-13.3 · Lo que gestiona quien publicó el aviso ───────────────
+
+const NO_ENCONTRADO = 'No encontramos ese aviso';
+
+/**
+ * Un aviso por id, para abrir su detalle desde la tarjeta del chat (HU-13.2) o desde Mis
+ * publicaciones. Con `usuario`, trae la distancia como el portal.
+ *
+ * Un aviso dado de baja responde `AVISO_ELIMINADO` y no "no existe": la tarjeta del chat sigue
+ * mostrándolo (es lo que se habló), así que quien la toca tiene que entender qué pasó.
+ */
+export async function obtenerAviso(
+  id: number,
+  usuarioId: number,
+  usuario: Coordenadas | null,
+): Promise<AvisoDto> {
+  const aviso = await repo.buscarPorId(id);
+
+  if (!aviso) {
+    throw new AppError('NO_ENCONTRADO', NO_ENCONTRADO, 404);
+  }
+  if (aviso.fechaBaja) {
+    throw new AppError('AVISO_ELIMINADO', 'Se eliminó esta publicación', 404);
+  }
+
+  return aDto(aviso, usuarioId, usuario);
+}
+
+/** Los avisos del usuario, en cualquier estado, para "Mis publicaciones". */
+export async function listarMisAvisos(usuarioId: number): Promise<AvisoDto[]> {
+  const avisos = await repo.listarDeReportante(usuarioId);
+  return avisos.map((aviso) => aDto(aviso, usuarioId));
+}
+
+/** El aviso vivo y de quien lo pide, o el error que corresponde. */
+async function exigirAvisoPropio(id: number, usuarioId: number, accion: string) {
+  const aviso = await repo.buscarPorId(id);
+
+  if (!aviso || aviso.fechaBaja) {
+    throw new AppError('NO_ENCONTRADO', NO_ENCONTRADO, 404);
+  }
+  if (aviso.usuarioReportanteId !== usuarioId) {
+    throw new AppError('SIN_PERMISO', `Sólo quien publicó el aviso puede ${accion}`, 403);
+  }
+
+  return aviso;
+}
+
+/**
+ * El estado que queda después de editar. Entre Perdido y Encontrado se puede cambiar (quien lo
+ * cargó pudo equivocarse); a Resuelto no, que tiene su propio botón y su confirmación; y uno
+ * Resuelto no cambia, porque el caso está cerrado.
+ */
+async function resolverEstadoEditado(
+  actual: { id: number; nombre: string },
+  estadoId: number,
+): Promise<{ id: number; nombre: string }> {
+  if (actual.nombre === ESTADO_ANIMAL_PERDIDO_RESUELTO) {
+    if (estadoId !== actual.id) {
+      throw new AppError(
+        'AVISO_RESUELTO',
+        'Este caso ya está resuelto: no se puede cambiar su estado',
+        409,
+      );
+    }
+    return actual;
+  }
+
+  const estado = await repo.buscarEstado(estadoId);
+
+  if (!estado) {
+    throw new AppError('NO_ENCONTRADO', 'El estado no existe', 404);
+  }
+  if (!ESTADOS_ANIMAL_PERDIDO_EN_ALTA.includes(estado.nombre)) {
+    throw new AppError(
+      'ESTADO_INVALIDO',
+      'El aviso tiene que ser de una mascota perdida o encontrada. Para cerrar el caso, marcalo como resuelto.',
+      400,
+    );
+  }
+
+  return estado;
+}
+
+/**
+ * La galería que manda el cliente sólo puede reordenar fotos que el aviso ya tiene y ubicar las
+ * nuevas: nunca apuntar a un archivo ajeno. Misma regla que la edición de una publicación.
+ */
+function validarGaleria(orden: string[], cantidadNuevas: number, permitidas: string[]): void {
+  const marcas = orden.filter((item) => item === MARCADOR_FOTO_NUEVA).length;
+
+  if (marcas !== cantidadNuevas) {
+    throw new AppError('VALIDACION', 'Las fotos nuevas no coinciden con la galería enviada', 400);
+  }
+
+  const existentes = orden.filter((item) => item !== MARCADOR_FOTO_NUEVA);
+
+  if (existentes.some((url) => !permitidas.includes(url))) {
+    throw new AppError('VALIDACION', 'Una de las fotos no pertenece al aviso', 400);
+  }
+  if (new Set(existentes).size !== existentes.length) {
+    throw new AppError('VALIDACION', 'La galería tiene fotos repetidas', 400);
+  }
+  if (orden.length === 0) {
+    throw new AppError('FOTO_REQUERIDA', 'Agregá una foto del animal', 400);
+  }
+}
+
+export interface ContextoEdicion {
+  usuarioId: number;
+  /** Las fotos nuevas, en el orden de sus marcas en `imagenes`. */
+  archivos: { buffer: Buffer; mimetype: string }[];
+}
+
+/**
+ * HU-13.3: quien publicó el aviso lo edita. Reemplaza todo lo que carga el formulario, con las
+ * mismas reglas que el alta. Las coordenadas del teléfono no se tocan.
+ *
+ * El pin del lugar: el que mande el cliente (lo vio en el mapa); si no manda ninguno y el lugar
+ * cambió, se vuelve a geocodificar; si no cambió, queda el que tenía.
+ *
+ * Las fotos que se sacaron se borran del almacenamiento recién después de guardar.
+ */
+export async function editarAviso(
+  id: number,
+  datos: EditarAvisoDto,
+  contexto: ContextoEdicion,
+): Promise<AvisoDto> {
+  const { usuarioId, archivos } = contexto;
+  const aviso = await exigirAvisoPropio(id, usuarioId, 'editarlo');
+  const estado = await resolverEstadoEditado(aviso.estadoAnimalPerdido, datos.estadoId);
+
+  if (estado.nombre === ESTADO_QUE_EXIGE_NOMBRE && !datos.nombre) {
+    throw new AppError('VALIDACION', 'El nombre es obligatorio', 400);
+  }
+
+  if (!(await repo.buscarEspecie(datos.especieId))) {
+    throw new AppError('NO_ENCONTRADO', 'La especie no existe', 404);
+  }
+
+  const actuales = aviso.imagenes.length > 0 ? aviso.imagenes : [aviso.imagenUrl];
+  validarGaleria(datos.imagenes, archivos.length, actuales);
+
+  const elegido =
+    datos.lugarLatitud !== undefined && datos.lugarLongitud !== undefined
+      ? { latitud: datos.lugarLatitud, longitud: datos.lugarLongitud }
+      : null;
+  const cambioElLugar =
+    datos.provincia !== aviso.provincia ||
+    datos.localidad !== aviso.localidad ||
+    datos.referencia !== aviso.referencia;
+  const lugar =
+    elegido ??
+    (cambioElLugar
+      ? await geocodificarLugar({
+          provincia: datos.provincia,
+          localidad: datos.localidad,
+          referencia: datos.referencia,
+        })
+      : lugarDe(aviso));
+
+  const nuevas = archivos.length > 0 ? await guardarImagenes(archivos, SUBCARPETA_FOTOS) : [];
+  let siguienteNueva = 0;
+  const imagenes = datos.imagenes.map((item) =>
+    item === MARCADOR_FOTO_NUEVA ? nuevas[siguienteNueva++]! : item,
+  );
+
+  let actualizado: repo.AvisoConRelaciones;
+  try {
+    actualizado = await repo.actualizar(
+      id,
+      {
+        nombre: datos.nombre,
+        descripcion: datos.descripcion,
+        imagenes,
+        provincia: datos.provincia,
+        localidad: datos.localidad,
+        referencia: datos.referencia,
+        lugarLatitud: lugar?.latitud ?? null,
+        lugarLongitud: lugar?.longitud ?? null,
+        fechaSuceso: datos.fechaSuceso,
+        especieId: datos.especieId,
+        estadoAnimalPerdidoId: estado.id,
+      },
+      usuarioId,
+    );
+  } catch (err) {
+    if (nuevas.length > 0) await borrarImagenes(nuevas);
+    throw err;
+  }
+
+  const quitadas = actuales.filter((url) => !imagenes.includes(url));
+  if (quitadas.length > 0) await borrarImagenes(quitadas);
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'MODIFICAR',
+    entidad: 'AnimalPerdido',
+    entidadId: id,
+    detalle: `estado=${estado.nombre} lugar=${elegido ? 'elegido' : cambioElLugar ? (lugar ? 'geocodificado' : 'sin-ubicar') : 'sin-cambios'}`,
+  });
+
+  return aDto(actualizado, usuarioId);
+}
+
+/**
+ * HU-13.3: quien publicó el aviso lo elimina (baja lógica). Sale del portal y de Mis
+ * publicaciones.
+ *
+ * **Uno resuelto no se elimina**: es el registro de que la mascota volvió, y la leyenda "Volvió
+ * con su dueño" es lo que la HU pide mostrar.
+ *
+ * Las conversaciones donde se reclamó no cambian: la tarjeta del aviso queda en el chat, con su
+ * foto (por eso las fotos no se borran), y al tocarla el detalle responde `AVISO_ELIMINADO`.
+ */
+export async function eliminarAviso(id: number, usuarioId: number): Promise<void> {
+  const aviso = await exigirAvisoPropio(id, usuarioId, 'eliminarlo');
+
+  if (aviso.estadoAnimalPerdido.nombre === ESTADO_ANIMAL_PERDIDO_RESUELTO) {
+    throw new AppError(
+      'AVISO_RESUELTO',
+      'No podés eliminar un aviso resuelto: queda como registro de que la mascota volvió con su dueño.',
+      409,
+    );
+  }
+
+  await repo.darDeBajaPorReportante(id, usuarioId);
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'ELIMINAR',
+    entidad: 'AnimalPerdido',
+    entidadId: id,
+  });
 }
 
 /** Baja de un aviso por el admin (spec 008, deuda #28): el motivo le llega a quien lo publicó. */

@@ -297,6 +297,7 @@ export function crearMensaje(datos: {
   imagenes: string[];
   tipo?: TipoMensaje;
   solicitudId?: number | null;
+  animalPerdidoId?: number | null;
 }) {
   return prisma.mensaje.create({
     data: {
@@ -307,6 +308,7 @@ export function crearMensaje(datos: {
       imagenUrl: datos.imagenes[0] ?? null,
       tipo: datos.tipo ?? 'TEXTO',
       solicitudId: datos.solicitudId ?? null,
+      animalPerdidoId: datos.animalPerdidoId ?? null,
       ...datosAlta(datos.usuarioId),
     },
   });
@@ -364,7 +366,7 @@ export function buscarUltimaSolicitudDelChat(chatId: number) {
   return prisma.mensaje.findFirst({
     where: { chatId, tipo: 'SOLICITUD', solicitudId: { not: null } },
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
-    select: { solicitudId: true },
+    select: { solicitudId: true, fechaAlta: true },
   });
 }
 
@@ -537,5 +539,92 @@ export function ultimosMensajesParaRespuesta(chatId: number, limite: number) {
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
     take: limite,
     select: { usuarioId: true, fechaAlta: true },
+  });
+}
+
+// ─────────────── La tarjeta de un aviso reclamado (HU-13.2) ───────────────
+
+/**
+ * Crea la sala de un reclamo con sus dos participantes, en una transacción.
+ *
+ * Sólo se llama cuando NO existe conversación entre las dos personas: si existe, el reclamo
+ * deja su tarjeta ahí (ver `asegurarChatDeReclamo`), igual que hace una segunda solicitud.
+ *
+ * `refugioId` queda en `null` SIEMPRE: el aviso es de la persona que lo cargó, no de su
+ * refugio (ver `animales-perdidos.service.ts`), así que la sala es entre personas y las dos
+ * la ven desde su perfil personal.
+ *
+ * `chat_tipo` NO se escribe: sus valores siguen sin definirse en MODELO_DATOS.md.
+ */
+export function crearChatDeReclamo(datos: {
+  animalPerdidoId: number;
+  participantesIds: number[];
+  creadoPor: number;
+}) {
+  return prisma.chat.create({
+    data: {
+      animalPerdidoId: datos.animalPerdidoId,
+      refugioId: null,
+      ...datosAlta(datos.creadoPor),
+      participantes: {
+        create: datos.participantesIds.map((usuarioId) => ({
+          usuarioId,
+          ...datosAlta(datos.creadoPor),
+        })),
+      },
+    },
+    select: { id: true },
+  });
+}
+
+/**
+ * ¿Este aviso ya dejó su tarjeta en esta sala?
+ *
+ * Es la idempotencia del reclamo: el botón "Enviar mensaje" no se esconde después del
+ * primero, así que volver a tocarlo tiene que devolver la misma conversación sin repetir la
+ * tarjeta. Es por (aviso, sala) y no por aviso a secas: el mismo aviso reclamado por cinco
+ * personas deja cinco tarjetas, una en la conversación de cada una con el reportante.
+ */
+export function buscarMensajeDeReclamo(animalPerdidoId: number, chatId: number) {
+  return prisma.mensaje.findFirst({
+    where: { tipo: 'ANIMAL_PERDIDO', animalPerdidoId, chatId },
+    select: { chatId: true },
+  });
+}
+
+/** Datos del aviso que pinta la tarjeta embebida y la cabecera de la sala. */
+export function buscarAvisoParaChat(animalPerdidoId: number) {
+  return prisma.animalPerdido.findUnique({
+    where: { id: animalPerdidoId },
+    select: {
+      id: true,
+      nombre: true,
+      descripcion: true,
+      imagenUrl: true,
+      provincia: true,
+      localidad: true,
+      referencia: true,
+      fechaSuceso: true,
+      fechaAlta: true,
+      fechaBaja: true,
+      usuarioReportanteId: true,
+      estadoAnimalPerdido: { select: { id: true, nombre: true } },
+      especie: { select: { nombre: true } },
+    },
+  });
+}
+
+/**
+ * El aviso de la ÚLTIMA tarjeta de aviso de la sala, con su fecha.
+ *
+ * Mismo criterio que `buscarUltimaSolicitudDelChat`: la cabecera nombra lo vigente, que es lo
+ * último que se dejó en la conversación. La fecha sale para poder compararla con la de la
+ * última solicitud, porque una sala puede tener las dos cosas y el subtítulo muestra una.
+ */
+export function buscarUltimoAvisoDelChat(chatId: number) {
+  return prisma.mensaje.findFirst({
+    where: { chatId, tipo: 'ANIMAL_PERDIDO', animalPerdidoId: { not: null } },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { animalPerdidoId: true, fechaAlta: true },
   });
 }

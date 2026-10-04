@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta, datosBaja } from '../../shared/auditoria';
+import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { finDelDia, inicioDelDia } from '../../shared/validation/dates';
 
 /**
@@ -244,4 +244,106 @@ export function darDeBajaPorModeracion(datos: {
       },
     }),
   ]);
+}
+
+// ─────────────── HU-13.2 · Reclamo y cierre del caso ───────────────
+
+/**
+ * El aviso con lo que necesitan el reclamo y el paso a Resuelto: de quién es, en qué estado
+ * está y si sigue vivo.
+ *
+ * Trae también la fecha de baja de la cuenta del reportante: no se le puede abrir una sala a
+ * alguien que ya no está, igual que el chat no deja escribirle a un contacto inactivo.
+ */
+export function buscarParaReclamo(id: number) {
+  return prisma.animalPerdido.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      nombre: true,
+      fechaBaja: true,
+      usuarioReportanteId: true,
+      estadoAnimalPerdido: { select: { id: true, nombre: true } },
+      usuarioReportante: { select: { id: true, fechaBaja: true } },
+    },
+  });
+}
+
+/** El estado "Resuelto" del catálogo, que es el que cierra el caso. */
+export function buscarEstadoPorNombre(nombre: string) {
+  return prisma.estadoAnimalPerdido.findFirst({
+    where: { nombre, fechaBaja: null },
+    select: { id: true, nombre: true },
+  });
+}
+
+/**
+ * Pasa el aviso a Resuelto y le pone la fecha de cierre.
+ *
+ * `fechaResuelto` es la que hasta ahora sólo escribía el seed: es el dato con el que el
+ * portal puede decir cuándo volvió, independiente de `fechaModificacion`, que cambia con
+ * cualquier edición.
+ */
+export function marcarResuelto(datos: { id: number; estadoId: number; usuarioId: number }) {
+  return prisma.animalPerdido.update({
+    where: { id: datos.id },
+    data: {
+      estadoAnimalPerdidoId: datos.estadoId,
+      fechaResuelto: new Date(),
+      ...datosModificacion(datos.usuarioId),
+    },
+    select: SELECCION_TARJETA,
+  });
+}
+
+// ─────────────── HU-13.3 · Lo que gestiona quien publicó el aviso ───────────────
+
+/**
+ * Un aviso por id, con su fecha de baja: el detalle tiene que poder decir "se eliminó" en vez
+ * de "no existe", porque la tarjeta del chat lo sigue mostrando después de la baja.
+ */
+export function buscarPorId(id: number) {
+  return prisma.animalPerdido.findUnique({
+    where: { id },
+    select: { ...SELECCION_TARJETA, fechaBaja: true },
+  });
+}
+
+/** Los avisos vivos de una persona, del más reciente al más viejo (Mis publicaciones). */
+export function listarDeReportante(usuarioId: number) {
+  return prisma.animalPerdido.findMany({
+    where: { usuarioReportanteId: usuarioId, fechaBaja: null },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: SELECCION_TARJETA,
+  });
+}
+
+/** `imagenes` llega con al menos una: la primera queda también como portada en `imagenUrl`. */
+export function actualizar(
+  id: number,
+  datos: {
+    nombre: string | null;
+    descripcion: string;
+    imagenes: string[];
+    provincia: string;
+    localidad: string;
+    referencia: string | null;
+    lugarLatitud: number | null;
+    lugarLongitud: number | null;
+    fechaSuceso: Date;
+    especieId: number;
+    estadoAnimalPerdidoId: number;
+  },
+  usuarioId: number,
+) {
+  return prisma.animalPerdido.update({
+    where: { id },
+    data: { ...datos, imagenUrl: datos.imagenes[0]!, ...datosModificacion(usuarioId) },
+    select: SELECCION_TARJETA,
+  });
+}
+
+/** Baja lógica por quien lo publicó. Las fotos quedan: las sigue mostrando el chat. */
+export function darDeBajaPorReportante(id: number, usuarioId: number) {
+  return prisma.animalPerdido.update({ where: { id }, data: datosBaja(usuarioId) });
 }

@@ -51,25 +51,74 @@ const campo = {
  * publicar: el del preview o el del link que pegó a mano. Son opcionales: sin ellas, el lugar
  * se geocodifica en el alta.
  */
+/** Lo que el formulario carga igual en el alta y en la edición. */
+const camposDelFormulario = {
+  nombre: textoOpcionalSchema({ max: animalPerdido.nombre.max, etiqueta: 'El nombre' }),
+  descripcion: textoSchema({ max: animalPerdido.descripcion.max, etiqueta: 'La descripción' }),
+  ...campo,
+  /** Día en que se perdió o se encontró. No puede ser futuro. */
+  fechaSuceso: fechaPasadaSchema('La fecha'),
+  estadoId: idSchema('El estado'),
+  especieId: idSchema('La especie'),
+  lugarLatitud: coordenadaOpcionalSchema('La ubicación del lugar', -90, 90),
+  lugarLongitud: coordenadaOpcionalSchema('La ubicación del lugar', -180, 180),
+};
+
+const puntoDelLugarCompleto = (datos: { lugarLatitud?: number; lugarLongitud?: number }) =>
+  (datos.lugarLatitud === undefined) === (datos.lugarLongitud === undefined);
+
 export const crearAvisoSchema = z
   .object({
-    nombre: textoOpcionalSchema({ max: animalPerdido.nombre.max, etiqueta: 'El nombre' }),
-    descripcion: textoSchema({ max: animalPerdido.descripcion.max, etiqueta: 'La descripción' }),
-    ...campo,
-    /** Día en que se perdió o se encontró. No puede ser futuro. */
-    fechaSuceso: fechaPasadaSchema('La fecha'),
-    estadoId: idSchema('El estado'),
-    especieId: idSchema('La especie'),
+    ...camposDelFormulario,
     latitud: coordenadaSchema({ ...animalPerdido.latitud, etiqueta: 'La latitud' }),
     longitud: coordenadaSchema({ ...animalPerdido.longitud, etiqueta: 'La longitud' }),
-    lugarLatitud: coordenadaOpcionalSchema('La ubicación del lugar', -90, 90),
-    lugarLongitud: coordenadaOpcionalSchema('La ubicación del lugar', -180, 180),
   })
-  .refine((datos) => (datos.lugarLatitud === undefined) === (datos.lugarLongitud === undefined), {
-    message: 'La ubicación del lugar no es válida',
-  });
+  .refine(puntoDelLugarCompleto, { message: 'La ubicación del lugar no es válida' });
 
 export type CrearAvisoDto = z.infer<typeof crearAvisoSchema>;
+
+/**
+ * Edición del aviso por quien lo publicó (HU-13.3): el formulario manda el aviso entero, como
+ * la edición de una publicación. Las coordenadas del teléfono no viajan: son las del momento
+ * de publicar y no cambian.
+ *
+ * `imagenes` es la galería final en orden, con el mismo formato que la edición de una
+ * publicación: la ruta de cada foto que el aviso ya tenía, tal como la devolvió la API, o
+ * `MARCADOR_FOTO_NUEVA` ("nueva") en el lugar de cada archivo nuevo de `fotos`.
+ *
+ * `lugarLatitud`/`lugarLongitud` son el pin que el usuario vio en el mapa. Sin ellas, el lugar
+ * se vuelve a geocodificar sólo si cambió; si no cambió, queda el pin que tenía.
+ */
+export const editarAvisoSchema = z
+  .object({
+    ...camposDelFormulario,
+    imagenes: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .transform((valor) => {
+        if (valor === undefined) return [];
+        return Array.isArray(valor) ? valor : [valor];
+      })
+      .refine((valores) => valores.length <= animalPerdido.imagenes.max, {
+        message: `Podés subir hasta ${animalPerdido.imagenes.max} fotos`,
+      }),
+  })
+  .refine(puntoDelLugarCompleto, { message: 'La ubicación del lugar no es válida' });
+
+export type EditarAvisoDto = z.infer<typeof editarAvisoSchema>;
+
+/**
+ * Query del detalle de un aviso: las coordenadas de quien mira, para la distancia. Opcionales y
+ * juntas, como en el portal.
+ */
+export const detalleAvisoQuerySchema = z
+  .object({
+    latitud: coordenadaOpcionalSchema('La latitud', -90, 90),
+    longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
+  })
+  .refine((query) => (query.latitud === undefined) === (query.longitud === undefined), {
+    message: 'La ubicación no es válida',
+  });
 
 /**
  * Preview del lugar en el mapa: lo geocodifica SIN publicar nada, para que el formulario
@@ -210,6 +259,12 @@ export interface AvisoDto {
    * el texto del lugar. `null` sólo si el aviso no tiene lugar.
    */
   mapaUrl: string | null;
+  /**
+   * El pin del lugar: el que quien publicó vio y verificó en el mapa, o el geocodificado.
+   * `null` si no se pudo ubicar. Es el mismo punto que lleva `mapaUrl`, así que no expone nada
+   * nuevo; la edición lo usa para arrancar con el pin que ya tenía. Nunca es el del teléfono.
+   */
+  lugar: { latitud: number; longitud: number } | null;
   estado: { id: number; nombre: string };
   /** `null` sólo en avisos cargados antes de HU-13.1. */
   especie: { id: number; nombre: string } | null;
@@ -223,8 +278,27 @@ export interface AvisoDto {
   fechaResuelto: string | null;
   /** Quien publicó el aviso: es la contraparte del chat de reencuentro (HU-13.2). */
   reportante: { id: number; nombre: string; apellido: string; imagenUrl: string | null };
-  /** Si el aviso es del usuario autenticado: con `true` la tarjeta no ofrece "Abrir chat". */
+  /**
+   * Si el aviso es del usuario autenticado. Decide qué botones ofrece el detalle: con `false`,
+   * "Enviar mensaje" (el reclamo, HU-13.2); con `true`, "Marcar como resuelto", "Editar" y
+   * "Eliminar" (HU-13.3).
+   */
   esPropio: boolean;
+}
+
+/**
+ * Resultado de reclamar un aviso (HU-13.2): la sala de reencuentro, lista para abrir.
+ *
+ * Devuelve sólo el id y no la conversación entera porque el cliente navega a la sala y ésta
+ * se pinta sola con `GET /chats/:chatId` — es el endpoint que existe justamente para eso
+ * (abrir una sala sin haber pasado por el listado).
+ *
+ * `nueva` es `false` cuando la sala ya existía: el botón no se esconde después del primer
+ * reclamo, así que volver a tocarlo es el caso normal y devuelve la misma sala.
+ */
+export interface ReclamoDto {
+  chatId: number;
+  nueva: boolean;
 }
 
 /** Opciones del filtro: cada provincia con avisos y sus localidades con avisos. */

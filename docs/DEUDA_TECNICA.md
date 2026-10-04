@@ -55,11 +55,12 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 25 | Reseña no avisa al recibir una reseña (el reporte ya existe, spec 008) | Baja | ambos |
 | 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
 | 27 | Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado | Baja | backend |
-| 28 | El dueño de un aviso de mascota perdida no puede retirarlo (el admin sí, spec 008) | Baja | backend |
+| ~~28~~ | ~~El dueño de un aviso de mascota perdida no puede retirarlo~~ | ✅ cerrada | — |
 | 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
 | 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
 | 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
 | 32 | En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy | Media | backend |
+| 33 | `chat` tiene dos FK de origen y nada en base impide llenar las dos | Baja | backend |
 
 ---
 
@@ -306,7 +307,6 @@ No se repite acá; el link va al detalle.
 |---|---|
 | Presencia en memoria: no escala a varias instancias y puede quedar stale al salir de la sala | [`api-chat-sala.md`](./api-chat-sala.md) § «Presencia: dos limitaciones conocidas» |
 | `mensaje_leido` quedó obsoleto pero se sigue poblando; ninguna query lo consulta | [`api-chat-sala.md`](./api-chat-sala.md) |
-| Falta la sala de HU-13.2 (mascota perdida/encontrada), que no nace de una solicitud | [`api-chats.md`](./api-chats.md) § «Creación de salas» |
 | Desnormalizar el último mensaje en `Chat`: evaluado y descartado, revisitable con cientos de chats por usuario | [`api-chats.md`](./api-chats.md) |
 | `chat_tipo` sigue sin definirse y no se escribe | [`api-chats.md`](./api-chats.md) |
 
@@ -591,7 +591,11 @@ correo está en [`MAIL.md`](MAIL.md).
 las `Notificacion`, y enganchar `suspenderUsuario` y `suspenderRefugio` de `admin-usuarios` al
 mismo `crearNotificacion`. Mismo trabajo que la parte pendiente de la #25.
 
-## 28. El dueño de un aviso de mascota perdida no puede retirarlo — Baja
+## 28. El dueño de un aviso de mascota perdida no puede retirarlo — ✅ **CERRADA**
+
+> Cerrada el 2026-10-04 por la spec 025 (HU-13.3): quien publicó el aviso lo edita y lo elimina
+> desde Mis publicaciones (`PUT` y `DELETE /animales-perdidos/:id`), y lo marca como resuelto
+> desde HU-13.2. Lo que sigue abajo es el registro de cómo estaba.
 
 **Qué pasa.** `animales-perdidos` (spec 020) tiene alta y listado. La baja por el **admin** existe
 desde la spec 008 (`PATCH /admin/animales-perdidos/:id/baja`), pero quien publicó el aviso no
@@ -643,6 +647,8 @@ refugio la ve contada y no la ve en la lista (spec 023, §9).
 (la opción 2 del pedido en `docs/ideas/USER.md`), o contar en el resumen con el mismo criterio
 que el feed. Lo mismo vale para `GET /publicaciones?usuarioId=`.
 
+---
+
 ## 32. En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy — Media
 
 **Qué pasa.** `CONSTITUTION.md` §4 pide el log de auditoría en un archivo append-only en
@@ -654,3 +660,30 @@ panel de logs de la plataforma. Pero esa retención es limitada y depende del pl
 **Cómo se arregla.** Montar un volumen persistente en `logs/` (Railway lo permite; en Render es
 un disk pago), o mandar stdout a un servicio de logs con retención. Pasarlo a una tabla
 contradice la constitución: sería una decisión de equipo.
+
+---
+
+## 33. `chat` tiene dos FK de origen y nada en base impide llenar las dos — Baja
+
+**Qué pasa.** Desde HU-13.2 (spec 024), `chat` tiene `solicitud_id` y `animal_perdido_id`: las
+dos guardan qué hecho **abrió** la conversación, y sólo se escribe una, la del hecho que creó la
+fila. Esa invariante la sostienen las dos funciones que crean salas
+—`asegurarChatDeSolicitud` y `asegurarChatDeReclamo`— y **nada más**. Un INSERT a mano, un seed
+descuidado o una tercera forma de abrir salas pueden dejar una fila con las dos.
+
+**Qué rompería.** Poco, y menos que antes: la cabecera ya no las lee para decidir nada —el
+contexto sale de las **tarjetas** de `mensaje`, no de estas columnas—, así que una fila con las dos
+no cambia ninguna pantalla. Queda como un dato inconsistente sobre el origen de la sala.
+
+**Cómo se arregla.** Un `CHECK` en la tabla, en SQL a mano porque Prisma no expresa constraints
+de tabla:
+
+```sql
+ALTER TABLE "chat" ADD CONSTRAINT "chat_origen_excluyente"
+  CHECK ("solicitud_id" IS NULL OR "animal_perdido_id" IS NULL);
+```
+
+No se hizo en el PR de la HU para no mezclar un cambio de integridad con la funcionalidad, y
+porque conviene decidir antes si el origen de una sala no debería ser **una** columna polimórfica
+(`origen_tipo` + `origen_id`, como ya hace `reporte_problema`) en lugar de una FK por tipo. Con
+una tercera clase de sala, el patrón actual suma una columna más.
