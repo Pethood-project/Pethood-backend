@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   crearAvisoSchema,
+  editarAvisoSchema,
   filtrosAvisosSchema,
   leerLinkMapaSchema,
   ubicarLugarSchema,
@@ -130,5 +131,30 @@ describe('leerLinkMapaSchema', () => {
     expect(leerLinkMapaSchema.parse({ mapaUrl: ' https://maps.app.goo.gl/abc ' }).mapaUrl).toBe(
       'https://maps.app.goo.gl/abc',
     );
+  });
+});
+
+describe('editarAvisoSchema', () => {
+  const DATOS = {
+    estadoId: '1',
+    especieId: '1',
+    descripcion: 'Labrador dorado.',
+    provincia: 'Mendoza',
+    localidad: 'Godoy Cruz',
+    fechaSuceso: '2026-09-01',
+  };
+
+  it('una sola foto llega como string y queda como lista', () => {
+    expect(editarAvisoSchema.parse({ ...DATOS, imagenes: 'nueva' }).imagenes).toEqual(['nueva']);
+  });
+
+  it('no pide las coordenadas del teléfono: son las del alta', () => {
+    expect(editarAvisoSchema.safeParse(DATOS).success).toBe(true);
+  });
+
+  it('corta en 5 fotos', () => {
+    expect(
+      primerError(editarAvisoSchema.safeParse({ ...DATOS, imagenes: Array(6).fill('nueva') })),
+    ).toBe('Podés subir hasta 5 fotos');
   });
 });

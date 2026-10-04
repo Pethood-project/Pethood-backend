@@ -348,8 +348,8 @@ function aMensajeDto(
     usuarioId: mensaje.usuarioId,
     tipo: mensaje.tipo,
     ...acuseDe(mensaje, marcas),
-    // La tarjeta sólo viaja en el mensaje que la anuncia, y sólo si es la solicitud de ESTA
-    // sala: hoy no hay forma de referenciar otra, y traerla por mensaje sería un N+1.
+    // La tarjeta sólo viaja en el mensaje que la anuncia: el que la pide resuelve la de cada
+    // mensaje (ver `listarHistorial`).
     solicitud:
       mensaje.tipo === 'SOLICITUD' && solicitud !== null && solicitud.id === mensaje.solicitudId
         ? solicitud
@@ -561,21 +561,43 @@ export async function listarHistorial(
   const hayMas = filas.length > query.limite;
   const pagina = hayMas ? filas.slice(0, query.limite) : filas;
 
-  // La solicitud se pide sólo si la página trae la tarjeta que la anuncia: la mayoría de las
-  // páginas son mensajes de texto y no tienen por qué pagar esa query.
-  const solicitudId = pagina.find((fila) => fila.tipo === 'SOLICITUD')?.solicitudId ?? null;
-  const solicitud = solicitudId === null ? null : await repo.buscarSolicitudParaChat(solicitudId);
+  // Cada tarjeta de la página lleva SU solicitud o SU aviso. La conversación es entre las
+  // partes, así que una misma página puede traer dos solicitudes, dos avisos o uno de cada uno:
+  // resolver sólo la primera dejaba a las demás sin carga y el cliente no las dibujaba (el
+  // aviso anterior "desaparecía" al reclamar otro). Se piden sólo las que la página trae: la
+  // mayoría de las páginas son mensajes de texto y no pagan ninguna query.
+  const idsDeSolicitud = new Set(
+    pagina.flatMap((fila) =>
+      fila.tipo === 'SOLICITUD' && fila.solicitudId !== null ? [fila.solicitudId] : [],
+    ),
+  );
+  const idsDeAviso = new Set(
+    pagina.flatMap((fila) =>
+      fila.tipo === 'ANIMAL_PERDIDO' && fila.animalPerdidoId !== null ? [fila.animalPerdidoId] : [],
+    ),
+  );
 
-  const resumen = solicitud === null ? null : aSolicitudEnChat(solicitud);
+  const [solicitudes, avisos] = await Promise.all([
+    Promise.all([...idsDeSolicitud].map((id) => repo.buscarSolicitudParaChat(id))),
+    Promise.all([...idsDeAviso].map((id) => repo.buscarAvisoParaChat(id))),
+  ]);
 
-  // Igual que la solicitud: la tarjeta del aviso se pide sólo si la página la trae. En una
-  // sala de reencuentro es el primer mensaje, así que sólo la paga la última página.
-  const avisoId = pagina.find((fila) => fila.tipo === 'ANIMAL_PERDIDO')?.animalPerdidoId ?? null;
-  const avisoFila = avisoId === null ? null : await repo.buscarAvisoParaChat(avisoId);
-  const aviso = avisoFila === null ? null : aAvisoEnChat(avisoFila);
+  const solicitudPorId = new Map(
+    solicitudes.flatMap((fila) => (fila === null ? [] : [[fila.id, aSolicitudEnChat(fila)]])),
+  );
+  const avisoPorId = new Map(
+    avisos.flatMap((fila) => (fila === null ? [] : [[fila.id, aAvisoEnChat(fila)]])),
+  );
 
   return {
-    mensajes: pagina.map((fila) => aMensajeDto(fila, marcas, resumen, aviso)),
+    mensajes: pagina.map((fila) =>
+      aMensajeDto(
+        fila,
+        marcas,
+        fila.solicitudId === null ? null : (solicitudPorId.get(fila.solicitudId) ?? null),
+        fila.animalPerdidoId === null ? null : (avisoPorId.get(fila.animalPerdidoId) ?? null),
+      ),
+    ),
     hayMas,
     proximoCursor: hayMas ? (pagina[pagina.length - 1]?.id ?? null) : null,
   };

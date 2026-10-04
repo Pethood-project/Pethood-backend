@@ -1,6 +1,6 @@
 # Contrato de API — Mascotas perdidas y encontradas
 
-Endpoints de **HU-13.1 (Registrar mascota perdida)** y **HU-13.2 (Reclamar mascota perdida/encontrada)**, listos para consumir desde `pethood-frontend`. Los nueve están implementados y testeados. Alcance, reglas y criterios de aceptación: [spec 020](specs/020-mascotas-perdidas.md) y [spec 024](specs/024-reclamar-mascota-perdida.md).
+Endpoints de **HU-13.1 (Registrar mascota perdida)**, **HU-13.2 (Reclamar mascota perdida/encontrada)** y **HU-13.3 (Gestión del aviso por quien lo publicó)**, listos para consumir desde `pethood-frontend`. Los trece están implementados y testeados. Alcance, reglas y criterios de aceptación: [spec 020](specs/020-mascotas-perdidas.md), [spec 024](specs/024-reclamar-mascota-perdida.md) y [spec 025](specs/025-gestion-aviso-perdido.md).
 
 > Este documento describe **solo lo que el backend expone**. Los textos de UI y las reglas de la pantalla salen de `REQUISITOS.md`.
 
@@ -91,9 +91,10 @@ Es la forma de cada aviso, tanto en el listado del portal como en la respuesta d
 | `fechaAlta` | Fecha de publicación. Define el orden del portal |
 | `fechaResuelto` | `null` salvo en los avisos Resueltos |
 | `reportante` | Quien publicó el aviso. Es la contraparte del chat de reencuentro (HU-13.2) |
-| `esPropio` | `true` si el aviso es del usuario autenticado. Decide qué botón ofrece el detalle: con `false`, "Enviar mensaje"; con `true`, "Marcar como resuelto" |
+| `lugar` | El pin del lugar, `{ latitud, longitud }`: el que quien publicó vio en el mapa, o el geocodificado. `null` si no se pudo ubicar. Es el mismo punto de `mapaUrl`, así que no expone nada nuevo; la edición lo usa para arrancar con el pin que el aviso ya tenía |
+| `esPropio` | `true` si el aviso es del usuario autenticado. Decide qué botones ofrece el detalle: con `false`, "Enviar mensaje"; con `true`, "Marcar como resuelto", "Editar" y "Eliminar" (HU-13.3) |
 
-Las coordenadas del teléfono de quien reportó **no vienen** (ver "Decisiones"). Las del lugar tampoco vienen sueltas: se usan para `distanciaKm` y `mapaUrl`.
+Las coordenadas del teléfono de quien reportó **no vienen** (ver "Decisiones"). Las del lugar vienen en `lugar`, que es el mismo punto de `mapaUrl`.
 
 ---
 
@@ -493,6 +494,107 @@ El razonamiento completo está en la [spec 024 §9, decisión 2](specs/024-recla
 
 ---
 
+## `GET /api/v1/animales-perdidos/mios` — Mis avisos (HU-13.3)
+
+Los avisos vivos del usuario autenticado, en **cualquier estado**, del más reciente al más viejo. Los usa "Mis publicaciones", que los muestra junto con las publicaciones de adopción. No pagina: es la lista de una sola persona, como `GET /publicaciones/mias`.
+
+### Respuesta 200
+
+Un array de tarjetas (ver "La tarjeta de aviso"), todas con `esPropio: true` y sin `distanciaKm`. Sin avisos, `[]`.
+
+### Errores
+
+Sólo los de autenticación.
+
+---
+
+## `GET /api/v1/animales-perdidos/:id` — Detalle de un aviso
+
+Un aviso por id. Lo usan la tarjeta del aviso en el chat ("Ver el aviso" abre el popup ahí mismo, sin pasar por el portal) y la edición.
+
+### Query params
+
+| Param | Formato | Reglas |
+|---|---|---|
+| `latitud`, `longitud` | número | Opcionales, juntas. Las de quien mira: con ellas viene `distanciaKm`, como en el portal |
+
+### Respuesta 200
+
+La tarjeta del aviso (ver "La tarjeta de aviso").
+
+### Errores
+
+| HTTP | `codigo` | `mensaje` | Cuándo |
+|---|---|---|---|
+| 400 | `VALIDACION` | El id no es válido · La ubicación no es válida | |
+| 404 | `AVISO_ELIMINADO` | Se eliminó esta publicación | Quien lo publicó lo eliminó (o lo dio de baja un admin). **La tarjeta del chat lo sigue mostrando**: el mensaje está pensado para mostrarse al tocarla |
+| 404 | `NO_ENCONTRADO` | No encontramos ese aviso | El id no existe |
+
+---
+
+## `PUT /api/v1/animales-perdidos/:id` — Editar el aviso (HU-13.3)
+
+Sólo quien lo publicó. Reemplaza **todo lo que carga el formulario**, como la edición de una publicación: el cliente manda el aviso entero, no sólo lo que cambió.
+
+### Body (multipart)
+
+Los mismos campos del alta, con estas diferencias:
+
+| Campo | Diferencia con el alta |
+|---|---|
+| `latitud`, `longitud` | **No van**: son las del teléfono al publicar y no cambian |
+| `estadoId` | Perdido o Encontrado (se puede pasar de uno a otro). A Resuelto no: tiene su propio endpoint. En un aviso **ya resuelto** tiene que ser el de Resuelto: el estado no cambia, pero el resto sí se edita |
+| `imagenes` | **Nuevo, repetido.** La galería final en orden: la ruta de cada foto que el aviso ya tenía (tal como la devolvió la API) o `nueva` en el lugar de cada archivo nuevo de `fotos`. De 1 a 5. Mismo formato que `PUT /publicaciones/:id` |
+| `fotos` | Sólo las nuevas, en el orden de sus marcas `nueva` |
+| `lugarLatitud`, `lugarLongitud` | El pin que el usuario vio en el mapa. Sin ellas: si el lugar no cambió queda el pin que tenía; si cambió, se vuelve a geocodificar |
+
+Ejemplo de la galería: el aviso tenía `[a.jpg, b.jpg]`, el usuario sacó `b.jpg` y puso una nueva primero:
+
+```
+imagenes=nueva
+imagenes=/api/v1/archivos/perdidos/a.jpg
+fotos=<archivo>
+```
+
+Las fotos que se sacaron se borran del almacenamiento después de guardar.
+
+### Respuesta 200
+
+La tarjeta del aviso actualizado.
+
+### Errores
+
+Los de validación del alta, más:
+
+| HTTP | `codigo` | `mensaje` |
+|---|---|---|
+| 400 | `FOTO_REQUERIDA` | Agregá una foto del animal |
+| 400 | `VALIDACION` | Las fotos nuevas no coinciden con la galería enviada · Una de las fotos no pertenece al aviso · La galería tiene fotos repetidas |
+| 400 | `ESTADO_INVALIDO` | El aviso tiene que ser de una mascota perdida o encontrada. Para cerrar el caso, marcalo como resuelto. |
+| 403 | `SIN_PERMISO` | Sólo quien publicó el aviso puede editarlo |
+| 404 | `NO_ENCONTRADO` | No encontramos ese aviso (tampoco si se eliminó) |
+| 409 | `AVISO_RESUELTO` | Este caso ya está resuelto: no se puede cambiar su estado |
+
+---
+
+## `DELETE /api/v1/animales-perdidos/:id` — Eliminar el aviso (HU-13.3)
+
+Sólo quien lo publicó. **Baja lógica**: el aviso sale del portal, de las opciones del filtro y de Mis publicaciones.
+
+**Las conversaciones no cambian.** La tarjeta del aviso queda en cada chat donde alguien lo reclamó —es lo que se habló—, con su foto (por eso las fotos no se borran). Al tocarla, `GET /animales-perdidos/:id` responde `AVISO_ELIMINADO`.
+
+### Respuesta — 204 No Content
+
+### Errores
+
+| HTTP | `codigo` | `mensaje` | Cuándo |
+|---|---|---|---|
+| 403 | `SIN_PERMISO` | Sólo quien publicó el aviso puede eliminarlo | |
+| 404 | `NO_ENCONTRADO` | No encontramos ese aviso | No existe o ya se eliminó |
+| 409 | `AVISO_RESUELTO` | No podés eliminar un aviso resuelto: queda como registro de que la mascota volvió con su dueño. | El caso está resuelto. El front lo explica antes de llamar |
+
+---
+
 ## Notas para las pantallas
 
 ### GUI-06 — Mascotas Perdidas (portal)
@@ -507,6 +609,17 @@ El razonamiento completo está en la [spec 024 §9, decisión 2](specs/024-recla
 8. **Estados de la pantalla:** cargando / vacío / error. El vacío es `avisos: []`, no un error.
 9. **Ubicación del usuario:** mandar `latitud` y `longitud` siempre que se tengan, aunque no haya radio: así cada tarjeta trae `distanciaKm`. Sin permiso de ubicación el portal funciona igual, sin distancias ni filtro por cercanía.
 10. **Detalle:** `ubicacion` ya viene armada para mostrar; `mapaUrl` alimenta el botón "Ver en Google Maps".
+11. **Aviso propio** (HU-13.3): además de "Marcar como resuelto", "Editar" y "Eliminar". Eliminar pide confirmación; en uno resuelto no llama al backend y explica por qué no se puede.
+
+### Mis publicaciones (HU-13.3)
+
+1. Desde el perfil **personal**, sumar `GET /animales-perdidos/mios` a las publicaciones de adopción, mezcladas por fecha (`fechaAlta` del aviso, `fechaPublicacion` de la publicación). Desde la vista de refugio no: el aviso es de la persona.
+2. Tocar un aviso abre el mismo popup del portal, con las acciones del dueño.
+
+### Tarjeta del aviso en el chat (HU-13.2)
+
+1. "Ver el aviso" pide `GET /animales-perdidos/:id` y abre el popup encima de la conversación, sin "Enviar mensaje" (ya se está en ella).
+2. Con `AVISO_ELIMINADO`, mostrar el mensaje del backend ("Se eliminó esta publicación"): la tarjeta queda, el aviso no.
 
 ### GUI-25 — Nueva publicación perdida/encontrada
 
@@ -555,6 +668,12 @@ El razonamiento completo está en la [spec 024 §9, decisión 2](specs/024-recla
 | **Sin tope de avisos activos** | La cuota anti-spam de la regla transversal 7 es de `Publicacion`. Si hace falta un límite para avisos, se evalúa con HU-13.3. |
 | **Archivo demasiado grande → `400`, no `413`** | Es el código de toda la API para ese caso (`ARCHIVO_DEMASIADO_GRANDE`). Cambiarlo implicaría tocar el middleware de subida que usan todos los módulos. |
 | **Mensajes de validación en español en todos los módulos** | De paso se corrigieron dos helpers compartidos: `idSchema` devolvía "Expected number, received nan" en inglés cuando faltaba un id (pasaba también en el alta de mascota) y no concordaba en género ("La especie no es válido"). Se sumó `limitePaginaSchema` para que `limite` también falle en español. |
+| **Editar reemplaza el formulario entero, con la galería por marcas** | Es el mismo formulario del alta y el mismo patrón que la edición de una publicación (spec 018): no hay que inventar un formato de "cambios parciales" para la galería. |
+| **Al editar, el pin sólo se vuelve a geocodificar si el lugar cambió** | Si el usuario había corregido el pin a mano, geocodificar de nuevo lo movería sin que lo pidiera. |
+| **Perdido ↔ Encontrado se puede editar; Resuelto no** | Quien cargó el aviso pudo equivocarse de estado. Resolver tiene su botón y su confirmación (HU-13.2), y un caso resuelto es terminal. |
+| **Un aviso resuelto no se elimina** | Es el registro de que la mascota volvió, y "Volvió con su dueño" es lo que la HU pide mostrar. Decisión del equipo del 2026-10-04. |
+| **Eliminar no toca las conversaciones ni las fotos** | La tarjeta del chat es lo que se habló: si desapareciera, el mensaje "es éste" quedaría colgado. El detalle responde `AVISO_ELIMINADO` para que el cliente diga qué pasó. |
+| **`AVISO_ELIMINADO` aparte de `NO_ENCONTRADO`** | "No existe" y "lo eliminaron" se dicen distinto: el segundo es el caso normal desde una tarjeta del chat. Es 404 igual, porque para la API el aviso ya no está. |
 | **SQL a mano sólo para el radio** | Prisma no calcula distancias: el filtro por cercanía usa un `$queryRaw` con Haversine, igual que `idsPublicacionCerca` de publicaciones, y después el listado con cursor se restringe a esos ids. Las opciones del filtro se traen con Prisma (`distinct`) y se agrupan en el servicio. |
 
 ---
@@ -563,15 +682,14 @@ El razonamiento completo está en la [spec 024 §9, decisión 2](specs/024-recla
 
 ### HU-13.3 — Gestión de estados (lo que no entró en HU-13.2)
 
-El paso a **Resuelto** y el cierre de las salas ya están: los implementó HU-13.2 (spec 024), porque "cierra el caso y el chat asociado" no se podía hacer antes de que existiera la sala. Queda:
+El paso a **Resuelto** ya está (HU-13.2, spec 024), y editar y eliminar el aviso por quien lo publicó también (spec 025). Queda:
 
 - **Histórico de estados:** hoy "Resuelto" es **terminal** y alcanzan la FK, `fecha_resuelto` y las columnas de auditoría. Si un aviso se puede **reabrir** o pasar de Perdido a Encontrado, conviene una tabla `AnimalPerdidoEstado` con el mismo patrón que `PublicacionEstado` (una fila vigente por aviso y el historial completo). El sólo lectura de las salas se deriva del estado del aviso, así que reabrir un caso reabre sus salas sin tocar `chat`.
-- **Editar y dar de baja el aviso** por el reportante (baja lógica).
 - **Tope anti-spam** de avisos activos por usuario, si el equipo lo quiere.
 
 ### Avisos viejos sin provincia
 
-Los avisos cargados con el primer corte de HU-13.1 (texto libre) pasaron su texto a `localidad` con la migración `20260930120000_hu131_animal_perdido_provincia_localidad`, pero quedaron **sin provincia ni coordenadas del lugar**: no aparecen en las opciones del filtro por lugar ni tienen distancia. Los del seed se completan solos al correrlo; los cargados a mano en una base de desarrollo, no. Cuando exista la edición del aviso (HU-13.3) se pueden corregir desde la app.
+Los avisos cargados con el primer corte de HU-13.1 (texto libre) pasaron su texto a `localidad` con la migración `20260930120000_hu131_animal_perdido_provincia_localidad`, pero quedaron **sin provincia ni coordenadas del lugar**: no aparecen en las opciones del filtro por lugar ni tienen distancia. Los del seed se completan solos al correrlo; los cargados a mano en una base de desarrollo, no. Se pueden corregir desde la app: Mis publicaciones → el aviso → "Editar" (HU-13.3).
 
 ### Vincular la mascota propia
 

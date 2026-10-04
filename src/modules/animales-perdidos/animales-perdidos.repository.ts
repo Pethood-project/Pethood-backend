@@ -295,3 +295,55 @@ export function marcarResuelto(datos: { id: number; estadoId: number; usuarioId:
     select: SELECCION_TARJETA,
   });
 }
+
+// ─────────────── HU-13.3 · Lo que gestiona quien publicó el aviso ───────────────
+
+/**
+ * Un aviso por id, con su fecha de baja: el detalle tiene que poder decir "se eliminó" en vez
+ * de "no existe", porque la tarjeta del chat lo sigue mostrando después de la baja.
+ */
+export function buscarPorId(id: number) {
+  return prisma.animalPerdido.findUnique({
+    where: { id },
+    select: { ...SELECCION_TARJETA, fechaBaja: true },
+  });
+}
+
+/** Los avisos vivos de una persona, del más reciente al más viejo (Mis publicaciones). */
+export function listarDeReportante(usuarioId: number) {
+  return prisma.animalPerdido.findMany({
+    where: { usuarioReportanteId: usuarioId, fechaBaja: null },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: SELECCION_TARJETA,
+  });
+}
+
+/** `imagenes` llega con al menos una: la primera queda también como portada en `imagenUrl`. */
+export function actualizar(
+  id: number,
+  datos: {
+    nombre: string | null;
+    descripcion: string;
+    imagenes: string[];
+    provincia: string;
+    localidad: string;
+    referencia: string | null;
+    lugarLatitud: number | null;
+    lugarLongitud: number | null;
+    fechaSuceso: Date;
+    especieId: number;
+    estadoAnimalPerdidoId: number;
+  },
+  usuarioId: number,
+) {
+  return prisma.animalPerdido.update({
+    where: { id },
+    data: { ...datos, imagenUrl: datos.imagenes[0]!, ...datosModificacion(usuarioId) },
+    select: SELECCION_TARJETA,
+  });
+}
+
+/** Baja lógica por quien lo publicó. Las fotos quedan: las sigue mostrando el chat. */
+export function darDeBajaPorReportante(id: number, usuarioId: number) {
+  return prisma.animalPerdido.update({ where: { id }, data: datosBaja(usuarioId) });
+}

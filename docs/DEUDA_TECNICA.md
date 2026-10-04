@@ -55,7 +55,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 25 | Reseña no avisa al recibir una reseña (el reporte ya existe, spec 008) | Baja | ambos |
 | 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
 | 27 | Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado | Baja | backend |
-| 28 | El dueño de un aviso de mascota perdida no puede retirarlo (el admin sí, spec 008) | Baja | backend |
+| ~~28~~ | ~~El dueño de un aviso de mascota perdida no puede retirarlo~~ | ✅ cerrada | — |
 | 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
 | 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
 | 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
@@ -590,7 +590,11 @@ correo está en [`MAIL.md`](MAIL.md).
 las `Notificacion`, y enganchar `suspenderUsuario` y `suspenderRefugio` de `admin-usuarios` al
 mismo `crearNotificacion`. Mismo trabajo que la parte pendiente de la #25.
 
-## 28. El dueño de un aviso de mascota perdida no puede retirarlo — Baja
+## 28. El dueño de un aviso de mascota perdida no puede retirarlo — ✅ **CERRADA**
+
+> Cerrada el 2026-10-04 por la spec 025 (HU-13.3): quien publicó el aviso lo edita y lo elimina
+> desde Mis publicaciones (`PUT` y `DELETE /animales-perdidos/:id`), y lo marca como resuelto
+> desde HU-13.2. Lo que sigue abajo es el registro de cómo estaba.
 
 **Qué pasa.** `animales-perdidos` (spec 020) tiene alta y listado. La baja por el **admin** existe
 desde la spec 008 (`PATCH /admin/animales-perdidos/:id/baja`), pero quien publicó el aviso no

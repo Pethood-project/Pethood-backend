@@ -181,7 +181,7 @@ escribían:
 
 | Campo de `aviso` | Qué es |
 |---|---|
-| `id` | Para navegar al aviso en el portal. **El chat no lo duplica** |
+| `id` | Para abrir el aviso: "Ver el aviso" pide `GET /animales-perdidos/:id` y muestra su popup en la sala. **El chat no lo duplica** |
 | `nombre` | Puede ser `null` (un aviso "Encontrado" no exige nombre): mostrar la especie en su lugar, como hace el portal |
 | `especie` | Nombre del catálogo, o `null` en avisos cargados antes de HU-13.1 |
 | `estado` | Estado **vigente**: "Perdido", "Encontrado" o "Resuelto". El color lo decide el cliente |
@@ -203,6 +203,10 @@ la cabecera nombra la más reciente (ver `contexto`).
 
 **Resolver el aviso no manda ningún mensaje ni cambia la sala.** Lo único que cambia es el
 `estado` que trae la tarjeta, que se resuelve en cada pedido.
+
+**Eliminar el aviso (HU-13.3) tampoco**: la tarjeta queda, con su foto y el último estado, porque
+es lo que se habló. Al tocarla, `GET /animales-perdidos/:id` responde `AVISO_ELIMINADO` ("Se
+eliminó esta publicación") y el cliente lo muestra.
 
 ---
 

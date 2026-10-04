@@ -36,3 +36,4 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 022 | Sistema de Reputación (HU-10.1 a HU-10.6) | 13 | IMPLEMENTADA |
 | 023 | Perfiles públicos: persona y refugio (GUI-26) | 13 | IMPLEMENTADA |
 | 024 | Reclamar mascota perdida/encontrada (HU-13.2) | 13 | APROBADA |
+| 025 | Gestión del aviso de mascota perdida por quien lo publicó (HU-13.3) | 13 | IMPLEMENTADA |

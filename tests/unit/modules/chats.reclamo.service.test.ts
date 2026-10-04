@@ -334,3 +334,66 @@ describe('resolver un aviso no toca la conversación', () => {
     expect(cabecera).not.toHaveProperty('soloLectura');
   });
 });
+
+describe('el historial de una sala con varias tarjetas', () => {
+  /** Una fila de `listarMensajes` que anuncia una tarjeta. */
+  function tarjeta(
+    id: number,
+    carga: { animalPerdidoId?: number; solicitudId?: number },
+    fechaAlta: Date,
+  ) {
+    return {
+      id,
+      chatId: CHAT,
+      contenido: '',
+      imagenUrl: null,
+      imagenes: [],
+      tipo:
+        carga.animalPerdidoId === undefined ? ('SOLICITUD' as const) : ('ANIMAL_PERDIDO' as const),
+      solicitudId: carga.solicitudId ?? null,
+      animalPerdidoId: carga.animalPerdidoId ?? null,
+      usuarioId: USUARIO_SISTEMA_ID,
+      fechaAlta,
+    };
+  }
+
+  it('cada tarjeta trae su propio aviso: reclamar otro no borra el anterior', async () => {
+    const OTRO_AVISO = 13;
+    vi.mocked(repo.listarMensajes).mockResolvedValue([
+      tarjeta(21, { animalPerdidoId: OTRO_AVISO }, FECHA),
+      tarjeta(20, { animalPerdidoId: AVISO }, FECHA_VIEJA),
+    ] as never);
+    vi.mocked(repo.buscarAvisoParaChat).mockImplementation(
+      async (id) => ({ ...aviso({ nombre: id === AVISO ? 'Michi' : 'Coco' }), id }) as never,
+    );
+
+    const { mensajes } = await service.listarHistorial(RECLAMANTE, CHAT, { limite: 30 });
+
+    expect(mensajes.map((mensaje) => mensaje.aviso?.nombre)).toEqual(['Coco', 'Michi']);
+  });
+
+  it('lo mismo con dos solicitudes en la misma página', async () => {
+    vi.mocked(repo.listarMensajes).mockResolvedValue([
+      tarjeta(31, { solicitudId: 91 }, FECHA),
+      tarjeta(30, { solicitudId: 90 }, FECHA_VIEJA),
+    ] as never);
+    vi.mocked(repo.buscarSolicitudParaChat).mockImplementation(
+      async (id) => ({ ...solicitud(), id }) as never,
+    );
+
+    const { mensajes } = await service.listarHistorial(RECLAMANTE, CHAT, { limite: 30 });
+
+    expect(mensajes.map((mensaje) => mensaje.solicitud?.id)).toEqual([91, 90]);
+  });
+
+  it('pide cada aviso una sola vez aunque aparezca en varias tarjetas', async () => {
+    vi.mocked(repo.listarMensajes).mockResolvedValue([
+      tarjeta(41, { animalPerdidoId: AVISO }, FECHA),
+      tarjeta(40, { animalPerdidoId: AVISO }, FECHA_VIEJA),
+    ] as never);
+
+    await service.listarHistorial(RECLAMANTE, CHAT, { limite: 30 });
+
+    expect(repo.buscarAvisoParaChat).toHaveBeenCalledTimes(1);
+  });
+});

@@ -5,6 +5,8 @@ import { idDeParametro } from '../../shared/responder';
 import type { MotivoBody } from '../admin-usuarios/admin-usuarios.dto';
 import {
   crearAvisoSchema,
+  detalleAvisoQuerySchema,
+  editarAvisoSchema,
   filtrosAvisosSchema,
   leerLinkMapaSchema,
   ubicarLugarSchema,
@@ -104,6 +106,55 @@ export async function reclamar(req: Request, res: Response, next: NextFunction):
 export async function resolver(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     res.json(await service.marcarResuelto(idDeParametro(req), req.usuario!.usuarioId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** El detalle de un aviso (desde la tarjeta del chat o Mis publicaciones). */
+export async function obtener(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { latitud, longitud } = parsearOFallar(detalleAvisoQuerySchema, req.query);
+    const usuario = latitud !== undefined && longitud !== undefined ? { latitud, longitud } : null;
+
+    res.json(await service.obtenerAviso(idDeParametro(req), req.usuario!.usuarioId, usuario));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** HU-13.3: los avisos del usuario, para Mis publicaciones. */
+export async function listarMios(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json(await service.listarMisAvisos(req.usuario!.usuarioId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** HU-13.3: edición por quien lo publicó. Multipart, como el alta. */
+export async function editar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const aviso = await service.editarAviso(
+      idDeParametro(req),
+      parsearOFallar(editarAvisoSchema, req.body),
+      {
+        usuarioId: req.usuario!.usuarioId,
+        archivos: Array.isArray(req.files) ? req.files : [],
+      },
+    );
+
+    res.json(aviso);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** HU-13.3: baja por quien lo publicó. Devuelve 204. */
+export async function eliminar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    await service.eliminarAviso(idDeParametro(req), req.usuario!.usuarioId);
+    res.status(204).send();
   } catch (err) {
     next(err);
   }
