@@ -68,6 +68,14 @@ export function listarChatsActivosDeUsuario(usuarioId: number) {
  * Hace falta para saber de qué lado del mostrador está: en un chat con refugio, el adoptante
  * ve al refugio y el miembro del refugio ve al adoptante.
  */
+/** Nombre para mostrar del emisor de un mensaje (spec 004: texto de la notificación agrupada). */
+export function buscarNombreUsuario(usuarioId: number) {
+  return prisma.usuario.findFirst({
+    where: { id: usuarioId },
+    select: { nombre: true, apellido: true },
+  });
+}
+
 export function buscarRefugioDeUsuario(usuarioId: number) {
   return prisma.usuario.findUnique({
     where: { id: usuarioId },

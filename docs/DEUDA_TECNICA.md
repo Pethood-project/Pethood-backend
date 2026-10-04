@@ -54,6 +54,8 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 =======
 | 21 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
 >>>>>>> origin/dev
+| 23 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
+| 24 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
 
 > **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
 > `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
@@ -520,3 +522,21 @@ el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se no
 sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
 consulta.
 >>>>>>> origin/dev
+
+---
+
+## 23. Notificaciones de Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica y Soporte — pausado a propósito
+
+**Qué pasa.** La spec 004 (Notificaciones) implementa el servicio central `notificar(...)`,
+la bandeja y los escenarios de "Fase 1" del documento fuente del módulo (Cuenta, Solicitudes,
+Chat, Seguimiento, Refugios/Administración). Los escenarios de "Fase 2" y "Fase 3" —
+Campañas, Mascotas Perdidas/Encontradas, Reputación, Moderación (salvo "cuenta suspendida",
+que sí está), Historia Clínica y Soporte— quedaron sin implementar, no por olvido: dependen de
+módulos que hoy no existen (Campañas, Reputación como endpoints propios) o que el equipo
+prefirió no tocar todavía (Mascotas Perdidas ya tiene módulo, pero sus notificaciones quedaron
+para cuando el resto de la app esté más completo). Decisión del usuario, 2026-09-29.
+
+**Cómo se retoma.** El servicio central ya existe (`modules/notificaciones/notificaciones.service.ts`,
+función `notificar(...)`): agregar estos escenarios es, en cada módulo nuevo, la misma llamada
+de 3-6 líneas que ya se usa en `solicitudes`/`seguimiento`/`chats` — no hace falta rediseñar
+nada, solo enganchar el módulo dueño cuando exista.

@@ -46,6 +46,19 @@ function mapearErrorUnico(error: unknown): never {
   throw error;
 }
 
+/** Cuentas activas, registradas hace 2 días o más, con foto, teléfono o localidad sin cargar
+ * (spec 004: recordatorio de "perfil incompleto"). El job de arriba decide si ya se avisó. */
+export function listarPerfilesIncompletos(desde: Date) {
+  return prisma.usuario.findMany({
+    where: {
+      fechaBaja: null,
+      fechaAlta: { lte: desde },
+      OR: [{ imagenUrl: null }, { telefono: null }, { ubicacion: null }],
+    },
+    select: { id: true, nombre: true },
+  });
+}
+
 export async function buscarPerfil(usuarioId: number): Promise<UsuarioPerfil | null> {
   return prisma.usuario.findFirst({
     where: { id: usuarioId, fechaBaja: null },

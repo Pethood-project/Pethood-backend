@@ -310,6 +310,7 @@ model Usuario {
   chats                UsuarioChat[]
   mensajes             Mensaje[]
   notificaciones       Notificacion[]
+  dispositivosPush     DispositivoPush[]
   hogares              Hogar[]
   donaciones           Donacion[]
   reportesPerdido      AnimalPerdido[]
@@ -812,11 +813,18 @@ model Mensaje {
 // ─────────────── NOTIFICACIONES ───────────────
 
 model Notificacion {
-  id        Int     @id @default(autoincrement()) @map("notificacion_id")
-  tipo      String  @map("notificacion_tipo")
-  mensaje   String  @map("notificacion_mensaje")
-  leido     Boolean @default(false) @map("notificacion_leido")
-  usuarioId Int     @map("usuario_id")
+  id      Int     @id @default(autoincrement()) @map("notificacion_id")
+  tipo    String  @map("notificacion_tipo")
+  mensaje String  @map("notificacion_mensaje")
+  leido   Boolean @default(false) @map("notificacion_leido")
+
+  // Navegación polimórfica (spec 004): a qué pantalla ir al tocarla. NO es una FK real —
+  // apunta a Solicitud, Chat, Seguimiento, Publicacion, Refugio, etc. según `entidadTipo`. Si
+  // la entidad ya no existe, el cliente lo muestra como "ya no disponible" en vez de romper.
+  entidadTipo String? @map("notificacion_entidad_tipo")
+  entidadId   Int?    @map("notificacion_entidad_id")
+
+  usuarioId Int @map("usuario_id")
 
   usuarioAlta         Int       @map("notificacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("notificacion_fecha_alta")
@@ -827,7 +835,35 @@ model Notificacion {
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
+  // Bandeja (GET /notificaciones): más recientes primero, solo las propias y no dadas de baja.
+  @@index([usuarioId, fechaBaja, fechaAlta])
+  // Upsert del mensaje de chat agrupado: "la notificación de CHAT sin leer de este chat".
+  @@index([usuarioId, entidadTipo, entidadId, leido])
   @@map("notificacion")
+}
+
+model DispositivoPush {
+  id             Int    @id @default(autoincrement()) @map("dispositivo_push_id")
+  expoPushToken  String @map("dispositivo_push_expo_push_token")
+  plataforma     String @map("dispositivo_push_plataforma") // 'ios' | 'android'
+  usuarioId      Int    @map("usuario_id")
+
+  usuarioAlta         Int       @map("dispositivo_push_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("dispositivo_push_fecha_alta")
+  usuarioModificacion Int?      @map("dispositivo_push_usuario_modificacion")
+  fechaModificacion   DateTime? @map("dispositivo_push_fecha_modificacion")
+  usuarioBaja         Int?      @map("dispositivo_push_usuario_baja")
+  fechaBaja           DateTime? @map("dispositivo_push_fecha_baja")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  // Mismo dispositivo físico puede haber tenido push de otro usuario antes (dispositivo
+  // compartido): la unicidad es por par, no por token solo. Reloguearse el mismo usuario en el
+  // mismo dispositivo actualiza esta fila (upsert) en vez de duplicarla.
+  @@unique([usuarioId, expoPushToken])
+  // Envío: "todos los dispositivos activos de este usuario".
+  @@index([usuarioId, fechaBaja])
+  @@map("dispositivo_push")
 }
 
 // ─────────────── HOGARES DE TRÁNSITO ───────────────

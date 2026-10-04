@@ -31,6 +31,59 @@ function historicoCompleto() {
   };
 }
 
+/** Otras solicitudes "Pendiente" sobre la misma publicación (spec 004: se avisa a sus autores
+ * cuando una de las otras se aprueba — "la mascota que solicitaste fue adoptada por otra"). */
+export async function listarOtrasPendientesDePublicacion(
+  publicacionId: number,
+  excluirSolicitudId: number,
+) {
+  const vivas = await prisma.solicitud.findMany({
+    where: { publicacionId, fechaBaja: null, id: { not: excluirSolicitudId } },
+    select: {
+      id: true,
+      usuarioId: true,
+      historicoEstados: {
+        where: { fechaBaja: null },
+        select: { estadoSolicitud: { select: { nombre: true } } },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+    },
+  });
+
+  return vivas.filter((s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente');
+}
+
+/** Solicitudes "Pendiente" sobre esta publicación (spec 004: se avisa a sus autores si el
+ * publicador la pausa o la da de baja). */
+export async function listarPendientesDePublicacion(
+  publicacionId: number,
+): Promise<{ id: number; usuarioId: number }[]> {
+  const vivas = await prisma.solicitud.findMany({
+    where: { publicacionId, fechaBaja: null },
+    select: {
+      id: true,
+      usuarioId: true,
+      historicoEstados: {
+        where: { fechaBaja: null },
+        select: { estadoSolicitud: { select: { nombre: true } } },
+        orderBy: { fechaAlta: 'desc' },
+        take: 1,
+      },
+    },
+  });
+
+  return vivas.filter((s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente');
+}
+
+/** Ids de los miembros activos de un refugio — a quién avisarle algo del lado publicador. */
+export function listarIdsMiembrosDeRefugio(refugioId: number): Promise<{ id: number }[]> {
+  return prisma.usuario.findMany({
+    where: { refugioId, fechaBaja: null },
+    select: { id: true },
+  });
+}
+
 export function buscarUsuarioConRefugio(usuarioId: number) {
   return prisma.usuario.findFirst({ where: { id: usuarioId, fechaBaja: null } });
 }
@@ -322,6 +375,32 @@ export function listarSinRespuesta() {
         take: 1,
       },
     },
+  });
+}
+
+/** Igual que `listarSinRespuesta`, con la mascota/publicación — para el job de la spec 004
+ * ("pendiente hace muchos días"), que necesita a quién avisarle y con qué nombre. */
+export function listarSinRespuestaConDetalle() {
+  return prisma.solicitud.findMany({
+    where: { fechaBaja: null, fechaRespuesta: null },
+    include: {
+      ...RELACIONES_SOLICITUD,
+      historicoEstados: historicoCompleto(),
+    },
+  });
+}
+
+/** Solicitudes de tránsito aprobadas, con fechas — para el job de tránsitos (spec 004). */
+export function listarTransitosAprobados() {
+  return prisma.solicitud.findMany({
+    where: {
+      fechaBaja: null,
+      tipoSolicitud: { nombre: 'Transito' },
+      fechaInicioTransito: { not: null },
+      fechaFinTransito: { not: null },
+      historicoEstados: { some: { fechaBaja: null, estadoSolicitud: { nombre: 'Aprobada' } } },
+    },
+    include: { ...RELACIONES_SOLICITUD, historicoEstados: historicoCompleto() },
   });
 }
 

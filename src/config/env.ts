@@ -33,6 +33,19 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   R2_BUCKET_NAME: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   R2_PUBLIC_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+
+  // Cola de notificaciones (spec 004): Redis para BullMQ. En dev apunta al `redis` de
+  // docker-compose; en producción, a Upstash (`rediss://...`).
+  REDIS_URL: z.string().default('redis://localhost:6379'),
+
+  // Resend (mail transaccional). Sin key, el envío de mail queda deshabilitado y solo se
+  // loguea — igual que R2, no debe tirar abajo el server en un ambiente sin configurar.
+  RESEND_API_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MAIL_FROM: z.string().default('PetHood <onboarding@resend.dev>'),
+
+  // Expo Push. El "access token" solo hace falta si se activa Enhanced Security en el
+  // dashboard de Expo; sin él, el envío funciona igual.
+  EXPO_ACCESS_TOKEN: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
 });
 
 const parsed = envSchema.safeParse(process.env);

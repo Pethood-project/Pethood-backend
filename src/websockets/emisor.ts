@@ -12,7 +12,9 @@
  */
 import type { Server } from 'socket.io';
 import type { MensajeDto } from '../modules/chats/chats.dto';
+import type { NotificacionItemDto } from '../modules/notificaciones/notificaciones.dto';
 import { EVENTOS, salaChat, salaUsuario } from './eventos';
+import { socketsDe } from './presencia';
 
 let io: Server | null = null;
 
@@ -86,4 +88,36 @@ export function emitirNoLeidos(usuarioId: number, chatId: number, noLeidos: numb
 /** Cambio de presencia de un participante, para el subtítulo del header de la sala. */
 export function emitirPresencia(chatId: number, usuarioId: number, enLinea: boolean): void {
   io?.to(salaChat(chatId)).emit(EVENTOS.PRESENCIA, { chatId, usuarioId, enLinea });
+}
+
+/**
+ * ¿Alguno de los sockets ABIERTOS de este usuario está, ahora mismo, adentro de la sala de
+ * ESTE chat puntual? Es más fino que `estaEnLinea` (presencia.ts): un usuario puede tener la
+ * app abierta en otra pantalla y no estar "viendo" esta conversación (spec 004, regla 4).
+ *
+ * Sin servidor registrado (tests, jobs, scripts) da `false` — mismo criterio best-effort que
+ * el resto de este archivo: sin socket no hay a quién preguntarle, así que se asume que no
+ * la tiene abierta y se notifica igual.
+ */
+export function estaEnSalaChat(usuarioId: number, chatId: number): boolean {
+  if (!io) return false;
+
+  const socketsDeLaSala = io.sockets.adapter.rooms.get(salaChat(chatId));
+  if (!socketsDeLaSala) return false;
+
+  for (const socketId of socketsDe(usuarioId)) {
+    if (socketsDeLaSala.has(socketId)) return true;
+  }
+
+  return false;
+}
+
+/** Notificación nueva de bandeja, a todos los dispositivos abiertos del destinatario. */
+export function emitirNotificacionNueva(usuarioId: number, notificacion: NotificacionItemDto): void {
+  io?.to(salaUsuario(usuarioId)).emit(EVENTOS.NOTIFICACION_NUEVA, notificacion);
+}
+
+/** Contador de no leídas de la campana, recalculado — para no hacerle sumar al cliente. */
+export function emitirContadorNotificaciones(usuarioId: number, contador: number): void {
+  io?.to(salaUsuario(usuarioId)).emit(EVENTOS.NOTIFICACION_CONTADOR, { contador });
 }

@@ -23,6 +23,10 @@ export const EVENTOS = {
   PRESENCIA: 'chat:presencia',
   /** server → cliente. Error no solicitado (ej. token vencido con el socket abierto). */
   ERROR: 'chat:error',
+  /** server → sala personal. Notificación nueva de bandeja (spec 004, regla 3). */
+  NOTIFICACION_NUEVA: 'notificacion:nueva',
+  /** server → sala personal. Contador de no leídas de la campana, recalculado. */
+  NOTIFICACION_CONTADOR: 'notificacion:contador',
 } as const;
 
 /**

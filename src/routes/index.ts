@@ -10,6 +10,7 @@ import { dashboardRefugioRouter } from '../modules/dashboard-refugio/dashboard-r
 import { favoritosRouter } from '../modules/favoritos/favoritos.routes';
 import { historiaClinicaRouter } from '../modules/historia-clinica/historia-clinica.routes';
 import { mascotasRouter } from '../modules/mascotas/mascotas.routes';
+import { notificacionesRouter } from '../modules/notificaciones/notificaciones.routes';
 import { perfilRefugioRouter } from '../modules/perfil-refugio/perfil-refugio.routes';
 import { publicacionesRouter } from '../modules/publicaciones/publicaciones.routes';
 import { solicitudesRouter } from '../modules/solicitudes/solicitudes.routes';
@@ -42,6 +43,7 @@ apiRouter.use('/', catalogosRouter);
 apiRouter.use('/', historiaClinicaRouter); // spec 005
 apiRouter.use('/', seguimientoRouter); // spec 011
 apiRouter.use('/', soporteRouter); // spec 015
+apiRouter.use('/notificaciones', notificacionesRouter); // spec 004
 
 // Módulos (descomentar a medida que se implementan las specs):
 // apiRouter.use('/usuarios', usuariosRouter);    // spec 001

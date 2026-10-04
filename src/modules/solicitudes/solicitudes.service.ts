@@ -17,6 +17,7 @@
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
 import * as chats from '../chats/chats.service';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
@@ -88,6 +89,27 @@ const visiblePor =
   (solicitud: SolicitudConDetalle): boolean =>
     (actor.ambito === 'PERSONAL' && solicitud.usuarioId === actor.id) ||
     esPropiaDelActor(solicitud.publicacion.mascota, actor);
+
+/**
+ * A quién avisarle algo del lado de quien publicó la mascota (spec 004): todos los miembros
+ * activos si es de un refugio, o solo el publicador si la mascota es personal — mismo
+ * criterio que ya resuelve `chats.service.ts` para abrir la sala.
+ */
+/** Para `publicaciones.service.ts` (spec 004): a quién avisarle si esta publicación se pausa/da de baja. */
+export function listarPendientesDePublicacion(
+  publicacionId: number,
+): Promise<{ id: number; usuarioId: number }[]> {
+  return repo.listarPendientesDePublicacion(publicacionId);
+}
+
+export async function destinatariosPublicador(mascota: {
+  refugioId: number | null;
+}, publicacionUsuarioId: number): Promise<number[]> {
+  if (mascota.refugioId === null) return [publicacionUsuarioId];
+
+  const miembros = await repo.listarIdsMiembrosDeRefugio(mascota.refugioId);
+  return miembros.map((m) => m.id);
+}
 
 /**
  * El período va como `AAAA-MM-DD` y no como instante ISO: es un día del calendario, y un
@@ -400,7 +422,40 @@ export async function crearSolicitud(
     console.error('No se pudo abrir el chat de la solicitud', creada.id, err);
   });
 
+  await avisarSolicitudNueva(creada);
+
   return aDetalleDto(creada);
+}
+
+/**
+ * HU-4.2: "X quiere adoptar a Y", al refugio o al publicador particular.
+ *
+ * Best-effort, mismo criterio que `chats.asegurarChatDeSolicitud` unas líneas arriba: la
+ * solicitud ya está creada y confirmada; que el aviso falle no puede convertir eso en un 500.
+ */
+async function avisarSolicitudNueva(solicitud: SolicitudConDetalle): Promise<void> {
+  try {
+    const mascota = solicitud.publicacion.mascota;
+    const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
+    const nombreMascota = mascota.nombre ?? 'tu mascota';
+    const nombreAdoptante = `${solicitud.usuario.nombre} ${solicitud.usuario.apellido}`;
+
+    await Promise.all(
+      destinatarios.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'SOLICITUD_NUEVA',
+          mensaje: `${nombreAdoptante} quiere adoptar a ${nombreMascota}`,
+          asuntoMail: `Nueva solicitud de adopción — ${nombreMascota}`,
+          entidadTipo: 'SOLICITUD',
+          entidadId: solicitud.id,
+          canal: { mail: true, push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar la solicitud nueva', solicitud.id, err);
+  }
 }
 
 /**
@@ -510,5 +565,183 @@ export async function resolverSolicitud(
     detalle: `${vigenteAlLeer.nombre} -> ${datos.estado}`,
   });
 
+  await avisarSolicitudResuelta(actualizada);
+
   return aDetalleDto(actualizada);
+}
+
+/**
+ * HU-4.1: aceptada o rechazada, al adoptante. Aceptada suma los efectos de la spec 004.
+ * Best-effort: la resolución de la solicitud ya se escribió, un aviso que falla no la revierte.
+ */
+async function avisarSolicitudResuelta(solicitud: SolicitudConDetalle): Promise<void> {
+  try {
+    const mascota = solicitud.publicacion.mascota;
+    const nombreMascota = mascota.nombre ?? 'la mascota';
+    const vigente = solicitud.historicoEstados[0]!.estadoSolicitud.nombre;
+
+    if (vigente === 'Aprobada') {
+      await notificaciones.notificar({
+        usuarioId: solicitud.usuarioId,
+        tipo: 'SOLICITUD_ACEPTADA',
+        mensaje: `¡Tu solicitud por ${nombreMascota} fue aceptada! Ya podés coordinar por el chat.`,
+        asuntoMail: `Tu solicitud por ${nombreMascota} fue aceptada`,
+        entidadTipo: 'SOLICITUD',
+        entidadId: solicitud.id,
+        canal: { mail: true, push: true },
+      });
+
+      // Adopción completada: al publicador le arranca el seguimiento y la historia clínica
+      // queda accesible. Tránsito no libera la mascota, así que no aplica.
+      if (solicitud.tipoSolicitud.nombre === 'Adopcion') {
+        const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
+        await Promise.all(
+          destinatarios.map((destId) =>
+            notificaciones.notificar({
+              usuarioId: destId,
+              tipo: 'ADOPCION_COMPLETADA',
+              mensaje: `Adopción de ${nombreMascota} completada — ya arrancó el seguimiento`,
+              entidadTipo: 'SOLICITUD',
+              entidadId: solicitud.id,
+              canal: { push: true },
+            }),
+          ),
+        );
+
+        await avisarOtrosPretendientes(solicitud);
+      }
+
+      return;
+    }
+
+    await notificaciones.notificar({
+      usuarioId: solicitud.usuarioId,
+      tipo: 'SOLICITUD_RECHAZADA',
+      mensaje: `Tu solicitud por ${nombreMascota} no fue aceptada esta vez`,
+      asuntoMail: `Tu solicitud por ${nombreMascota} fue rechazada`,
+      entidadTipo: 'SOLICITUD',
+      entidadId: solicitud.id,
+      canal: { mail: true, push: true },
+    });
+  } catch (err) {
+    console.error('No se pudo avisar la resolución de la solicitud', solicitud.id, err);
+  }
+}
+
+/** "La mascota que solicitaste fue adoptada por otra persona", a las demás pendientes. */
+async function avisarOtrosPretendientes(solicitud: SolicitudConDetalle): Promise<void> {
+  const otras = await repo.listarOtrasPendientesDePublicacion(
+    solicitud.publicacion.id,
+    solicitud.id,
+  );
+  if (otras.length === 0) return;
+
+  const nombreMascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
+
+  await Promise.all(
+    otras.map((otra) =>
+      notificaciones.notificar({
+        usuarioId: otra.usuarioId,
+        tipo: 'SOLICITUD_MASCOTA_ADOPTADA_POR_OTRO',
+        mensaje: `${nombreMascota} ya fue adoptada por otra persona`,
+        entidadTipo: 'SOLICITUD',
+        entidadId: otra.id,
+        canal: { push: true },
+      }),
+    ),
+  );
+}
+
+// ─────────────── Jobs programados (spec 004, entregable 4) ───────────────
+
+const DIAS_PENDIENTE_MUCHO = 3;
+const MS_POR_DIA = 24 * 60 * 60 * 1000;
+
+/** "Solicitud pendiente hace muchos días sin responder", al publicador. Un aviso por solicitud. */
+export async function avisarPendientesHaceMucho(ahora: Date = new Date()): Promise<void> {
+  const solicitudes = await repo.listarSinRespuestaConDetalle();
+  const limite = DIAS_PENDIENTE_MUCHO * MS_POR_DIA;
+
+  for (const solicitud of solicitudes) {
+    if (solicitud.historicoEstados[0]?.estadoSolicitud.nombre !== 'Pendiente') continue;
+    if (solicitud.fechaAlta.getTime() + limite > ahora.getTime()) continue;
+
+    const mascota = solicitud.publicacion.mascota;
+    const nombreMascota = mascota.nombre ?? 'la mascota';
+    const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
+
+    await Promise.all(
+      destinatarios.map((usuarioId) =>
+        notificaciones.notificarUnaVez({
+          usuarioId,
+          tipo: 'SOLICITUD_PENDIENTE_HACE_MUCHO',
+          mensaje: `Tenés una solicitud por ${nombreMascota} sin responder hace varios días`,
+          asuntoMail: `Solicitud pendiente — ${nombreMascota}`,
+          entidadTipo: 'SOLICITUD',
+          entidadId: solicitud.id,
+          canal: { mail: true },
+        }),
+      ),
+    );
+  }
+}
+
+const DIAS_TRANSITO_POR_VENCER = 3;
+
+/** "Tránsito por comenzar" (día anterior) y "próximo a la fecha límite" (spec 004). */
+export async function avisarTransitosProgramados(ahora: Date = new Date()): Promise<void> {
+  const solicitudes = await repo.listarTransitosAprobados();
+
+  for (const solicitud of solicitudes) {
+    if (solicitud.historicoEstados[0]?.estadoSolicitud.nombre !== 'Aprobada') continue;
+
+    const { fechaInicioTransito: inicio, fechaFinTransito: fin } = solicitud;
+    if (!inicio || !fin) continue;
+
+    const mascota = solicitud.publicacion.mascota;
+    const nombreMascota = mascota.nombre ?? 'la mascota';
+    const destinatariosRefugio = await destinatariosPublicador(
+      mascota,
+      solicitud.publicacion.usuarioId,
+    );
+    const destinatarios = [solicitud.usuarioId, ...destinatariosRefugio];
+
+    const faltanParaInicio = inicio.getTime() - ahora.getTime();
+    const yaEmpezoYFaltanParaFin = fin.getTime() - ahora.getTime();
+
+    // Ventana de un día: el job corre 1x/día, así que basta con "cae dentro de las próximas
+    // 24-48h" para pegarle una sola vez sin exigir precisión de reloj.
+    if (faltanParaInicio > 0 && faltanParaInicio <= MS_POR_DIA) {
+      await Promise.all(
+        destinatarios.map((usuarioId) =>
+          notificaciones.notificarUnaVez({
+            usuarioId,
+            tipo: 'TRANSITO_POR_COMENZAR',
+            mensaje: `El tránsito de ${nombreMascota} empieza mañana`,
+            entidadTipo: 'SOLICITUD',
+            entidadId: solicitud.id,
+            canal: { push: true },
+          }),
+        ),
+      );
+    }
+
+    if (
+      yaEmpezoYFaltanParaFin > 0 &&
+      yaEmpezoYFaltanParaFin <= DIAS_TRANSITO_POR_VENCER * MS_POR_DIA
+    ) {
+      await Promise.all(
+        destinatarios.map((usuarioId) =>
+          notificaciones.notificarUnaVez({
+            usuarioId,
+            tipo: 'TRANSITO_POR_VENCER',
+            mensaje: `El tránsito de ${nombreMascota} está por terminar`,
+            entidadTipo: 'SOLICITUD',
+            entidadId: solicitud.id,
+            canal: { push: true },
+          }),
+        ),
+      );
+    }
+  }
 }

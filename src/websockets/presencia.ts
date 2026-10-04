@@ -49,6 +49,14 @@ export function estaEnLinea(usuarioId: number): boolean {
   return socketsPorUsuario.has(usuarioId);
 }
 
+const SIN_SOCKETS: ReadonlySet<string> = new Set();
+
+/** Ids de socket ABIERTOS de este usuario (puede tener más de uno: celular + web). Usado por
+ * `emisor.estaEnSalaChat` para cruzarlos contra los sockets de una sala puntual. */
+export function socketsDe(usuarioId: number): ReadonlySet<string> {
+  return socketsPorUsuario.get(usuarioId) ?? SIN_SOCKETS;
+}
+
 /** Sólo para tests: deja el registro como recién arrancado. */
 export function limpiarPresencia(): void {
   socketsPorUsuario.clear();

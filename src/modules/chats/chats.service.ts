@@ -29,6 +29,7 @@ import { firmarUrlArchivo, firmarUrlsArchivo } from '../../shared/urlFirmada';
 import { estaEnLinea } from '../../websockets/presencia';
 import * as emisor from '../../websockets/emisor';
 import { LIMITES } from '../../shared/validation/limits';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
   CabeceraChatDto,
   ConversacionDto,
@@ -619,7 +620,51 @@ export async function enviarMensaje(
 
   emisor.emitirMensajeNuevo(dto, participantes);
 
+  await avisarDestinatarios(contexto.usuarioId, contexto.chatId, participantes);
+
   return dto;
+}
+
+/**
+ * Spec 004, regla 4: un mensaje de chat se notifica (bandeja/push) solo si el destinatario
+ * NO tiene esa conversación abierta en este momento, y los mensajes seguidos se agrupan en
+ * una sola fila ("Tenés N mensajes nuevos de X") — lo resuelve
+ * `notificaciones.notificarMensajeChat` con un upsert; acá solo se arma el texto y se decide
+ * a quién le toca.
+ */
+async function avisarDestinatarios(
+  remitenteId: number,
+  chatId: number,
+  participantesIds: number[],
+): Promise<void> {
+  const destinatarios = participantesIds.filter((id) => id !== remitenteId);
+  if (destinatarios.length === 0) return;
+
+  // Best-effort, mismo criterio que `asegurarChatDeSolicitud`: el mensaje ya se guardó y se
+  // emitió por socket; que la bandeja/push falle no puede convertir el envío en un error.
+  try {
+    const remitente = await repo.buscarNombreUsuario(remitenteId);
+    const nombreRemitente = remitente ? `${remitente.nombre} ${remitente.apellido}` : 'alguien';
+
+    await Promise.all(
+      destinatarios.map(async (destinatarioId) => {
+        // Ya la está viendo: la recibe en vivo por el socket, no hace falta bandeja ni push.
+        if (emisor.estaEnSalaChat(destinatarioId, chatId)) return;
+
+        const [fila] = (await repo.contarNoLeidosPorChat(destinatarioId, [chatId])) ?? [];
+        const noLeidos = fila?.noLeidos ?? 1;
+
+        const mensaje =
+          noLeidos <= 1
+            ? `Nuevo mensaje de ${nombreRemitente}`
+            : `Tenés ${noLeidos} mensajes nuevos de ${nombreRemitente}`;
+
+        await notificaciones.notificarMensajeChat({ destinatarioId, chatId, mensaje });
+      }),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar el mensaje nuevo del chat', chatId, err);
+  }
 }
 
 /**

@@ -70,6 +70,15 @@ export function buscarActivo(usuarioId: number, mascotaId: number) {
   return prisma.favorito.findFirst({ where: { usuarioId, mascotaId, fechaBaja: null } });
 }
 
+/** Quiénes tienen esta mascota en favoritos (spec 004: avisarles si deja de estar disponible). */
+export async function listarUsuariosConFavorito(mascotaId: number): Promise<number[]> {
+  const filas = await prisma.favorito.findMany({
+    where: { mascotaId, fechaBaja: null },
+    select: { usuarioId: true },
+  });
+  return filas.map((f) => f.usuarioId);
+}
+
 /**
  * Alta. No reactiva una fila dada de baja: inserta una nueva, así cada ciclo de
  * guardar/quitar queda registrado. El índice único parcial permite el par repetido

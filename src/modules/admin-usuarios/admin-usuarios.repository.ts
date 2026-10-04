@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosBaja, datosModificacion } from '../../shared/auditoria';
+import { ROL_DB } from '../../shared/roles';
 
 const includeUsuario = {
   estado: true,
@@ -118,6 +119,24 @@ export function quitarRol(vinculoId: number, adminId: number) {
     where: { id: vinculoId },
     data: datosBaja(adminId),
   });
+}
+
+/** Ids de los miembros activos de un refugio (spec 004: a quién avisarle su validación/suspensión). */
+export async function listarIdsMiembrosDeRefugio(refugioId: number): Promise<number[]> {
+  const filas = await prisma.usuario.findMany({
+    where: { refugioId, fechaBaja: null },
+    select: { id: true },
+  });
+  return filas.map((f) => f.id);
+}
+
+/** Ids de administradores activos (spec 004: a quién avisarle un refugio nuevo esperando validación). */
+export async function listarIdsAdmins(): Promise<number[]> {
+  const filas = await prisma.rolUsuario.findMany({
+    where: { fechaBaja: null, rol: { nombre: ROL_DB.ADMIN }, usuario: { fechaBaja: null } },
+    select: { usuarioId: true },
+  });
+  return filas.map((f) => f.usuarioId);
 }
 
 export function asignarRefugio(usuarioId: number, refugioId: number, adminId: number) {

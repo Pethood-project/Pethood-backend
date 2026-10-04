@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as repo from '../../../../src/modules/seguimiento/seguimiento.repository';
 import * as service from '../../../../src/modules/seguimiento/seguimiento.service';
+import * as notificaciones from '../../../../src/modules/notificaciones/notificaciones.service';
 import { borrarImagen, guardarImagen } from '../../../../src/shared/storage';
 import { registrarAuditoria } from '../../../../src/shared/logAuditoria';
 
 vi.mock('../../../../src/modules/seguimiento/seguimiento.repository');
+vi.mock('../../../../src/modules/notificaciones/notificaciones.service');
 vi.mock('../../../../src/shared/storage');
 vi.mock('../../../../src/shared/logAuditoria');
 
@@ -328,12 +330,13 @@ describe('aviso al publicador por seguimiento vencido (HU-9.1)', () => {
 
     await service.obtenerSeguimientosDeSolicitud(1, ADOPTANTE.id, 'PERSONAL', AHORA);
 
-    expect(repo.crearNotificacion).toHaveBeenCalledWith({
-      tipo: 'SEGUIMIENTO_VENCIDO',
-      mensaje: 'Actualización de seguimiento no enviado — Rex',
-      usuarioId: PUBLICADOR.id,
-      usuarioAlta: 1,
-    });
+    expect(notificaciones.notificar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tipo: 'SEGUIMIENTO_VENCIDO',
+        mensaje: 'Actualización de seguimiento no enviado — Rex',
+        usuarioId: PUBLICADOR.id,
+      }),
+    );
     expect(repo.marcarVencidosNotificados).toHaveBeenCalledWith([30], 1);
   });
 
@@ -348,7 +351,9 @@ describe('aviso al publicador por seguimiento vencido (HU-9.1)', () => {
 
     await service.obtenerSeguimientosDeSolicitud(1, ADOPTANTE.id, 'PERSONAL', AHORA);
 
-    expect(repo.crearNotificacion).not.toHaveBeenCalled();
+    expect(notificaciones.notificar).not.toHaveBeenCalledWith(
+      expect.objectContaining({ tipo: 'SEGUIMIENTO_VENCIDO' }),
+    );
   });
 });
 
@@ -744,7 +749,7 @@ describe('enviarPregunta — preguntas propias del refugio (spec 011 §6.11)', (
       },
       STAFF_REFUGIO.id,
     );
-    expect(repo.crearNotificacion).toHaveBeenCalledWith(
+    expect(notificaciones.notificar).toHaveBeenCalledWith(
       expect.objectContaining({ usuarioId: ADOPTANTE.id }),
     );
     expect(repo.programarPregunta).not.toHaveBeenCalled();
@@ -761,7 +766,7 @@ describe('enviarPregunta — preguntas propias del refugio (spec 011 §6.11)', (
       STAFF_REFUGIO.id,
     );
     expect(repo.crearPedidoManual).not.toHaveBeenCalled();
-    expect(repo.crearNotificacion).not.toHaveBeenCalled();
+    expect(notificaciones.notificar).not.toHaveBeenCalled();
   });
 
   it('409 antes de que llegue la primera pregunta (la de la primera noche)', async () => {

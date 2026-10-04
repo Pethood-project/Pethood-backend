@@ -121,6 +121,11 @@ export async function quitarFavorito(mascotaId: number, usuarioId: number): Prom
   await repo.darDeBaja(favorito.id, usuarioId);
 }
 
+/** Para `publicaciones.service.ts` (spec 004): a quién avisarle si una mascota que guardó deja de estar disponible. */
+export function listarUsuariosConFavorito(mascotaId: number): Promise<number[]> {
+  return repo.listarUsuariosConFavorito(mascotaId);
+}
+
 export async function listarFavoritos(usuarioId: number): Promise<ListaFavoritosDto> {
   const favoritos = await repo.listarVisiblesDeUsuario(usuarioId);
 
