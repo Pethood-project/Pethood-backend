@@ -904,7 +904,7 @@ export async function seedMascotas(catalogos: Catalogos, actores: Actores): Prom
           data: {
             titulo: `${def.nombre} busca hogar`,
             descripcion: def.publicacion.tagline,
-            ubicacion: def.refugio ? 'Mendoza' : (duenio.ubicacion ?? 'Mendoza'),
+            ubicacion: def.refugio ? 'Mendoza' : (duenio.localidad ?? 'Mendoza'),
             requisitos: def.publicacion.requisitos,
             personalidad: def.publicacion.personalidad,
             desparasitado: def.publicacion.desparasitado ?? true,

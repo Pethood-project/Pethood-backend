@@ -7,7 +7,11 @@ import { uploadImagenOpcional } from '../../middlewares/uploadImagen';
 import { validar } from '../../middlewares/validar';
 import { ROL_API } from '../../shared/roles';
 import * as controller from './perfil-refugio.controller';
-import { actualizarPerfilRefugioBodySchema } from './perfil-refugio.dto';
+import {
+  actualizarPerfilRefugioBodySchema,
+  actualizarUbicacionRefugioBodySchema,
+  previewUbicacionRefugioBodySchema,
+} from './perfil-refugio.dto';
 
 export const perfilRefugioRouter = Router();
 
@@ -29,4 +33,24 @@ perfilRefugioRouter.patch(
   comprimirImagen,
   validar(actualizarPerfilRefugioBodySchema),
   controller.actualizar,
+);
+
+// Edición manual del link del mapa (lápiz de "Ubicación" en Mi Refugio).
+perfilRefugioRouter.patch(
+  '/perfil/ubicacion',
+  autenticar,
+  requiereRol(ROL_API.MIEMBRO_REFUGIO),
+  requiereAmbito('REFUGIO'),
+  validar(actualizarUbicacionRefugioBodySchema),
+  controller.actualizarUbicacion,
+);
+
+// Preview del link generado por geocodificación, sin guardar (Datos del refugio).
+perfilRefugioRouter.post(
+  '/perfil/ubicacion/preview',
+  autenticar,
+  requiereRol(ROL_API.MIEMBRO_REFUGIO),
+  requiereAmbito('REFUGIO'),
+  validar(previewUbicacionRefugioBodySchema),
+  controller.previewUbicacion,
 );

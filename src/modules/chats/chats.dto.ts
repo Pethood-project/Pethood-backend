@@ -54,10 +54,11 @@ export interface UltimoMensajeDto {
    */
   tieneVideo: boolean;
   /**
-   * `SOLICITUD` cuando lo último de la sala es la tarjeta de una solicitud: su `contenido`
-   * va vacío y el cliente pone el texto ("Solicitud"), igual que con la foto.
+   * `SOLICITUD` cuando lo último de la sala es la tarjeta de una solicitud y
+   * `ANIMAL_PERDIDO` cuando es la de un aviso reclamado (HU-13.2): su `contenido` va vacío
+   * y el cliente pone el texto ("Solicitud", "Mascota perdida"), igual que con la foto.
    */
-  tipo: 'TEXTO' | 'SOLICITUD';
+  tipo: 'TEXTO' | 'SOLICITUD' | 'ANIMAL_PERDIDO';
 }
 
 /**
@@ -133,10 +134,11 @@ export interface MensajeDto {
   /** Id del emisor. El cliente decide de qué lado de la burbuja va. */
   usuarioId: number;
   /**
-   * Qué es este mensaje. `SOLICITUD` lo emite el usuario SISTEMA y trae `solicitud`
-   * completa: es la tarjeta embebida de la sala, no una burbuja de texto.
+   * Qué es este mensaje. `SOLICITUD` y `ANIMAL_PERDIDO` los emite el usuario SISTEMA y
+   * traen `solicitud` o `aviso` completos: son las tarjetas embebidas de la sala, no
+   * burbujas de texto.
    */
-  tipo: 'TEXTO' | 'SOLICITUD';
+  tipo: 'TEXTO' | 'SOLICITUD' | 'ANIMAL_PERDIDO';
   /**
    * El otro ya lo recibió en algún dispositivo, aunque no lo haya abierto. Es el segundo
    * tilde. Un mensaje leído está siempre entregado.
@@ -152,6 +154,8 @@ export interface MensajeDto {
   fechaLectura: string | null;
   /** Sólo en los de tipo `SOLICITUD`. */
   solicitud: SolicitudEnChatDto | null;
+  /** Sólo en los de tipo `ANIMAL_PERDIDO` (HU-13.2). */
+  aviso: AvisoEnChatDto | null;
   /** ISO 8601 crudo. La hora la formatea el cliente. */
   fechaAlta: string;
 }
@@ -181,6 +185,36 @@ export interface SolicitudEnChatDto {
     fechaNacimiento: string | null;
     imagenUrl: string | null;
   };
+}
+
+/**
+ * El aviso de animal perdido/encontrado que abrió la sala de reencuentro (HU-13.2), tal como
+ * lo pintan la tarjeta embebida y la cabecera.
+ *
+ * Mismo criterio que `SolicitudEnChatDto`: es un resumen y no el aviso entero. El detalle
+ * completo sigue saliendo del portal (`GET /animales-perdidos`), y el cliente navega ahí
+ * con el `id`.
+ *
+ * NO lleva coordenadas ni distancia: la regla 6 de la spec 020 es que las del dispositivo no
+ * se exponen nunca, y la distancia depende de dónde está quien mira, que en una sala de chat
+ * no es un dato que la tarjeta necesite.
+ */
+export interface AvisoEnChatDto {
+  id: number;
+  /** `null` en un aviso "Encontrado" sin nombre: el texto de relleno lo pone el cliente. */
+  nombre: string | null;
+  /** Nombre de la especie, del catálogo, o `null` si el aviso no la tiene cargada. */
+  especie: string | null;
+  /** Estado vigente: "Perdido", "Encontrado" o "Resuelto". El color lo decide el cliente. */
+  estado: string;
+  /** Portada del aviso. */
+  imagenUrl: string;
+  /** «referencia, localidad - provincia», ya armada por el backend. */
+  ubicacion: string | null;
+  /** Sólo el día, como en el portal, o `null` si el aviso no la tiene. */
+  fechaSuceso: string | null;
+  /** ISO 8601 crudo: cuándo se publicó el aviso. */
+  fechaAlta: string;
 }
 
 /**
@@ -223,8 +257,24 @@ export interface CabeceraChatDto {
    * ISO: el texto es una decisión de UI y el redondeo depende del idioma.
    */
   minutosRespuesta: number | null;
-  /** La solicitud que originó la sala, o `null` si no nació de una (HU-13.2, salas viejas). */
+  /** La solicitud vigente de la sala, o `null` si no hay ninguna. */
   solicitud: SolicitudEnChatDto | null;
+  /**
+   * El aviso de la última tarjeta de aviso de la sala (HU-13.2), o `null` si no hay ninguna.
+   *
+   * **No es excluyente con `solicitud`**: desde que el reclamo entra en la conversación que ya
+   * existía con esa persona, una sala puede tener las dos tarjetas.
+   */
+  aviso: AvisoEnChatDto | null;
+  /**
+   * De qué se está hablando: cuál de las dos tarjetas es la vigente, o `null` si no hay
+   * ninguna. Es la más reciente, la misma regla que ya regía para dos solicitudes en la misma
+   * sala.
+   *
+   * Lo decide el backend para que el subtítulo de la cabecera no tenga que comparar fechas ni
+   * conocer la regla.
+   */
+  contexto: 'SOLICITUD' | 'ANIMAL_PERDIDO' | null;
 }
 
 /**

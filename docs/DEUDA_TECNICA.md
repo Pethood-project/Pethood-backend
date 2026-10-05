@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-09-27**
+> Última revisión: **2026-10-01**
 
 ## Cómo se usa
 
@@ -48,58 +48,21 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 18 | Cualquier miembro del refugio puede editar y cambiar de estado sus publicaciones | Media | backend |
 | 19 | Pausar o finalizar una publicación no toca sus solicitudes abiertas | Media | backend |
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
-<<<<<<< HEAD
-| 21 | La ubicación es texto libre: no hay catálogo de Provincia/Localidad | Media | ambos |
+| 21 | El catálogo de Provincia/Localidad vive sólo en el cliente, y la publicación sigue con ubicación en texto libre | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
-=======
-| 21 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
->>>>>>> origin/dev
-| 23 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
-| 24 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
-
-> **Estado al 2026-09-25.** Los ítems 1 y 2 están resueltos en la rama
-> `feature/archivos-acceso-controlado` del backend, que todavía **no se mergeó a `dev`**:
-> hasta que entre el PR, el resto del equipo sigue con los archivos sin firmar. Borrar este
-> párrafo cuando se mergee.
-
----
-
-## 1. Los archivos subidos se sirven sin autenticación — ✅ **CERRADA**
-
-`/api/v1/archivos` se servía con `express.static` y sin ningún control: cualquiera con el link
-abría un adjunto de chat, un comprobante de historia clínica o una prueba de vida, sin sesión.
-
-Se cerró con **URLs firmadas** ([`shared/urlFirmada.ts`](../src/shared/urlFirmada.ts)): las
-tres subcarpetas privadas (`chats`, `historias-clinicas`, `seguimientos`) exigen un `exp` y un
-`sig` HMAC que emiten los DTOs; las públicas (`mascotas`, `publicaciones`, `perfiles`) siguen
-abiertas porque se muestran en el feed de adopción.
-
-**Por qué firmada y no un header.** En React Native, `<Image source={{ uri }} />` descarga por
-su cuenta y no manda `Authorization`. Poner `autenticar` delante habría dejado la app sin una
-sola foto, salvo pasarle `headers` a las 25 imágenes remotas y perder el cacheo. Es el mismo
-motivo por el que S3 y R2 tienen URLs prefirmadas.
-
-**Lo que NO resuelve, y hay que saberlo:** sigue siendo un *bearer*. Quien tenga el link
-vigente entra, aunque no participe del chat. Lo que se gana es que **vence** (6 h) y que no se
-puede fabricar uno para un archivo ajeno. La versión fuerte —verificar la pertenencia al chat
-en cada request— es justamente lo que el `<Image>` de RN no deja hacer.
-
-**El vencimiento se redondea a ventanas de 6 h** para que la URL no cambie en cada respuesta:
-si cambiara, el cliente volvería a descargar la misma foto —o el mismo video de 30 MB— cada
-vez, porque su caché indexa por URL.
-
----
-
-## 2. `r2.ts` no conoce los formatos de video — ✅ **CERRADA**
-
-Había dos mapas de mime → extensión, uno en `storage.ts` y otro en `r2.ts`, y habían
-divergido: el de R2 nunca supo de video, así que un `.mp4` se habría subido al bucket como
-`.jpg` apenas se activara R2 para el chat.
-
-Se cerró unificando los dos en [`src/shared/extensiones.ts`](../src/shared/extensiones.ts),
-que ahora es el único mapa del proyecto. Tiene un test que recorre **todos** los formatos
-declarados en `LIMITES` y falla si alguien suma uno sin decidirle extensión, para que no
-puedan volver a separarse.
+| 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
+| 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
+| 25 | Reseña no avisa al recibir una reseña (el reporte ya existe, spec 008) | Baja | ambos |
+| 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
+| 27 | Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado | Baja | backend |
+| ~~28~~ | ~~El dueño de un aviso de mascota perdida no puede retirarlo~~ | ✅ cerrada | — |
+| 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
+| 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
+| 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
+| 32 | En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy | Media | backend |
+| 33 | `chat` tiene dos FK de origen y nada en base impide llenar las dos | Baja | backend |
+| 34 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
+| 35 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
 
 ---
 
@@ -346,7 +309,6 @@ No se repite acá; el link va al detalle.
 |---|---|
 | Presencia en memoria: no escala a varias instancias y puede quedar stale al salir de la sala | [`api-chat-sala.md`](./api-chat-sala.md) § «Presencia: dos limitaciones conocidas» |
 | `mensaje_leido` quedó obsoleto pero se sigue poblando; ninguna query lo consulta | [`api-chat-sala.md`](./api-chat-sala.md) |
-| Falta la sala de HU-13.2 (mascota perdida/encontrada), que no nace de una solicitud | [`api-chats.md`](./api-chats.md) § «Creación de salas» |
 | Desnormalizar el último mensaje en `Chat`: evaluado y descartado, revisitable con cientos de chats por usuario | [`api-chats.md`](./api-chats.md) |
 | `chat_tipo` sigue sin definirse y no se escribe | [`api-chats.md`](./api-chats.md) |
 
@@ -473,23 +435,31 @@ correr el seed sobre una base vacía.
 
 ---
 
-<<<<<<< HEAD
-## 21. La ubicación es texto libre: no hay catálogo de Provincia/Localidad — Media
+## 21. El catálogo de Provincia/Localidad vive sólo en el cliente, y la publicación sigue con ubicación en texto libre — Media
+
+> Antes: «La ubicación es texto libre: no hay catálogo de Provincia/Localidad». Se achicó el
+> 2026-09-30.
 
 **Qué pasa.** `REQUISITOS.md` y `MODELO_DATOS.md` piden filtrar por ubicación administrativa
-(Provincia/Localidad), pero no existe ese catálogo. Hoy la ubicación es texto libre en tres
-lugares: el perfil (`usuario_ubicacion`), la publicación (`publicacion_ubicacion`) y el aviso
-de animal perdido (`animal_perdido_ubicacion`, spec 020). En el portal de perdidos el filtro
-de selección múltiple se arma con las ubicaciones ya cargadas
-(`GET /animales-perdidos/ubicaciones`) y compara sin distinguir mayúsculas, pero sí acentos:
-"Maipu" y "Maipú" son dos opciones distintas, y un error de tipeo crea una opción nueva.
+(Provincia/Localidad). Desde el Módulo 11 el perfil del usuario y el del refugio la cargan con
+selectores de provincia y localidad que salen de un catálogo de georef **embebido en el
+cliente** (`apps/mobile/constants/Provincias.ts`), y se guardan como texto. El aviso de animal
+perdido (spec 020) pasó al mismo criterio el 2026-09-30 (`animal_perdido_provincia` /
+`_localidad`, más una referencia libre), con el filtro del portal armado sólo con los lugares
+que tienen avisos. Lo que queda:
 
-**Por qué quedó así.** Decisión de equipo del 2026-09-29: el catálogo se quiere definir una
-sola vez para toda la app (también lo necesita HU-11.3) y aplicarlo después en cada lugar.
+- **El backend no conoce el catálogo:** no valida que la provincia y la localidad existan, así
+  que otro cliente (o un pedido a mano) puede guardar cualquier texto.
+- **La publicación sigue con `publicacion_ubicacion` en texto libre.**
+- Los avisos cargados con el primer corte de HU-13.1 quedaron con su texto libre en
+  `localidad` y sin provincia (ver el contrato de mascotas perdidas).
 
-**Cómo se arregla.** Modelar `Provincia` y `Localidad` (con auditoría, gestionables desde
-web-admin), sembrarlas, reemplazar las tres columnas de texto por una FK a `Localidad` con una
-migración de datos, y sacar el endpoint de ubicaciones del portal de perdidos.
+**Por qué quedó así.** Decisión de equipo: el catálogo se definió en el cliente para no
+depender de la API de georef en cada carga, y se va aplicando en cada lugar que lo necesita.
+
+**Cómo se arregla.** Llevar el catálogo al backend (tablas `Provincia` y `Localidad`
+sembradas desde georef, o al menos el mismo archivo compartido) para validar en los DTO, y
+pasar la publicación a provincia y localidad como el perfil y el aviso.
 
 ---
 
@@ -503,8 +473,10 @@ que arma el cliente, no el usuario, así que en la práctica no se ve.
 **Cómo se arregla.** Usar `limitePaginaSchema` de `shared/validation/schemas.ts` (creado en la
 spec 020), que ya da el error en español. `idSchema` tenía el mismo problema cuando faltaba un
 id y quedó corregido para todos los módulos en esa misma spec.
-=======
-## 21. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
+
+---
+
+## 23. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
 
 **Qué pasa.** El rediseño de Inicio (adoptante y refugio) trae secciones de Campañas y de
 Mascotas perdidas con datos reales (montos, donantes, reportes cerca). Esos módulos son las
@@ -521,11 +493,212 @@ distinto filtro, porque no hay un endpoint de resumen.
 el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se notan lentos,
 sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
 consulta.
->>>>>>> origin/dev
 
 ---
 
-## 23. Notificaciones de Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica y Soporte — pausado a propósito
+## 24. Módulo 11 usa GPS, contra el criterio original de "no GPS" — Decisión de equipo
+
+**Qué pasa.** El anteproyecto excluía el GPS y proponía filtrar solo por ubicación
+administrativa (Provincia/Localidad). El Módulo 11 (HU-11.3, "filtrar por cercanía") se
+implementó **con geolocalización nativa** (`expo-location`), agregando
+`publicacion_ubicacion_latitud`/`_longitud` a `Publicacion` y un filtro por distancia
+(Haversine) en el backend. Cuando el permiso de GPS se deniega, la app cae a la localidad
+parametrizada en el perfil (antes `usuario_ubicacion`; hoy la dirección estructurada del
+perfil), que era el mecanismo previsto.
+
+**Por qué.** Decisión explícita del equipo (2026-09-27) al priorizar la HU-11.3 sobre la nota
+de alcance del anteproyecto. Sigue **sin haber mapa interactivo** ni SDK de mapas: solo se
+capturan coordenadas para calcular distancia.
+
+**Qué falta.** Reflejarlo en la documentación fuente y decidir si las publicaciones creadas
+sin permiso de GPS (coordenadas nulas) deben geocodificarse a partir de `publicacion_ubicacion`
+—hoy no hay geocodificación— o quedar solo en el filtro por localidad. También actualizar el
+diagrama de clases con los dos campos nuevos.
+
+**Actualización (2026-09-28):** el filtro por cercanía ahora toma las coordenadas de dos
+fuentes: la capturada al publicar y la extraída del enlace de Google Maps del refugio
+(`refugio_mapa_url`). Los links **cortos** (`maps.app.goo.gl`) se resuelven siguiendo la
+redirección (`resolverCoordenadasDeMapsUrl`, con caché por URL y tope de 4 s) y se parsean de
+la URL final (`@lat,lng`, `!3d..!4d..` o `?q=lat,lng`). El filtro por `localidad` de texto
+libre se eliminó.
+
+**Riesgo pendiente.** La resolución del link corto depende de la red y de que Google devuelva
+la URL final con coordenadas (algunos links pasan por una pantalla de consentimiento que no
+las incluye). Si falla, el refugio no entra en el filtro por distancia pero el feed sigue
+funcionando. Para eliminarlo del camino crítico conviene resolver y **persistir** las
+coordenadas al guardar el `mapa_url` (no hay UI para cargarlo todavía), o moverlo a un job.
+
+**Actualización (2026-09-29): geocodificación de direcciones.** Se agregó `node-geocoder`
+(`src/shared/geocoding.ts`) para que el perfil del usuario y el del refugio carguen una
+dirección estructurada (`provincia` + `localidad` + `calle_altura`) y se persistan
+`latitud`/`longitud` + `mapa_url` (`https://www.google.com/maps?q=<lat>,<lng>`). Sigue **sin
+haber mapa interactivo ni SDK de mapas**. La geocodificación corre al guardar el perfil, en el
+camino crítico: si el proveedor no ubica la dirección completa, el endpoint responde
+`422 DIRECCION_NO_GEOCODIFICADA`. Proveedor configurable por `GEOCODER_PROVIDER`
+(`openstreetmap`, gratis y por defecto, o `google` con `GEOCODER_API_KEY`). El vínculo se puede
+**verificar**: el cliente pide un preview (`POST /usuarios/me/ubicacion/preview` y
+`/refugio/perfil/ubicacion/preview`) para mostrar el link antes de guardar, y el usuario lo
+confirma (queda `usuario_ubicacion_verificada`/`refugio_ubicacion_verificada`) o lo corrige a
+mano (`PATCH .../ubicacion`). Se eliminaron `usuario_ubicacion` (barrio/ciudad) y
+`refugio_direccion`: el texto de la dirección es la concatenación «calle_altura, localidad -
+provincia» (`src/shared/ubicacion.ts`). **Deuda que queda:** no hay caché persistente ni
+reintentos para la geocodificación, y las publicaciones creadas sin GPS siguen sin
+geocodificarse (el feed usa la dirección del perfil).
+
+---
+
+## 25. Reseña no avisa al recibir una reseña — Baja
+
+**Qué pasa.** El Módulo 10 (spec 022) cubre alta, historial y baja lógica por el admin, y desde
+la spec 008 una reseña se puede reportar (`tipo: RESENA`). Lo que sigue sin existir es el aviso
+al recibir una reseña (Módulo 4).
+
+**Cómo se arregla.** Cuando se haga el Módulo 4, enganchar el evento de alta de reseña al motor
+de notificaciones. Mismo trabajo que la #27.
+
+## 26. Las vacunas son un enum: el admin no puede agregarlas desde el panel — Baja
+
+**Qué pasa.** `TipoVacuna` es un enum de `schema.prisma` y el plan de vacunación vive en
+`src/shared/vacunas.ts` (spec 019). Es a propósito: el código ramifica por el valor (qué
+especie la admite, color de la medalla en la app). Por eso `GET /admin/catalogos/vacunas` es
+solo lectura y `POST`/`PUT`/baja responden `403 OPERACION_NO_PERMITIDA`. Es la única excepción
+del ABM de catálogos (`docs/api-admin-catalogos.md`).
+
+**Cuándo migrar a tabla.** Si aparecen otras especies (conejos, aves), vacunas por región, o
+alguien que no sea del equipo tiene que gestionarlas. Mientras el plan de perros y gatos siga
+igual, agregar una vacuna es una migración y un commit.
+
+**Cómo se arregla.** Tabla `Vacuna` con nombre y descripción, más `VacunaEspecie` (N:M, porque
+`ANTIRRABICA` sirve a perros y gatos). Migrar `historia_clinica.tipoVacuna` a `vacunaId`
+conservando un código estable, para no romper `tipo` en los endpoints ni las medallas de
+mobile (definir color por defecto o campo `color`). Toca historia clínica, alta de mascota,
+publicaciones, catálogos y la app: hacerlo como cambio aparte.
+
+## 27. Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado — Baja
+
+**Qué pasa.** Resolver un reporte (spec 008) crea una fila en `Notificacion` para el
+reportante, igual que la baja de publicaciones y mascotas del admin avisa al dueño. Pero no
+existe ningún endpoint que lea esa tabla, así que el aviso queda guardado y nadie lo ve. Tampoco
+hay envío de correo (no hay mailer en el proyecto), y suspender un usuario o refugio no avisa al
+afectado: se entera al intentar loguearse (`USUARIO_SUSPENDIDO`).
+
+Tampoco existe un endpoint para que el reportante vea el estado y la respuesta de sus reportes
+(no hay HU que lo pida): hoy solo le queda la `Notificacion`, que no se puede leer.
+
+**Qué falta decidir.** Si la suspensión notifica al afectado, con o sin motivo, y si hace falta
+correo además del aviso en la app. El relevamiento de todos los puntos donde iría un
+correo está en [`MAIL.md`](MAIL.md).
+
+**Parcialmente resuelto por la spec 004 (Módulo 4, 2026-09-29).** Ya existe la bandeja completa
+(`GET /notificaciones`, marcar leída/todas, eliminar) y `suspenderUsuario`/`suspenderRefugio`
+de `admin-usuarios` ya llaman a `notificaciones.notificar(...)` con mail + push. Lo que sigue
+sin resolver es específico de Moderación (Fase 2, pausada — ver #34): el reportante no tiene
+cómo ver el estado/respuesta de SU reporte, y "resolver un reporte" todavía no dispara ningún
+aviso (ni al reportante ni al reportado) porque el módulo de Moderación en sí no está hecho.
+
+**Cómo se termina de arreglar.** Cuando se implemente Moderación: enganchar la resolución de un
+reporte a `notificaciones.notificar(...)` (ya no hace falta tocar nada de bajo nivel, el
+servicio central ya existe) y, si se decide que el reportante necesita ver el detalle, un
+endpoint de "mis reportes". Mismo trabajo que la parte pendiente de la #25.
+
+## 28. El dueño de un aviso de mascota perdida no puede retirarlo — ✅ **CERRADA**
+
+> Cerrada el 2026-10-04 por la spec 025 (HU-13.3): quien publicó el aviso lo edita y lo elimina
+> desde Mis publicaciones (`PUT` y `DELETE /animales-perdidos/:id`), y lo marca como resuelto
+> desde HU-13.2. Lo que sigue abajo es el registro de cómo estaba.
+
+**Qué pasa.** `animales-perdidos` (spec 020) tiene alta y listado. La baja por el **admin** existe
+desde la spec 008 (`PATCH /admin/animales-perdidos/:id/baja`), pero quien publicó el aviso no
+puede retirarlo ni marcarlo como resuelto (HU-13.3, estados del aviso).
+
+**Cómo se arregla.** Baja lógica y cambio de estado por el dueño, con el patrón de
+`publicaciones` (editar y finalizar).
+
+## 29. Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja — Media
+
+**Qué pasa.** Moderación (spec 008) ya puede reportar una campaña y mostrársela al admin, pero
+`Campania` es solo el esqueleto del modelo y el Módulo 12 no existe. Faltan tres cosas, todas de
+ese módulo:
+
+- **Alias y CBU** (HU-12.2). No hay columnas en `Campania`, así que `objeto.vista` del reporte
+  no los trae, justo lo que más se denuncia en una campaña falsa (la cuenta donde cae la plata).
+- **Confirmación manual de donaciones** (HU-12.3, regla transversal 11). `Donacion` no tiene
+  estado ni fecha de confirmación, así que `montoActual` de la vista suma todas las donaciones
+  activas. El comentario `ponytail:` de `reportes.service.ts` marca el lugar a cambiar.
+- **Baja de campaña** (HU-12.5). No hay endpoint: un reporte de campaña se resuelve, pero el
+  admin solo puede suspender al refugio. Falta un `PATCH /admin/campanias/:id/baja` como el de
+  publicaciones y avisos.
+
+**Cómo se arregla.** Con la spec del Módulo 12: columnas de alias y CBU en `Campania` (con
+sus validaciones en `shared/validation/`), estado de confirmación en `Donacion`, y la baja admin
+con notificación al refugio. Después, sumar `alias` y `cbu` a la `vista` de `CAMPANIA` y que
+`montoActual` cuente solo las confirmadas. Toca `docs/MODELO_DATOS.md`.
+
+## 30. Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto — Baja
+
+**Qué pasa.** `Mensaje` solo tiene alta (sin baja lógica), así que un reporte de mensaje se
+resuelve pero el mensaje sigue visible para quien lo recibió: la única acción posible es
+suspender al autor (`PATCH /admin/usuarios/:id/suspender`). Además el admin ve los 10 mensajes
+anteriores y los 10 posteriores (`VENTANA_CONTEXTO_MENSAJES`), sin forma de pedir más.
+
+**Cómo se arregla.** Si hace falta ocultar un mensaje, agregar una baja lógica solo para
+moderación (y que el chat lo filtre); es un cambio de modelo y de contrato del chat, no solo de
+moderación. Para el contexto, un parámetro de ampliación en `GET /admin/reportes/:id` si en la
+práctica falta información.
+
+## 31. El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra — Baja
+
+**Qué pasa.** `GET /refugios/:id` informa `resumen.publicacionesActivas` con todas las
+publicaciones activas, pero la lista de ese refugio sale del feed (`GET /publicaciones?refugioId=`),
+que excluye las mascotas que el usuario ya guardó en favoritos. Quien guardó una mascota del
+refugio la ve contada y no la ve en la lista (spec 023, §9).
+
+**Cómo se arregla.** Un endpoint propio de publicaciones por publicador que no excluya favoritos
+(la opción 2 del pedido en `docs/ideas/USER.md`), o contar en el resumen con el mismo criterio
+que el feed. Lo mismo vale para `GET /publicaciones?usuarioId=`.
+
+---
+
+## 32. En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy — Media
+
+**Qué pasa.** `CONSTITUTION.md` §4 pide el log de auditoría en un archivo append-only en
+`logs/`, pero en Render y Railway el disco del contenedor se recrea en cada deploy y reinicio:
+el archivo arranca vacío cada vez. Paliativo actual: con `NODE_ENV=production`,
+`registrarAuditoria` repite cada línea por stdout con el prefijo `[auditoria]`, así queda en el
+panel de logs de la plataforma. Pero esa retención es limitada y depende del plan.
+
+**Cómo se arregla.** Montar un volumen persistente en `logs/` (Railway lo permite; en Render es
+un disk pago), o mandar stdout a un servicio de logs con retención. Pasarlo a una tabla
+contradice la constitución: sería una decisión de equipo.
+
+---
+
+## 33. `chat` tiene dos FK de origen y nada en base impide llenar las dos — Baja
+
+**Qué pasa.** Desde HU-13.2 (spec 024), `chat` tiene `solicitud_id` y `animal_perdido_id`: las
+dos guardan qué hecho **abrió** la conversación, y sólo se escribe una, la del hecho que creó la
+fila. Esa invariante la sostienen las dos funciones que crean salas
+—`asegurarChatDeSolicitud` y `asegurarChatDeReclamo`— y **nada más**. Un INSERT a mano, un seed
+descuidado o una tercera forma de abrir salas pueden dejar una fila con las dos.
+
+**Qué rompería.** Poco, y menos que antes: la cabecera ya no las lee para decidir nada —el
+contexto sale de las **tarjetas** de `mensaje`, no de estas columnas—, así que una fila con las dos
+no cambia ninguna pantalla. Queda como un dato inconsistente sobre el origen de la sala.
+
+**Cómo se arregla.** Un `CHECK` en la tabla, en SQL a mano porque Prisma no expresa constraints
+de tabla:
+
+```sql
+ALTER TABLE "chat" ADD CONSTRAINT "chat_origen_excluyente"
+  CHECK ("solicitud_id" IS NULL OR "animal_perdido_id" IS NULL);
+```
+
+No se hizo en el PR de la HU para no mezclar un cambio de integridad con la funcionalidad, y
+porque conviene decidir antes si el origen de una sala no debería ser **una** columna polimórfica
+(`origen_tipo` + `origen_id`, como ya hace `reporte_problema`) en lugar de una FK por tipo. Con
+una tercera clase de sala, el patrón actual suma una columna más.
+
+## 34. Notificaciones de Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica y Soporte — pausado a propósito
 
 **Qué pasa.** La spec 004 (Notificaciones) implementa el servicio central `notificar(...)`,
 la bandeja y los escenarios de "Fase 1" del documento fuente del módulo (Cuenta, Solicitudes,
@@ -540,3 +713,16 @@ para cuando el resto de la app esté más completo). Decisión del usuario, 2026
 función `notificar(...)`): agregar estos escenarios es, en cada módulo nuevo, la misma llamada
 de 3-6 líneas que ya se usa en `solicitudes`/`seguimiento`/`chats` — no hace falta rediseñar
 nada, solo enganchar el módulo dueño cuando exista.
+
+## 35. `usuarios.repository.ts` usa un `PrismaClient` distinto al del resto del proyecto — Media
+
+**Qué pasa.** `src/modules/usuarios/usuarios.repository.ts` importa `prisma` desde
+`config/prisma.ts`, un `PrismaClient` propio, en vez de la instancia única de
+`shared/prisma.ts` que importan todos los demás `repository.ts`. Son dos pools de conexión
+distintos a la misma base — no rompe nada hoy (Postgres soporta varias conexiones sin
+problema), pero es la clase de divergencia silenciosa que un día explica un comportamiento
+raro (una transacción que no ve lo que la otra acaba de escribir, el límite de conexiones del
+plan gratis de Neon agotándose el doble de rápido).
+
+**Cómo se arregla.** Cambiar el import de `usuarios.repository.ts` a `shared/prisma.ts` y
+borrar `config/prisma.ts` si ningún otro archivo lo usa.

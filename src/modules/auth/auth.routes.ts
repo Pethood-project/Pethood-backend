@@ -9,6 +9,7 @@ import {
   loginBodySchema,
   recuperarBodySchema,
   registroBodySchema,
+  registroRefugioBodySchema,
   resetearBodySchema,
 } from './auth.dto';
 
@@ -20,6 +21,13 @@ authRouter.post(
   comprimirImagen,
   validar(registroBodySchema),
   authController.registro,
+);
+authRouter.post(
+  '/registro-refugio',
+  uploadImagenOpcional('imagen'),
+  comprimirImagen,
+  validar(registroRefugioBodySchema),
+  authController.registroRefugio,
 );
 authRouter.post('/login', validar(loginBodySchema), authController.login);
 authRouter.post('/logout', autenticar, authController.logout);

@@ -3,8 +3,8 @@
  * saltea esa regla hasta que se vuelva a prender.
  *
  * `EXIGIR_VERIFICACION_PARA_SOLICITAR`: HU-7.1 pide cuenta verificada (DNI + selfie)
- * para solicitar. Hoy está apagada porque esa pantalla todavía no está lista.
+ * para solicitar. Prendida: un usuario sin verificar no puede solicitar.
  */
 export const FLAGS = {
-  EXIGIR_VERIFICACION_PARA_SOLICITAR: false,
+  EXIGIR_VERIFICACION_PARA_SOLICITAR: true,
 };

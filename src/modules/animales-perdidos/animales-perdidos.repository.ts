@@ -1,16 +1,23 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta } from '../../shared/auditoria';
+import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { finDelDia, inicioDelDia } from '../../shared/validation/dates';
 
-/** Lo que pinta una tarjeta del portal, en una sola query y sin N+1. */
+/**
+ * Lo que pinta una tarjeta del portal, en una sola query y sin N+1. Las coordenadas del
+ * dispositivo NO están: nunca se exponen, y la distancia se calcula con las del lugar.
+ */
 const SELECCION_TARJETA = {
   id: true,
   nombre: true,
   descripcion: true,
   imagenUrl: true,
   imagenes: true,
-  ubicacion: true,
+  provincia: true,
+  localidad: true,
+  referencia: true,
+  lugarLatitud: true,
+  lugarLongitud: true,
   fechaSuceso: true,
   fechaAlta: true,
   fechaResuelto: true,
@@ -29,7 +36,11 @@ export interface FiltrosListado {
   fechaHasta?: Date;
   estados: number[];
   especies: number[];
-  ubicaciones: string[];
+  provincias: string[];
+  /** Pares provincia-localidad: el mismo nombre de localidad existe en varias provincias. */
+  localidades: { provincia: string; localidad: string }[];
+  /** Ids dentro del radio de cercanía, ya calculados (`idsEnRadio`). Ausente = sin radio. */
+  idsCercanos?: number[];
 }
 
 /**
@@ -38,9 +49,14 @@ export interface FiltrosListado {
  *
  * Incluye avisos en CUALQUIER estado, "Resuelto" también: la HU los quiere en el portal.
  * Sólo se excluyen los dados de baja.
+ *
+ * Provincia y localidad se comparan exactas: salen del catálogo de georef del cliente, no se
+ * escriben a mano. Como el resto, van con AND: con provincias y localidades elegidas, sólo
+ * entran esas localidades (el cliente no manda localidades de provincias que no eligió).
  */
 function whereDelListado(filtros: FiltrosListado): Prisma.AnimalPerdidoWhereInput {
-  const { fechaDesde, fechaHasta, estados, especies, ubicaciones } = filtros;
+  const { fechaDesde, fechaHasta, estados, especies, provincias, localidades, idsCercanos } =
+    filtros;
 
   return {
     fechaBaja: null,
@@ -54,15 +70,52 @@ function whereDelListado(filtros: FiltrosListado): Prisma.AnimalPerdidoWhereInpu
       : {}),
     ...(estados.length > 0 ? { estadoAnimalPerdidoId: { in: estados } } : {}),
     ...(especies.length > 0 ? { especieId: { in: especies } } : {}),
-    // Texto libre: igualdad sin distinguir mayúsculas, para que "maipú" encuentre "Maipú".
-    ...(ubicaciones.length > 0
-      ? {
-          OR: ubicaciones.map((ubicacion) => ({
-            ubicacion: { equals: ubicacion, mode: 'insensitive' as const },
-          })),
-        }
+    ...(provincias.length > 0 ? { provincia: { in: provincias } } : {}),
+    ...(localidades.length > 0
+      ? { OR: localidades.map(({ provincia, localidad }) => ({ provincia, localidad })) }
       : {}),
+    ...(idsCercanos ? { id: { in: idsCercanos } } : {}),
   };
+}
+
+/**
+ * Ids de los avisos visibles dentro del radio (km) de un punto, con la fórmula del semiverseno
+ * (Haversine), igual que el filtro por cercanía de publicaciones (HU-11.3).
+ *
+ * Se mide contra el LUGAR geocodificado y, si el geocoder no lo encontró, contra las
+ * coordenadas del dispositivo al publicar: sin ese respaldo, un aviso sin geocodificar nunca
+ * entraría en un filtro por cercanía. El `LEAST/GREATEST` evita que un error de punto flotante
+ * saque al `acos` de su dominio.
+ *
+ * Es SQL a mano porque Prisma no sabe expresar la fórmula, y va como un paso aparte que
+ * devuelve ids para que el listado siga siendo un `findMany` con cursor.
+ */
+export async function idsEnRadio(
+  latitud: number,
+  longitud: number,
+  radioKm: number,
+): Promise<number[]> {
+  const filas = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT animal_perdido_id AS id
+    FROM animal_perdido
+    WHERE animal_perdido_fecha_baja IS NULL
+      AND (
+        6371 * acos(
+          LEAST(1, GREATEST(-1,
+            cos(radians(${latitud})) *
+            cos(radians(COALESCE(animal_perdido_lugar_latitud, animal_perdido_latitud))) *
+            cos(
+              radians(COALESCE(animal_perdido_lugar_longitud, animal_perdido_longitud)) -
+              radians(${longitud})
+            ) +
+            sin(radians(${latitud})) *
+            sin(radians(COALESCE(animal_perdido_lugar_latitud, animal_perdido_latitud)))
+          ))
+        )
+      ) <= ${radioKm}
+  `;
+
+  return filas.map((fila) => fila.id);
 }
 
 /**
@@ -96,15 +149,14 @@ export function existeAviso(id: number) {
 }
 
 /**
- * Ubicaciones distintas de los avisos visibles, para armar las opciones del filtro. El
- * agrupado sin distinguir mayúsculas lo hace el servicio: Prisma no sabe agrupar por
- * `lower(...)` sin SQL a mano, y la cantidad de ubicaciones distintas es chica.
+ * Pares provincia-localidad distintos de los avisos visibles, para las opciones del filtro:
+ * así nunca se ofrece una localidad sin avisos. El agrupado por provincia lo hace el servicio.
  */
 export function listarUbicaciones() {
   return prisma.animalPerdido.findMany({
-    where: { fechaBaja: null, ubicacion: { not: null } },
-    distinct: ['ubicacion'],
-    select: { ubicacion: true },
+    where: { fechaBaja: null, provincia: { not: null }, localidad: { not: null } },
+    distinct: ['provincia', 'localidad'],
+    select: { provincia: true, localidad: true },
   });
 }
 
@@ -135,7 +187,12 @@ export function crear(
     nombre: string | null;
     descripcion: string;
     imagenes: string[];
-    ubicacion: string;
+    provincia: string;
+    localidad: string;
+    referencia: string | null;
+    /** El lugar geocodificado, o `null` si el geocoder no lo encontró. */
+    lugarLatitud: number | null;
+    lugarLongitud: number | null;
     fechaSuceso: Date;
     latitud: number;
     longitud: number;
@@ -153,4 +210,140 @@ export function crear(
     },
     select: SELECCION_TARJETA,
   });
+}
+
+/** Baja lógica de un aviso por el admin (spec 008): `null` si no existe. */
+export function buscarParaModeracion(id: number) {
+  return prisma.animalPerdido.findFirst({
+    where: { id },
+    select: {
+      id: true,
+      nombre: true,
+      descripcion: true,
+      usuarioReportanteId: true,
+      fechaBaja: true,
+    },
+  });
+}
+
+/** Da de baja el aviso y avisa a quien lo publicó en la misma transacción. */
+export function darDeBajaPorModeracion(datos: {
+  id: number;
+  adminId: number;
+  duenoId: number;
+  mensajeAviso: string;
+}) {
+  return prisma.$transaction([
+    prisma.animalPerdido.update({ where: { id: datos.id }, data: datosBaja(datos.adminId) }),
+    prisma.notificacion.create({
+      data: {
+        tipo: 'MODERACION',
+        mensaje: datos.mensajeAviso,
+        usuarioId: datos.duenoId,
+        ...datosAlta(datos.adminId),
+      },
+    }),
+  ]);
+}
+
+// ─────────────── HU-13.2 · Reclamo y cierre del caso ───────────────
+
+/**
+ * El aviso con lo que necesitan el reclamo y el paso a Resuelto: de quién es, en qué estado
+ * está y si sigue vivo.
+ *
+ * Trae también la fecha de baja de la cuenta del reportante: no se le puede abrir una sala a
+ * alguien que ya no está, igual que el chat no deja escribirle a un contacto inactivo.
+ */
+export function buscarParaReclamo(id: number) {
+  return prisma.animalPerdido.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      nombre: true,
+      fechaBaja: true,
+      usuarioReportanteId: true,
+      estadoAnimalPerdido: { select: { id: true, nombre: true } },
+      usuarioReportante: { select: { id: true, fechaBaja: true } },
+    },
+  });
+}
+
+/** El estado "Resuelto" del catálogo, que es el que cierra el caso. */
+export function buscarEstadoPorNombre(nombre: string) {
+  return prisma.estadoAnimalPerdido.findFirst({
+    where: { nombre, fechaBaja: null },
+    select: { id: true, nombre: true },
+  });
+}
+
+/**
+ * Pasa el aviso a Resuelto y le pone la fecha de cierre.
+ *
+ * `fechaResuelto` es la que hasta ahora sólo escribía el seed: es el dato con el que el
+ * portal puede decir cuándo volvió, independiente de `fechaModificacion`, que cambia con
+ * cualquier edición.
+ */
+export function marcarResuelto(datos: { id: number; estadoId: number; usuarioId: number }) {
+  return prisma.animalPerdido.update({
+    where: { id: datos.id },
+    data: {
+      estadoAnimalPerdidoId: datos.estadoId,
+      fechaResuelto: new Date(),
+      ...datosModificacion(datos.usuarioId),
+    },
+    select: SELECCION_TARJETA,
+  });
+}
+
+// ─────────────── HU-13.3 · Lo que gestiona quien publicó el aviso ───────────────
+
+/**
+ * Un aviso por id, con su fecha de baja: el detalle tiene que poder decir "se eliminó" en vez
+ * de "no existe", porque la tarjeta del chat lo sigue mostrando después de la baja.
+ */
+export function buscarPorId(id: number) {
+  return prisma.animalPerdido.findUnique({
+    where: { id },
+    select: { ...SELECCION_TARJETA, fechaBaja: true },
+  });
+}
+
+/** Los avisos vivos de una persona, del más reciente al más viejo (Mis publicaciones). */
+export function listarDeReportante(usuarioId: number) {
+  return prisma.animalPerdido.findMany({
+    where: { usuarioReportanteId: usuarioId, fechaBaja: null },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: SELECCION_TARJETA,
+  });
+}
+
+/** `imagenes` llega con al menos una: la primera queda también como portada en `imagenUrl`. */
+export function actualizar(
+  id: number,
+  datos: {
+    nombre: string | null;
+    descripcion: string;
+    imagenes: string[];
+    provincia: string;
+    localidad: string;
+    referencia: string | null;
+    lugarLatitud: number | null;
+    lugarLongitud: number | null;
+    fechaSuceso: Date;
+    especieId: number;
+    estadoAnimalPerdidoId: number;
+  },
+  usuarioId: number,
+) {
+  return prisma.animalPerdido.update({
+    where: { id },
+    data: { ...datos, imagenUrl: datos.imagenes[0]!, ...datosModificacion(usuarioId) },
+    select: SELECCION_TARJETA,
+  });
+}
+
+/** Baja lógica por quien lo publicó. Las fotos quedan: las sigue mostrando el chat. */
+export function darDeBajaPorReportante(id: number, usuarioId: number) {
+  return prisma.animalPerdido.update({ where: { id }, data: datosBaja(usuarioId) });
 }

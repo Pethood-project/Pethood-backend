@@ -78,7 +78,15 @@ export async function valoracionDelRefugio(
 
 export interface DatosActualizarRefugio {
   nombre: string;
-  direccion: string;
+  provincia: string | null;
+  localidad: string | null;
+  calleAltura: string | null;
+  // Opcionales: si no se geocodificó una dirección nueva, no se tocan (así no se borra un
+  // link de Maps cargado a mano).
+  mapaUrl?: string;
+  latitud?: number;
+  longitud?: number;
+  ubicacionVerificada?: boolean;
   telefono: string | null;
   email: string | null;
   descripcion: string | null;
@@ -94,11 +102,47 @@ export function actualizarRefugio(
     where: { id: refugioId },
     data: {
       nombre: datos.nombre,
-      direccion: datos.direccion,
+      provincia: datos.provincia,
+      localidad: datos.localidad,
+      calleAltura: datos.calleAltura,
+      ...(datos.mapaUrl !== undefined
+        ? {
+            mapaUrl: datos.mapaUrl,
+            latitud: datos.latitud ?? null,
+            longitud: datos.longitud ?? null,
+          }
+        : {}),
+      ...(datos.ubicacionVerificada !== undefined
+        ? { ubicacionVerificada: datos.ubicacionVerificada }
+        : {}),
       telefono: datos.telefono,
       email: datos.email,
       descripcion: datos.descripcion,
       ...(datos.imagenUrl ? { imagenUrl: datos.imagenUrl } : {}),
+      ...datosModificacion(usuarioId),
+    },
+    include: includeRefugio,
+  });
+}
+
+export interface DatosUbicacionRefugio {
+  mapaUrl: string;
+  latitud: number;
+  longitud: number;
+}
+
+/** Actualiza solo el link del mapa y sus coordenadas, sin tocar el resto del refugio. */
+export function actualizarUbicacion(
+  refugioId: number,
+  usuarioId: number,
+  datos: DatosUbicacionRefugio,
+): Promise<RefugioConEstado> {
+  return prisma.refugio.update({
+    where: { id: refugioId },
+    data: {
+      ...datos,
+      // El link cargado a mano lo eligió el refugio: queda verificado.
+      ubicacionVerificada: true,
       ...datosModificacion(usuarioId),
     },
     include: includeRefugio,

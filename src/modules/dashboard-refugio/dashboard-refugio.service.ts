@@ -1,4 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { etiquetaUbicacion } from '../../shared/ubicacion';
 import { finDeMes, inicioDeMes, parsearMesISO } from '../../shared/validation/dates';
 import type { EntidadExportableRefugio, PeriodoDashboardInput } from './dashboard-refugio.dto';
 import * as repo from './dashboard-refugio.repository';
@@ -262,7 +263,7 @@ export async function obtenerDashboard(
   const solicitudesDemoradasDetalle = aSolicitudesDemoradas(solicitudesAbiertas, hoy);
 
   return {
-    refugio: { nombre: refugio.nombre, localidad: refugio.direccion },
+    refugio: { nombre: refugio.nombre, localidad: etiquetaUbicacion(refugio) ?? '' },
     periodo: { desde: periodo.desde, hasta: periodo.hasta },
     kpis: {
       animalesAdoptados,

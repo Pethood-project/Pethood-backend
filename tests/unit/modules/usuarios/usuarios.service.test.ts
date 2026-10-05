@@ -9,6 +9,7 @@ vi.mock('../../../../src/modules/usuarios/usuarios.repository', () => ({
   promedioValoracion: vi.fn(),
   contarMascotasDelAmbito: vi.fn(),
   actualizarPerfil: vi.fn(),
+  actualizarUbicacion: vi.fn(),
   actualizarContrasena: vi.fn(),
   buscarHashContrasena: vi.fn(),
   buscarEstadoUsuarioPorNombre: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('../../../../src/shared/imagenPerfil', () => ({
 import * as repo from '../../../../src/modules/usuarios/usuarios.repository';
 import {
   actualizarPerfil,
+  actualizarUbicacion,
   cambiarPassword,
   darDeBajaCuenta,
   obtenerPerfil,
@@ -160,6 +162,28 @@ describe('usuarios.service', () => {
       expect.objectContaining({ imagenUrl: '/api/v1/archivos/perfiles/a.jpg' }),
     );
     expect(perfil.nombre).toBe('Anita');
+  });
+
+  it('actualiza la ubicación desde un link de Maps y recalcula las coordenadas', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+    mockedRepo.actualizarUbicacion.mockResolvedValue(perfilFake());
+
+    await actualizarUbicacion(10, 'PERSONAL', 'https://www.google.com/maps?q=-32.889,-68.845');
+
+    expect(mockedRepo.actualizarUbicacion).toHaveBeenCalledWith(10, {
+      mapaUrl: 'https://www.google.com/maps?q=-32.889,-68.845',
+      latitud: -32.889,
+      longitud: -68.845,
+    });
+  });
+
+  it('rechaza un link de mapa sin coordenadas', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+
+    await expect(
+      actualizarUbicacion(10, 'PERSONAL', 'https://www.google.com/'),
+    ).rejects.toMatchObject({ codigo: 'LINK_MAPA_INVALIDO', httpStatus: 422 });
+    expect(mockedRepo.actualizarUbicacion).not.toHaveBeenCalled();
   });
 
   it('rechaza cambiar el correo a uno ya usado por otro usuario', async () => {

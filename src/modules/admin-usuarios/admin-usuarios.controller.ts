@@ -33,6 +33,18 @@ export async function listarUsuarios(
   }
 }
 
+export async function obtenerUsuario(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    res.json(await service.obtenerDetalleUsuario(idDeParametro(req)));
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function verificarUsuario(
   req: Request,
   res: Response,

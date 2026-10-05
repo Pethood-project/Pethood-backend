@@ -346,6 +346,15 @@ const ESTADO_SOLICITABLE = 'Disponible';
 /** Solo un aviso activo recibe solicitudes: uno pausado o finalizado está fuera del feed. */
 const ESTADO_PUBLICACION_SOLICITABLE = 'Activa';
 
+/** Tipo de solicitud que, al aprobarse, transfiere la mascota al adoptante (HU-7.4). */
+const TIPO_SOLICITUD_ADOPCION = 'Adopcion';
+
+/**
+ * Comentario que queda en las demás solicitudes "Pendiente" de la publicación cuando una
+ * adopción se aprueba: se rechazan solas porque la mascota ya tiene un hogar.
+ */
+const COMENTARIO_RECHAZO_POR_ADOPCION = 'La mascota fue adoptada por otra persona';
+
 export async function crearSolicitud(
   datos: CrearSolicitudDto,
   usuarioId: number,
@@ -543,6 +552,13 @@ export async function resolverSolicitud(
     throw new AppError('ERROR_INTERNO', `Falta el estado "${datos.estado}" en el catálogo`, 500);
   }
 
+  // Aprobar una solicitud de ADOPCIÓN no es sólo cambiar el estado: hay que darle la mascota
+  // al adoptante. El tránsito es temporal (la mascota vuelve al refugio), así que sólo se
+  // resuelve. Ver `aprobarAdopcion`.
+  if (datos.estado === 'Aprobada' && solicitud.tipoSolicitud.nombre === TIPO_SOLICITUD_ADOPCION) {
+    return aprobarAdopcion(solicitud, nuevoEstado.id, datos.comentario, usuarioId);
+  }
+
   // Revalida "Pendiente" atómicamente al escribir: si otro PATCH concurrente ya la
   // resolvió entre la lectura de arriba y este punto, `resolverSiPendiente` devuelve
   // `null` en vez de pisar su resultado.
@@ -571,13 +587,14 @@ export async function resolverSolicitud(
 }
 
 /**
- * HU-4.1: aceptada o rechazada, al adoptante. Aceptada suma los efectos de la spec 004.
+* HU-4.1: rechazada, o aprobada de un tránsito (la adopción aprobada tiene su propio aviso,
+ * más completo, en `aprobarAdopcion` — a esta función ya no la alcanza porque
+ * `resolverSolicitud` deriva ese caso antes de llegar a `resolverSiPendiente`).
  * Best-effort: la resolución de la solicitud ya se escribió, un aviso que falla no la revierte.
  */
 async function avisarSolicitudResuelta(solicitud: SolicitudConDetalle): Promise<void> {
   try {
-    const mascota = solicitud.publicacion.mascota;
-    const nombreMascota = mascota.nombre ?? 'la mascota';
+    const nombreMascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
     const vigente = solicitud.historicoEstados[0]!.estadoSolicitud.nombre;
 
     if (vigente === 'Aprobada') {
@@ -590,27 +607,6 @@ async function avisarSolicitudResuelta(solicitud: SolicitudConDetalle): Promise<
         entidadId: solicitud.id,
         canal: { mail: true, push: true },
       });
-
-      // Adopción completada: al publicador le arranca el seguimiento y la historia clínica
-      // queda accesible. Tránsito no libera la mascota, así que no aplica.
-      if (solicitud.tipoSolicitud.nombre === 'Adopcion') {
-        const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
-        await Promise.all(
-          destinatarios.map((destId) =>
-            notificaciones.notificar({
-              usuarioId: destId,
-              tipo: 'ADOPCION_COMPLETADA',
-              mensaje: `Adopción de ${nombreMascota} completada — ya arrancó el seguimiento`,
-              entidadTipo: 'SOLICITUD',
-              entidadId: solicitud.id,
-              canal: { push: true },
-            }),
-          ),
-        );
-
-        await avisarOtrosPretendientes(solicitud);
-      }
-
       return;
     }
 
@@ -628,28 +624,62 @@ async function avisarSolicitudResuelta(solicitud: SolicitudConDetalle): Promise<
   }
 }
 
-/** "La mascota que solicitaste fue adoptada por otra persona", a las demás pendientes. */
-async function avisarOtrosPretendientes(solicitud: SolicitudConDetalle): Promise<void> {
-  const otras = await repo.listarOtrasPendientesDePublicacion(
-    solicitud.publicacion.id,
-    solicitud.id,
-  );
-  if (otras.length === 0) return;
+/**
+ * Avisos de una adopción aprobada (spec 004): al adoptante que ya puede coordinar, al
+ * publicador porque le arranca el seguimiento, y a quienes tenían otra solicitud pendiente
+ * sobre la misma publicación y `aprobarAdopcion` ya les rechazó (HU-7.4) — "la mascota que
+ * solicitaste fue adoptada por otra persona". Best-effort, mismo criterio que
+ * `avisarSolicitudResuelta`: la adopción ya quedó aprobada, un aviso que falla no la revierte.
+ */
+async function avisarAdopcionAprobada(
+  solicitud: SolicitudConDetalle,
+  otrosPretendientes: { id: number; usuarioId: number }[],
+  idsRechazados: number[],
+): Promise<void> {
+  try {
+    const mascota = solicitud.publicacion.mascota;
+    const nombreMascota = mascota.nombre ?? 'la mascota';
 
-  const nombreMascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
+    await notificaciones.notificar({
+      usuarioId: solicitud.usuarioId,
+      tipo: 'SOLICITUD_ACEPTADA',
+      mensaje: `¡Tu solicitud por ${nombreMascota} fue aceptada! Ya podés coordinar por el chat.`,
+      asuntoMail: `Tu solicitud por ${nombreMascota} fue aceptada`,
+      entidadTipo: 'SOLICITUD',
+      entidadId: solicitud.id,
+      canal: { mail: true, push: true },
+    });
 
-  await Promise.all(
-    otras.map((otra) =>
-      notificaciones.notificar({
-        usuarioId: otra.usuarioId,
-        tipo: 'SOLICITUD_MASCOTA_ADOPTADA_POR_OTRO',
-        mensaje: `${nombreMascota} ya fue adoptada por otra persona`,
-        entidadTipo: 'SOLICITUD',
-        entidadId: otra.id,
-        canal: { push: true },
-      }),
-    ),
-  );
+    const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
+    await Promise.all(
+      destinatarios.map((destId) =>
+        notificaciones.notificar({
+          usuarioId: destId,
+          tipo: 'ADOPCION_COMPLETADA',
+          mensaje: `Adopción de ${nombreMascota} completada — ya arrancó el seguimiento`,
+          entidadTipo: 'SOLICITUD',
+          entidadId: solicitud.id,
+          canal: { push: true },
+        }),
+      ),
+    );
+
+    const rechazados = otrosPretendientes.filter((otra) => idsRechazados.includes(otra.id));
+    await Promise.all(
+      rechazados.map((otra) =>
+        notificaciones.notificar({
+          usuarioId: otra.usuarioId,
+          tipo: 'SOLICITUD_MASCOTA_ADOPTADA_POR_OTRO',
+          mensaje: `${nombreMascota} ya fue adoptada por otra persona`,
+          entidadTipo: 'SOLICITUD',
+          entidadId: otra.id,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar la adopción aprobada', solicitud.id, err);
+  }
 }
 
 // ─────────────── Jobs programados (spec 004, entregable 4) ───────────────
@@ -744,4 +774,112 @@ export async function avisarTransitosProgramados(ahora: Date = new Date()): Prom
       );
     }
   }
+}
+
+/**
+ * Aprobación de una adopción (HU-7.4): resuelve la solicitud, crea la mascota propia del
+ * adoptante, pasa la mascota publicada a "Adoptado", finaliza la publicación y rechaza las
+ * demás solicitudes pendientes — todo en una transacción (`repo.aprobarAdopcion`).
+ */
+async function aprobarAdopcion(
+  solicitud: SolicitudConDetalle,
+  estadoAprobadaId: number,
+  comentario: string | null,
+  usuarioId: number,
+): Promise<SolicitudDetalleDto> {
+  const [estadoRechazada, estadoMascotaAdoptado, estadoPublicacionFinalizada] = await Promise.all([
+    repo.buscarEstadoSolicitudPorNombre('Rechazada'),
+    repo.buscarEstadoMascotaPorNombre('Adoptado'),
+    repo.buscarEstadoPublicacionPorNombre('Finalizada'),
+  ]);
+
+  if (!estadoRechazada || !estadoMascotaAdoptado || !estadoPublicacionFinalizada) {
+    throw new AppError(
+      'ERROR_INTERNO',
+      'Faltan estados en el catálogo para aprobar la adopción',
+      500,
+    );
+  }
+
+  const mascota = solicitud.publicacion.mascota;
+
+  // Antes de la transacción: a esta altura todavía siguen "Pendiente" (spec 004, para saber
+  // a quién de ellas avisarle después que la mascota ya fue adoptada por otro).
+  const otrosPretendientes = await repo.listarOtrasPendientesDePublicacion(
+    solicitud.publicacionId,
+    solicitud.id,
+  );
+
+  const resultado = await repo.aprobarAdopcion(solicitud.id, usuarioId, {
+    estadoAprobadaId,
+    estadoRechazadaId: estadoRechazada.id,
+    estadoMascotaAdoptadoId: estadoMascotaAdoptado.id,
+    estadoPublicacionFinalizadaId: estadoPublicacionFinalizada.id,
+    comentario,
+    comentarioRechazo: COMENTARIO_RECHAZO_POR_ADOPCION,
+    publicacionId: solicitud.publicacionId,
+    mascotaOrigenId: mascota.id,
+    mascotaOrigen: {
+      nombre: mascota.nombre,
+      fechaNacimiento: mascota.fechaNacimiento,
+      genero: mascota.genero,
+      peso: mascota.peso,
+      tamanio: mascota.tamanio,
+      castrado: mascota.castrado,
+      descripcion: mascota.descripcion,
+      imagenUrl: mascota.imagenUrl,
+      razaId: mascota.razaId,
+    },
+    adoptanteId: solicitud.usuarioId,
+  });
+
+  if (!resultado) {
+    throw new AppError('SOLICITUD_YA_RESUELTA', 'Esta solicitud ya fue resuelta', 409);
+  }
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'APROBAR',
+    entidad: 'Solicitud',
+    entidadId: solicitud.id,
+    detalle: `Pendiente -> Aprobada (adopción, mascota ${mascota.id} -> usuario ${solicitud.usuarioId})`,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CREAR',
+    entidad: 'Mascota',
+    entidadId: resultado.mascotaAdoptadaId,
+    detalle: `adoptada por usuario ${solicitud.usuarioId} (solicitud ${solicitud.id})`,
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Mascota',
+    entidadId: mascota.id,
+    detalle: 'Adoptado (adopción aprobada)',
+  });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Publicacion',
+    entidadId: solicitud.publicacionId,
+    detalle: 'Finalizada (adopción aprobada)',
+  });
+
+  for (const rechazadaId of resultado.solicitudesRechazadas) {
+    await registrarAuditoria({
+      usuarioId,
+      accion: 'RECHAZAR',
+      entidad: 'Solicitud',
+      entidadId: rechazadaId,
+      detalle: 'Rechazada al aprobarse otra solicitud de la misma publicación',
+    });
+  }
+
+  await avisarAdopcionAprobada(resultado.solicitud, otrosPretendientes, resultado.solicitudesRechazadas);
+
+  return aDetalleDto(resultado.solicitud);
 }

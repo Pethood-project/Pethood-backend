@@ -9,6 +9,7 @@
 // natural antes de crear). En producción solo se siembran catálogos y el usuario SISTEMA.
 //
 // Cuentas (contraseña `Pethood123` para todas):
+//   Todos tienen además el rol Adoptante (nadie lo pierde; solo cambia su vínculo con un refugio).
 //   admin@pethood.test       Administrador — panel web-admin
 //   adoptante@pethood.test   Ana Gomez — adoptante con favoritos, solicitudes, seguimientos, chats
 //   refugio@pethood.test     Bruno Diaz — operador de Refugio Patitas (dashboard refugio)

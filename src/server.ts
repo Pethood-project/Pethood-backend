@@ -20,11 +20,16 @@ void iniciarJobsProgramados();
 
 console.info('🔔 Worker y jobs programados de notificaciones arrancados.');
 
-process.on('SIGINT', () => {
-  console.info('\nCerrando servidor...');
-  // Primero los sockets: si no, `server.close()` espera a que se caigan las conexiones
-  // abiertas y el proceso queda colgado.
-  void Promise.all([detenerWebsockets(io), detenerWorkerNotificaciones(), detenerJobsProgramados()]).then(
-    () => server.close(() => process.exit(0)),
-  );
-});
+// SIGINT es el Ctrl+C local; SIGTERM es lo que mandan Render y Railway en cada deploy.
+for (const senal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(senal, () => {
+    console.info('\nCerrando servidor...');
+    // Primero los sockets: si no, `server.close()` espera a que se caigan las conexiones
+    // abiertas y el proceso queda colgado.
+    void Promise.all([
+      detenerWebsockets(io),
+      detenerWorkerNotificaciones(),
+      detenerJobsProgramados(),
+    ]).then(() => server.close(() => process.exit(0)));
+  });
+}

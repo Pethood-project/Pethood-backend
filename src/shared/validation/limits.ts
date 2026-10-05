@@ -21,23 +21,44 @@ export const LIMITES = {
     ubicacion: { max: 50 },
     personalidad: { max: 25 },
     imagenes: { max: 5 },
+    /** Texto libre de la barra de búsqueda de Adoptar (Módulo 11, HU-11.4). */
+    busqueda: { max: 100 },
+    /** Radio del filtro por cercanía, en kilómetros (HU-11.3). */
+    radioKm: { min: 1, max: 500 },
   },
 
   usuario: {
     nombre: { min: 1, max: 50 },
     apellido: { min: 1, max: 50 },
-    ubicacion: { max: 80 },
+    // Dirección estructurada para geocodificar (node-geocoder). Opcionales.
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    calleAltura: { max: 120 },
+    /** Link de Google Maps que el usuario puede pegar/corregir a mano. */
+    mapaUrl: { max: 500 },
   },
 
   refugio: {
     nombre: { min: 2, max: 100 },
-    direccion: { min: 2, max: 150 },
     descripcion: { max: 1000 },
+    // Dirección estructurada para geocodificar (node-geocoder). Opcionales.
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    calleAltura: { max: 120 },
+    /** Link de Google Maps que el miembro del refugio puede pegar/corregir a mano. */
+    mapaUrl: { max: 500 },
   },
 
   /** Solo web-admin (spec 002) — no hay contraparte en la app mobile, no se mirrorea. */
   admin: {
     motivo: { min: 1, max: 500 },
+    /** Respuesta con la que el admin resuelve un reporte (spec 008, HU-3.7). */
+    respuestaReporte: { min: 1, max: 500 },
+  },
+
+  /** Reporte de moderación (spec 008, HU-3.1 a HU-3.3). Texto libre. Espejo en el frontend mobile. */
+  reporte: {
+    motivo: { min: 5, max: 500 },
   },
 
   /** Formulario de contacto público (spec 015, HU-15.2). */
@@ -53,6 +74,13 @@ export const LIMITES = {
     pregunta: { min: 5, max: 200 },
     respuesta: { min: 5, max: 2000 },
     orden: { min: 1, max: 999 },
+  },
+
+  /** Solo web-admin (ABM de catálogos) — no hay contraparte en la app mobile, no se mirrorea. */
+  catalogo: {
+    nombre: { min: 2, max: 50 },
+    descripcion: { max: 200 },
+    secuenciaDias: { min: 1, max: 365 },
   },
 
   faqCategoria: {
@@ -141,6 +169,16 @@ export const LIMITES = {
   },
 
   /**
+   * Reseña (Módulo 10, HU-10.1). La puntuación es obligatoria de 1 a 5; el comentario es
+   * opcional y comparte techo con el comentario de solicitud (500), que es el campo de texto
+   * libre comparable más cercano. Espejo en el frontend mobile.
+   */
+  resena: {
+    puntuacion: { min: 1, max: 5 },
+    comentario: { max: 500 },
+  },
+
+  /**
    * Mensaje de chat (HU-5.2). REQUISITOS.md no fija un largo máximo, así que 1000 es una
    * decisión de esta HU: alcanza de sobra para una conversación de coordinación y evita que
    * un solo mensaje reviente el preview del listado (HU-5.1) o la celda de la sala.
@@ -175,16 +213,24 @@ export const LIMITES = {
     /** Lo fija la HU. */
     descripcion: { max: 300 },
     /**
-     * Dónde se perdió o se encontró, en texto libre y con el mismo techo que la ubicación del
-     * perfil. Provisorio hasta que exista el catálogo de Provincia/Localidad.
+     * Dónde se perdió o se encontró, con los mismos techos que la dirección del perfil:
+     * provincia y localidad del catálogo de georef, y un aclaratorio libre y opcional.
      */
-    ubicacion: { max: 80 },
+    provincia: { max: 80 },
+    localidad: { max: 80 },
+    referencia: { max: 120 },
     /** Fotos por aviso: la primera es la portada de la tarjeta, el resto va en la galería. */
     imagenes: { max: 5 },
     latitud: { min: -90, max: 90 },
     longitud: { min: -180, max: 180 },
-    /** Cuántas ubicaciones se pueden elegir a la vez en el filtro del portal. */
-    filtroUbicaciones: { maximo: 20 },
+    /** Link de Google Maps que se pega a mano para corregir el lugar. Mismo techo que el perfil. */
+    mapaUrl: { max: 500 },
+    /** Cuántas provincias se pueden elegir a la vez en el filtro del portal: todas. */
+    filtroProvincias: { maximo: 24 },
+    /** Cuántas localidades se pueden elegir a la vez en el filtro del portal. */
+    filtroLocalidades: { maximo: 20 },
+    /** Radio del filtro por cercanía, en km. Mismo techo que el de publicaciones (HU-11.3). */
+    radioKm: { min: 1, max: 500 },
     /** Tamaño de página del portal y su techo (paginación por cursor). */
     pagina: { porDefecto: 20, maximo: 50 },
   },

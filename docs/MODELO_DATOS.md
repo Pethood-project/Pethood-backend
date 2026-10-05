@@ -39,7 +39,11 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 
 ### Usuario
 
-`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, `usuario_ubicacion` (nullable — barrio/ciudad del perfil, GUI-15), FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+
+**Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de perfil):** `usuario_provincia`, `usuario_localidad`, `usuario_calle_altura` (texto, nullable — dirección estructurada que carga el usuario), `usuario_mapa_url` (texto, nullable — URL de Google Maps generada al geocodificar), `usuario_latitud` / `usuario_longitud` (`Float`, nullable — coordenadas resultantes) y `usuario_ubicacion_verificada` (boolean — si el usuario confirmó que el link apunta a su dirección). El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Las coordenadas se guardan aparte de la URL para calcular la distancia al refugio con Haversine (`distanciaKm`, `src/shared/geo.ts`) sin parsear el link. La geocodificación la hace `src/shared/geocoding.ts` con `node-geocoder` (proveedor `openstreetmap` por defecto o `google`, ver `GEOCODER_PROVIDER`/`GEOCODER_API_KEY`).
+
+> **Campo eliminado (2026-09-29):** `usuario_ubicacion` (barrio/ciudad, GUI-15). Lo reemplaza la dirección estructurada de arriba.
 
 Relaciones: 1 Usuario → N Mascota, N Publicacion, N Solicitud, N Favorito, N Notificacion, N Hogar, N Reseña (como autor), N Donacion, N Campaña, N Usuario_Chat, N Mensaje, N Rol_Usuario, N Animal_Perdido (como reportante).
 
@@ -49,7 +53,13 @@ Tabla intermedia N:N entre Usuario y Rol. `usuario_id FK NOT NULL`, `rol_id FK N
 
 ### Refugio
 
-`refugio_id PK`, `refugio_nombre`, `refugio_direccion`, `refugio_telefono`, `refugio_email`, `refugio_descripcion`, `refugio_verificado`, `refugio_imagen_url`, FK `estado_id` (→ Estado_Refugio).
+`refugio_id PK`, `refugio_nombre`, `refugio_telefono`, `refugio_email`, `refugio_descripcion`, `refugio_verificado`, `refugio_imagen_url`, FK `estado_id` (→ Estado_Refugio).
+
+**Campo agregado fuera del diagrama de clases (2026-09-28, Módulo 11):** `refugio_mapa_url` (texto, nullable) — enlace a Google Maps del refugio. Se muestra como ícono de ubicación en el detalle de la mascota y, cuando el link incluye coordenadas, alimenta el filtro por cercanía del feed. La extracción de coordenadas la hace `src/shared/geo.ts`: `coordenadasDeMapsUrl` para links completos y `resolverCoordenadasDeMapsUrl` para links cortos (`maps.app.goo.gl`), que sigue la redirección con caché y tope de tiempo.
+
+**Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de refugio):** `refugio_provincia`, `refugio_localidad`, `refugio_calle_altura` (texto, nullable — dirección estructurada), `refugio_latitud` / `refugio_longitud` (`Float`, nullable — coordenadas geocodificadas) y `refugio_ubicacion_verificada` (boolean — si el refugio confirmó que el link apunta a su dirección). `refugio_mapa_url` se genera al geocodificar (`https://www.google.com/maps?q=<lat>,<lng>`) y las coordenadas se persisten para no depender de parsear el link en el camino crítico del feed. El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Misma utilidad que el usuario: `src/shared/geocoding.ts`.
+
+> **Campo eliminado (2026-09-29):** `refugio_direccion` (texto libre). Lo reemplaza la dirección estructurada de arriba.
 
 Relaciones: 1 Refugio → N Campaña, 1 Refugio → N Reseña (como reportado/ `refugio_reportado_id` en Reseña).
 
@@ -88,6 +98,15 @@ Ver catálogos arriba.
 | `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
 
 **Vacunas (2026-09-27, spec 019):** `publicacion_vacunas` (texto libre) se eliminó. Las vacunas son de la mascota y viven en `Historia_Clinica` (`historia_clinica_tipo_vacuna`); la publicación las muestra leyéndolas de ahí.
+
+**Campos agregados por el Módulo 11 (2026-09-27, HU-11.3):**
+
+| Campo | Tipo | Para qué |
+| --- | --- | --- |
+| `publicacion_ubicacion_latitud` | `Decimal(9,6)` nullable | Coordenada capturada con el GPS al publicar. Habilita el filtro por cercanía del feed. |
+| `publicacion_ubicacion_longitud` | `Decimal(9,6)` nullable | Ídem. |
+
+Ambos son nullable: las publicaciones anteriores no las tienen. Cuando faltan, la publicación se sigue pudiendo ubicar por `publicacion_ubicacion` (texto libre), pero no entra en el filtro por distancia. Se agregaron fuera del diagrama de clases; pendiente reflejarlos. La decisión de solicitar GPS (contra el criterio original de "no GPS") es del equipo — ver `DEUDA_TECNICA.md`.
 
 **A revisar con el equipo:** `publicacion_desparasitado` sigue en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`, como pasó con las vacunas.
 
@@ -166,15 +185,24 @@ Con `solicitud_id` null la fila es del **catálogo** que se sortea. Con valor, e
 
 ### Reseña
 
-`reseña_id PK`, `reseña_puntuacion` (1-5), `reseña_comentario`, FK `reseña_usuario_autor FK NOT NULL` (autor), FK `refugio_reportado_id` (nullable), FK `usuario_reportado_id` (nullable).
+`reseña_id PK`, `reseña_puntuacion` (1-5), `reseña_comentario`, FK `reseña_usuario_autor FK NOT NULL` (autor), FK `refugio_reportado_id` (nullable), FK `usuario_reportado_id` (nullable), FK `solicitud_id` (nullable — la transacción que la habilita).
 
-**Nota sobre auditoría:** en el diagrama, Reseña tiene alta y modificación pero **no tiene campos de baja separados visibles como el resto** — sin embargo HU-10.6 ("Dar de baja reseñas") indica que sí soporta baja lógica. Tratarla igual que el resto de entidades con baja lógica estándar. Nunca se edita el contenido de una reseña ya creada (solo alta y baja, sin endpoint de update de contenido).
+**Campo agregado fuera del diagrama de clases (2026-09-27, Módulo 10):** `solicitud_id`. El diagrama solo tenía emisor/receptor, pero HU-10.1 exige que la reseña la habilite una transacción finalizada; sin ese vínculo no hay forma de validar la precondición (que las dos partes hayan cerrado una adopción/tránsito) ni de impedir reseñas entre desconocidos. Es nullable en base por compatibilidad con las reseñas ya sembradas, pero **obligatorio en el DTO** de alta. El flujo reseñado (adoptante→refugio, refugio→adoptante, refugio→hogar de tránsito) se deriva del `tipoSolicitud` de esa solicitud, y el receptor de cuál de los dos FKs (`refugio_reportado_id` o `usuario_reportado_id`) está poblado. Pendiente: reflejarlo en el diagrama de clases del grupo.
+
+**Nota sobre auditoría:** en el diagrama, Reseña tiene alta y modificación pero **no tiene campos de baja separados visibles como el resto** — sin embargo HU-10.6 ("Dar de baja reseñas") indica que sí soporta baja lógica. Tratarla igual que el resto de entidades con baja lógica estándar. Nunca se edita el contenido de una reseña ya creada (solo alta y baja, sin endpoint de update de contenido). Un índice único **parcial** (`resena_solicitud_autor_activo_uq`, solo en la migración) garantiza una sola reseña activa por autor y solicitud.
 
 ### Chat
 
-`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable).
+`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable).
 
-`solicitud_id` es la solicitud que habilitó la sala (CONSTITUTION §7: no hay chat sin interacción previa). Es nullable porque las salas de coordinación por mascota perdida (HU-13.2) no salen de una solicitud. Un índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL` evita dos salas para la misma solicitud.
+**Dos FK dicen de qué nació la sala** (CONSTITUTION §7: no hay chat sin interacción previa). Las dos guardan el ORIGEN de la conversación, no todo lo que se habló en ella:
+
+- `solicitud_id` — la solicitud de adopción o tránsito que la habilitó. Índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL`: evita dos salas para la misma solicitud.
+- `animal_perdido_id` — el aviso de mascota perdida/encontrada cuyo reclamo la abrió (HU-13.2, spec 024).
+
+Las dos son nullables y en la práctica nunca se llenan juntas, porque sólo se escribe la del hecho que creó la fila. Con las dos en `null` es una sala anterior a HU-5.2. (Nada en base lo impide: anotado en `DEUDA_TECNICA.md`, ítem 33.)
+
+**La sala es siempre entre las partes**, tanto para una solicitud como para un reclamo: una segunda solicitud al mismo refugio, o el reclamo de un aviso de alguien con quien ya se hablaba, caen en la conversación que ya existía. Por eso **lo que se habló vive en `Mensaje`** y no acá: una sala puede acumular dos solicitudes, dos avisos, o una de cada uno. La sala de un reclamo lleva `refugio_id` en `null` — el aviso es de la persona, no de su refugio.
 
 ### Usuario_Chat
 
@@ -184,11 +212,13 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 
 ### Mensaje
 
-`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable).
+`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD` | `ANIMAL_PERDIDO`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable).
 
 - **`mensaje_leido` quedó obsoleto.** Lo reemplazan las marcas de `Usuario_Chat`. Se sigue poblando para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo.
 - **`mensaje_imagen_url` es la PRIMERA de `mensaje_imagenes`**, desnormalizada para que el preview del listado no tenga que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`. Un mensaje admite hasta 5 fotos (`LIMITES.mensaje.fotos.maximo`).
 - **`mensaje_tipo = SOLICITUD`** es la tarjeta que PetHood inserta en la sala al enviarse una solicitud: la emite el usuario SISTEMA y lleva `solicitud_id`. No es una burbuja de texto y su `mensaje_contenido` va vacío — el texto lo pone la UI.
+- **`mensaje_tipo = ANIMAL_PERDIDO`** (HU-13.2) es lo mismo con la tarjeta del aviso reclamado: la emite SISTEMA, lleva `animal_perdido_id` y su contenido va vacío. Índice único parcial sobre `(animal_perdido_id, chat_id) WHERE animal_perdido_id IS NOT NULL`: una tarjeta por aviso y por sala, y es el equivalente del índice de `chat.solicitud_id`.
+- **Resolver un aviso no deja ningún mensaje.** Se evaluó una línea de sistema "Volvió con su dueño" en la sala y se descartó junto con el cierre de la conversación (spec 024 §9, decisión 2): la leyenda vive en el portal, que es donde el aviso se mira.
 
 **Nota de auditoría — excepción:** el mensaje **solo tiene alta**, no baja (consistente con la nota del documento de requisitos: "El mensaje solo va a tener alta, y el chat va a tener alta y baja"). No implementar endpoint de borrado de mensaje individual.
 
@@ -254,19 +284,27 @@ Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
 
 ### Animal_Perdido
 
-`animal_perdido_id PK`, `animal_perdido_nombre` (nullable), `animal_perdido_descripcion`, `animal_perdido_imagen_url`, `animal_perdido_imagenes` (TEXT[]), `animal_perdido_ubicacion` (nullable), `animal_perdido_fecha_suceso` (nullable), `animal_perdido_latitud`, `animal_perdido_longitud`, `animal_perdido_fecha_resuelto`, FK `usuario_reportante_id FK NOT NULL`, FK `mascota_id` (nullable — puede reportarse un animal encontrado que no está registrado como Mascota propia de nadie en el sistema), FK `especie_id` (nullable), FK `animal_perdido_estado_animal_perdido FK NOT NULL`.
+`animal_perdido_id PK`, `animal_perdido_nombre` (nullable), `animal_perdido_descripcion`, `animal_perdido_imagen_url`, `animal_perdido_imagenes` (TEXT[]), `animal_perdido_provincia` (nullable), `animal_perdido_localidad` (nullable), `animal_perdido_referencia` (nullable), `animal_perdido_lugar_latitud` (nullable), `animal_perdido_lugar_longitud` (nullable), `animal_perdido_fecha_suceso` (nullable), `animal_perdido_latitud`, `animal_perdido_longitud`, `animal_perdido_fecha_resuelto`, FK `usuario_reportante_id FK NOT NULL`, FK `mascota_id` (nullable — puede reportarse un animal encontrado que no está registrado como Mascota propia de nadie en el sistema), FK `especie_id` (nullable), FK `animal_perdido_estado_animal_perdido FK NOT NULL`.
 
-**Campos agregados fuera del diagrama de clases (2026-09-29, HU-13.1, spec 020):** `animal_perdido_nombre`, `animal_perdido_ubicacion` y `especie_id` **no figuran en el diagrama de clases original**, pero los pide la HU: el nombre de hasta 30 caracteres y los filtros del portal por localidad y por especie. Son nullables en base, igual que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la imponen el DTO y el servicio:
+**Campos agregados fuera del diagrama de clases (2026-09-29 y 2026-09-30, HU-13.1, spec 020):** `animal_perdido_nombre`, las columnas del lugar y `especie_id` **no figuran en el diagrama de clases original**, pero los pide la HU: el nombre de hasta 30 caracteres y los filtros del portal por lugar y por especie. Son nullables en base, igual que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la imponen el DTO y el servicio:
 
 - `animal_perdido_nombre`: obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar, porque quien encuentra un animal no sabe cómo se llama.
-- `animal_perdido_ubicacion`: dónde se perdió o se encontró, en **texto libre** como `usuario_ubicacion`. Es **provisorio**: el equipo va a definir un catálogo de Provincia/Localidad para toda la app y reemplazarlo por una FK (ver `DEUDA_TECNICA.md`).
+- `animal_perdido_provincia` / `animal_perdido_localidad`: dónde se perdió o se encontró, con el mismo criterio que `usuario_provincia` / `usuario_localidad`: texto que sale del catálogo de georef embebido en el cliente (no hay tablas de provincias ni localidades, ver `DEUDA_TECNICA.md` ítem 21). Obligatorias en el alta. Índice `(provincia, localidad)` para el filtro del portal. Reemplazaron el 2026-09-30 a `animal_perdido_ubicacion` (texto libre del primer corte), cuyo contenido la migración pasó a `localidad`.
+- `animal_perdido_referencia`: aclaración libre y opcional del lugar ("frente a la plaza"), hasta 120 caracteres. Hace el papel de `calle_altura` en la dirección del perfil.
+- `animal_perdido_lugar_latitud` / `animal_perdido_lugar_longitud`: el lugar geocodificado al publicar (`node-geocoder`, primero con la referencia y después sin ella). `NULL` si el geocoder no lo encontró. Alimentan la distancia, el filtro por cercanía y el link a Google Maps del aviso. **No confundir** con `animal_perdido_latitud` / `_longitud`, que son las del teléfono de quien reportó.
 - `especie_id`: FK directa y no derivada de `mascota_id` → raza → especie, porque un animal encontrado no tiene Mascota asociada.
 - `animal_perdido_fecha_suceso`: día en que se perdió o se encontró (campo "Fecha" del formulario, pantalla 26 del diseño). No es la fecha de publicación, que sigue siendo `animal_perdido_fecha_alta`. Obligatoria en el alta y no futura.
 - `animal_perdido_imagenes`: de 1 a 5 fotos. **El orden del array es el de la galería del detalle.** Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`: `animal_perdido_imagen_url` es la PRIMERA, la portada de la tarjeta del portal.
 
 Pendiente: reflejarlos en el diagrama de clases del grupo.
 
-**Resuelto:** `animal_perdido_latitud` / `animal_perdido_longitud` se mantienen — sí se captura la coordenada al reportar un animal perdido/encontrado (ej. desde el GPS del dispositivo al momento del reporte). Lo que **no existe** es un mapa interactivo en la UI: el usuario busca y visualiza por ubicación administrativa (Provincia/Localidad), no por un mapa con pines. No quitar estos campos del modelo ni reemplazarlos por FK a Provincia/Localidad — conviven ambos: lat/long como dato del reporte, Provincia/Localidad como criterio de filtro para el usuario.
+**`animal_perdido_fecha_resuelto` la escribe HU-13.2** (spec 024). Hasta entonces sólo la llenaba el seed. Se completa cuando el reportante marca el caso resuelto, junto con el paso del estado a "Resuelto"; es el dato de **cuándo volvió**, independiente de `fecha_modificacion`, que cambia con cualquier edición.
+
+Hoy "Resuelto" es un **estado terminal**: no hay reapertura ni histórico de estados (si HU-13.3 los pide, corresponde una tabla `AnimalPerdidoEstado` con el patrón de `PublicacionEstado`).
+
+**Resolver el aviso no toca los chats.** REQUISITOS §13 pedía cerrar "el chat asociado"; se descartó por decisión del equipo del 2026-10-01 (spec 024 §9, decisión 2), porque la conversación es compartida con esa persona y cerrarla silenciaría charlas ajenas al aviso.
+
+**Resuelto:** `animal_perdido_latitud` / `animal_perdido_longitud` se mantienen — sí se captura la coordenada al reportar un animal perdido/encontrado (ej. desde el GPS del dispositivo al momento del reporte). Lo que **no existe** es un mapa interactivo en la UI: el usuario busca y visualiza por ubicación administrativa (Provincia/Localidad), no por un mapa con pines. No quitar estos campos del modelo ni reemplazarlos por FK a Provincia/Localidad — conviven ambos: lat/long como dato del reporte, Provincia/Localidad como criterio de filtro para el usuario. Las del teléfono **nunca se exponen** en la API: sólo sirven de respaldo del filtro por cercanía cuando el lugar no se pudo geocodificar (2026-09-30).
 
 ### Estado_Animal_Perdido
 
@@ -274,7 +312,7 @@ Ver catálogos.
 
 ### Reporte_Problema
 
-`reporte_problema_id`, `reporte_problema_motivo`, `reporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema` y sus datos de auditoría. No hay relación con ninguna tabla.
+`reporte_problema_id`, `reporte_problema_motivo`, `reporte_problema_respuesta`, `reporte_problema_resuelto`, `reporte_problema_mensaje_sistema`, `reporte_problema_tipo` (enum `tipo_reporte`: `PUBLICACION`, `USUARIO`, `REFUGIO`, `RESENA`, `ANIMAL_PERDIDO`, `CAMPANIA`, `MENSAJE`), `reporte_problema_objeto_id` y sus datos de auditoría. Vínculo **polimórfico sin FK**: `objeto_id` es el id de la tabla que indica `tipo` (no queda colgado porque no hay DELETE físico). El reportante es `usuario_alta`. Un solo reporte pendiente por (reportante, tipo, objeto). Ver spec 008.
 
 ### Consulta_Soporte
 
@@ -292,7 +330,7 @@ Ver catálogos.
 
 ## Entidades cuya existencia formal hay que confirmar
 
-- **Reporte_Problema**: aparece nombrada explícitamente en la matriz de trazabilidad del documento de requisitos (HU-3.1 a HU-3.7, "Moderación y Reportes") asociada a Usuario, Publicacion y Reseña, pero **no aparece dibujada como entidad propia en las capturas del diagrama de clases** revisadas. Antes de la Fase 9 del roadmap, confirmar con el equipo si ya existe en una versión más actualizada del diagrama o si hay que modelarla desde cero (sugerencia mínima: `reporte_id PK`, `reporte_motivo`, `reporte_estado`, FK polimórfica o FKs nullable a `publicacion_id` / `usuario_reportado_id` / `reseña_id` + auditoría).
+- **Reporte_Problema**: aparece nombrada explícitamente en la matriz de trazabilidad del documento de requisitos (HU-3.1 a HU-3.7, "Moderación y Reportes") asociada a Usuario, Publicacion y Reseña, pero **no aparece dibujada como entidad propia en las capturas del diagrama de clases** revisadas. Se modeló con `tipo` + `objeto_id` polimórfico (spec 008, 2026-10-01); **a confirmar con el equipo** contra el diagrama.
 
 ## Resumen de cardinalidades clave (para no perderlas al migrar)
 
@@ -354,6 +392,7 @@ Ver catálogos.
   -> Usuario (autor, vía `reseña_usuario_autor`)
   -> Refugio (reportado, opcional)
   -> Usuario (reportado, opcional)
+  -> Solicitud (transacción que la habilita)
 
 - Chat
   -> Refugio (opcional)

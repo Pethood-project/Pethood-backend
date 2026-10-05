@@ -7,6 +7,7 @@ import type {
   LoginBody,
   RecuperarBody,
   RegistroBody,
+  RegistroRefugioBody,
   ResetearBody,
 } from './auth.dto';
 import * as authService from './auth.service';
@@ -20,6 +21,23 @@ function redirectLogin(res: Response, error: string): void {
 export async function registro(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const resultado = await authService.registrar(req.body as RegistroBody, req.file);
+    res.status(201).json(resultado);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function registroRefugio(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const resultado = await authService.registrarRefugio(
+      req.body as RegistroRefugioBody,
+      req.file,
+      req.ip,
+    );
     res.status(201).json(resultado);
   } catch (error) {
     next(error);
