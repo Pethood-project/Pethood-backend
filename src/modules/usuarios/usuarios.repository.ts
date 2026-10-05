@@ -63,7 +63,13 @@ export function listarPerfilesIncompletos(desde: Date) {
     where: {
       fechaBaja: null,
       fechaAlta: { lte: desde },
-      OR: [{ imagenUrl: null }, { telefono: null }, { ubicacion: null }],
+      OR: [
+        { imagenUrl: null },
+        { telefono: null },
+        { provincia: null },
+        { localidad: null },
+        { calleAltura: null },
+      ],
     },
     select: { id: true, nombre: true },
   });
