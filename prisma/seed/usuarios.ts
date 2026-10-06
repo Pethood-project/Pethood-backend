@@ -80,7 +80,8 @@ async function crearUsuario(catalogos: Catalogos, datos: DatosUsuario): Promise<
     },
   });
 
-  for (const rol of datos.roles) {
+  // Todo usuario es adoptante siempre; `roles` solo suma los otros (Refugio, Administrador).
+  for (const rol of new Set(['Adoptante', ...datos.roles])) {
     await asignarRol(usuario.id, id(catalogos.roles, rol), sistemaId);
   }
 
@@ -190,7 +191,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     provincia: 'Mendoza',
     localidad: 'Godoy Cruz',
     calleAltura: 'Tiburcio Benegas 850',
-    roles: ['Adoptante'],
+    roles: [],
   });
 
   const carla = await crearUsuario(catalogos, {
@@ -204,7 +205,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     provincia: 'Mendoza',
     localidad: 'Guaymallén',
     calleAltura: 'Bandera de los Andes 2300',
-    roles: ['Adoptante'],
+    roles: [],
   });
 
   const martin = await crearUsuario(catalogos, {
@@ -218,7 +219,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     provincia: 'Mendoza',
     localidad: 'Luján de Cuyo',
     calleAltura: 'Roque Sáenz Peña 480',
-    roles: ['Adoptante'],
+    roles: [],
   });
 
   const elena = await crearUsuario(catalogos, {
@@ -231,7 +232,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     provincia: 'Mendoza',
     localidad: 'Las Heras',
     calleAltura: 'Independencia 1200',
-    roles: ['Adoptante'],
+    roles: [],
   });
 
   const lucia = await crearUsuario(catalogos, {
@@ -244,7 +245,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     provincia: 'Mendoza',
     localidad: 'Maipú',
     calleAltura: 'Ozamis 300',
-    roles: ['Adoptante'],
+    roles: [],
   });
 
   // Cuenta dada de baja: sus chats tienen que seguir visibles con el contacto inactivo.
@@ -254,7 +255,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     email: 'diego@pethood.test',
     telefono: '2617000005',
     dni: '31333444',
-    roles: ['Adoptante'],
+    roles: [],
     baja: true,
   });
 
@@ -294,7 +295,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     roles: ['Refugio'],
   });
 
-  // Adoptante que además pertenece a un refugio: prueba la gestión de roles múltiples (HU-2.1).
+  // Pertenece a un refugio además de ser adoptante: prueba la gestión de roles múltiples (HU-2.1).
   const multirol = await crearUsuario(catalogos, {
     nombre: 'Bruna',
     apellido: 'Salvatierra',
@@ -302,7 +303,7 @@ async function seedActoresPrincipales(catalogos: Catalogos): Promise<Actores> {
     telefono: '2617777777',
     dni: '39999999',
     refugioId: huellitas.id,
-    roles: ['Adoptante', 'Refugio'],
+    roles: ['Refugio'],
   });
 
   return {
@@ -445,7 +446,7 @@ async function seedLoteAdmin(catalogos: Catalogos) {
       dni: String(35000000 + i * 23),
       verificado: escenario.verificado,
       estado: escenario.estado,
-      roles: ['Adoptante'],
+      roles: [],
     });
   }
 }

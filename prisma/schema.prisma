@@ -16,8 +16,10 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Conexión sin pooler: la usan las migraciones (PgBouncer no las soporta). En local es igual a DATABASE_URL.
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────── ENUMS ───────────────
@@ -42,6 +44,7 @@ enum GeneroMascota {
 enum TipoMensaje {
   TEXTO
   SOLICITUD
+  ANIMAL_PERDIDO
 
   @@map("tipo_mensaje")
 }
@@ -774,13 +777,22 @@ model Chat {
   // esta HU no salen de una solicitud.
   solicitudId Int? @map("solicitud_id")
 
+  // Aviso de animal perdido/encontrado que abrió la sala (HU-13.2). Mismo papel que
+  // `solicitudId`: es el ORIGEN de la conversación, no todo lo que se habló en ella.
+  //
+  // La sala es entre las partes, igual que la de una solicitud: si las dos personas ya se
+  // escribían, el reclamo cae en la conversación que tenían y esta columna queda en null.
+  // Lo que se habló vive en `Mensaje.animalPerdidoId`, una tarjeta por aviso.
+  animalPerdidoId Int? @map("animal_perdido_id")
+
   usuarioAlta Int       @map("chat_usuario_alta")
   fechaAlta   DateTime  @default(now()) @map("chat_fecha_alta")
   usuarioBaja Int?      @map("chat_usuario_baja")
   fechaBaja   DateTime? @map("chat_fecha_baja")
 
-  refugio   Refugio?   @relation(fields: [refugioId], references: [id])
-  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
+  refugio       Refugio?       @relation(fields: [refugioId], references: [id])
+  solicitud     Solicitud?     @relation(fields: [solicitudId], references: [id])
+  animalPerdido AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
 
   participantes UsuarioChat[]
   mensajes      Mensaje[]
@@ -857,15 +869,21 @@ model Mensaje {
   // Sólo en los mensajes de tipo SOLICITUD: la tarjeta que se pinta en la sala.
   solicitudId Int? @map("solicitud_id")
 
+  // Sólo en los de tipo ANIMAL_PERDIDO: la tarjeta del aviso reclamado (HU-13.2). Una sala
+  // puede acumular varias (dos avisos de la misma persona, o un aviso y una solicitud); un
+  // índice único parcial sobre (animal_perdido_id, chat_id) evita repetir la misma.
+  animalPerdidoId Int? @map("animal_perdido_id")
+
   chatId    Int @map("chat_id")
   usuarioId Int @map("usuario_id")
 
   usuarioAlta Int      @map("mensaje_usuario_alta")
   fechaAlta   DateTime @default(now()) @map("mensaje_fecha_alta")
 
-  chat      Chat       @relation(fields: [chatId], references: [id])
-  usuario   Usuario    @relation(fields: [usuarioId], references: [id])
-  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
+  chat          Chat           @relation(fields: [chatId], references: [id])
+  usuario       Usuario        @relation(fields: [usuarioId], references: [id])
+  solicitud     Solicitud?     @relation(fields: [solicitudId], references: [id])
+  animalPerdido AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
 
   // Conteo de no leídos con el modelo nuevo: "mensajes de la sala que no emití yo y son
   // posteriores a mi última lectura". Los índices parciales de HU-5.1 siguen en SQL a mano.
@@ -1003,15 +1021,20 @@ model Donacion {
 
 // Aviso de un animal perdido o encontrado (spec 020, HU-13.1).
 //
-// `nombre`, `ubicacion` y `especieId` no vienen del diagrama de clases: los pide la HU (el
-// nombre de hasta 30 caracteres y los filtros por localidad y especie). Son nullables en base,
-// igual que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la impone el DTO y el
+// `nombre`, el lugar y `especieId` no vienen del diagrama de clases: los pide la HU (el nombre
+// de hasta 30 caracteres y los filtros por localidad y especie). Son nullables en base, igual
+// que los campos que HU-6.1 le sumó a Mascota, y la obligatoriedad la impone el DTO y el
 // servicio: así no invalidan los avisos cargados antes y no bloquean otros flujos.
 //
 // - `nombre`: obligatorio en un aviso "Perdido"; en uno "Encontrado" puede faltar, porque
 //   quien encuentra un animal no sabe cómo se llama.
-// - `ubicacion`: dónde se perdió o se encontró, en texto libre como `usuario_ubicacion`. Es
-//   PROVISORIO hasta que exista el catálogo de Provincia/Localidad (ver DEUDA_TECNICA.md).
+// - `provincia`, `localidad` y `referencia`: dónde se perdió o se encontró, con el mismo
+//   criterio que la dirección del perfil (Módulo 11): provincia y localidad salen del catálogo
+//   de georef del cliente (`constants/Provincias.ts`) y se guardan como texto; `referencia` es
+//   el aclaratorio libre y opcional ("cerca de la plaza Italia").
+// - `lugarLatitud`/`lugarLongitud`: el lugar geocodificado con `node-geocoder` al publicar
+//   (shared/geocoding.ts). Son las que se exponen (distancia, link a Google Maps). Nulas si el
+//   geocoder no encontró nada.
 // - `especieId`: FK directa y no derivada de `mascotaId` → raza → especie, porque un animal
 //   encontrado no tiene Mascota asociada.
 // - `fechaSuceso`: el día en que se perdió o se encontró, que no tiene por qué ser el día en
@@ -1022,7 +1045,8 @@ model Donacion {
 //   la tarjeta del portal.
 //
 // `latitud`/`longitud` NO son la ubicación del animal: son las coordenadas del dispositivo al
-// momento de reportar (MODELO_DATOS.md). No se exponen en el listado.
+// momento de reportar (MODELO_DATOS.md). NUNCA se exponen: dicen dónde estaba quien reportó.
+// Sólo se usan para el filtro por cercanía de los avisos cuyo lugar no se pudo geocodificar.
 //
 // Además del índice de abajo, la tabla tiene un índice PARCIAL que Prisma no sabe expresar y
 // vive en `migrations/20260929120000_hu131_animal_perdido_nombre_ubicacion_especie`:
@@ -1034,7 +1058,11 @@ model AnimalPerdido {
   descripcion           String    @map("animal_perdido_descripcion")
   imagenUrl             String    @map("animal_perdido_imagen_url")
   imagenes              String[]  @map("animal_perdido_imagenes")
-  ubicacion             String?   @map("animal_perdido_ubicacion")
+  provincia             String?   @map("animal_perdido_provincia")
+  localidad             String?   @map("animal_perdido_localidad")
+  referencia            String?   @map("animal_perdido_referencia")
+  lugarLatitud          Float?    @map("animal_perdido_lugar_latitud")
+  lugarLongitud         Float?    @map("animal_perdido_lugar_longitud")
   fechaSuceso           DateTime? @map("animal_perdido_fecha_suceso")
   latitud               Float     @map("animal_perdido_latitud")
   longitud              Float     @map("animal_perdido_longitud")
@@ -1056,20 +1084,46 @@ model AnimalPerdido {
   especie             Especie?            @relation(fields: [especieId], references: [id])
   estadoAnimalPerdido EstadoAnimalPerdido @relation(fields: [estadoAnimalPerdidoId], references: [id])
 
+  // Las salas que abrió este aviso (HU-13.2) y las tarjetas que dejó en una conversación.
+  chats    Chat[]
+  mensajes Mensaje[]
+
   @@index([especieId])
+  // Filtro por provincia y localidad del portal.
+  @@index([provincia, localidad])
   @@map("animal_perdido")
 }
 
-// ─────────────── MODERACIÓN Y REPORTES ───────────────
-// Sin FKs por ahora (así quedó en MODELO_DATOS.md) — pendiente de confirmar antes de Fase 9
-// del ROADMAP (ver "Entidades cuya existencia formal hay que confirmar" en el doc).
+// ─────────────── MODERACIÓN Y REPORTES (spec 008) ───────────────
+
+// Qué se reporta (HU-3.1 a HU-3.3). Enum de Prisma y no tabla de catálogo: el service ramifica
+// por el valor (cómo se resuelve y valida cada objeto). Agregar un tipo es un valor nuevo acá
+// (`ALTER TYPE ... ADD VALUE`) más su resolver en `reportes.service.ts`.
+enum TipoReporte {
+  PUBLICACION
+  USUARIO
+  REFUGIO
+  RESENA
+  ANIMAL_PERDIDO
+  CAMPANIA
+  MENSAJE
+
+  @@map("tipo_reporte")
+}
+
+// `objeto_id` apunta al id de la tabla que indica `tipo`, SIN FK: es polimórfico. No queda
+// colgado porque nada se borra físicamente (regla transversal 1). Reportante = `usuario_alta`.
+// Índice único parcial `reporte_problema_pendiente_uq` (migración): un solo reporte pendiente
+// por (reportante, tipo, objeto).
 
 model ReporteProblema {
-  id             Int     @id @default(autoincrement()) @map("reporte_problema_id")
-  motivo         String  @map("reporte_problema_motivo")
-  respuesta      String? @map("reporte_problema_respuesta")
-  resuelto       Boolean @default(false) @map("reporte_problema_resuelto")
-  mensajeSistema String? @map("reporte_problema_mensaje_sistema")
+  id             Int         @id @default(autoincrement()) @map("reporte_problema_id")
+  motivo         String      @map("reporte_problema_motivo")
+  respuesta      String?     @map("reporte_problema_respuesta")
+  resuelto       Boolean     @default(false) @map("reporte_problema_resuelto")
+  mensajeSistema String?     @map("reporte_problema_mensaje_sistema")
+  tipo           TipoReporte @map("reporte_problema_tipo")
+  objetoId       Int         @map("reporte_problema_objeto_id")
 
   usuarioAlta         Int       @map("reporte_problema_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("reporte_problema_fecha_alta")
@@ -1078,6 +1132,7 @@ model ReporteProblema {
   usuarioBaja         Int?      @map("reporte_problema_usuario_baja")
   fechaBaja           DateTime? @map("reporte_problema_fecha_baja")
 
+  @@index([tipo, objetoId])
   @@map("reporte_problema")
 }
 

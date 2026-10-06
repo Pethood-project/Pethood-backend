@@ -216,7 +216,7 @@ const ESTADO_VISIBLE_EN_FEED = 'Disponible';
 const RELACIONES_FEED = {
   historicoEstados: ESTADO_VIGENTE,
   // Quién la publicó, para el «Publicado por» de la ficha cuando no es de un refugio.
-  usuario: { select: { nombre: true, apellido: true } },
+  usuario: { select: { id: true, nombre: true, apellido: true, imagenUrl: true } },
   mascota: {
     include: {
       raza: { include: { especie: true } },
@@ -417,6 +417,15 @@ function condicionesFeed(
     mascota,
     historicoEstados: conEstadoVigente({ nombre: ESTADO_PUBLICACION.ACTIVA }),
   };
+
+  // Perfiles públicos (spec 023). Una persona lista solo lo que publicó a título personal:
+  // lo que publicó para su refugio se ve en el perfil del refugio.
+  if (filtros.refugioId !== undefined) mascota.refugioId = filtros.refugioId;
+  if (filtros.usuarioId !== undefined) {
+    where.usuarioId = filtros.usuarioId;
+    if (filtros.refugioId === undefined) mascota.refugioId = null;
+  }
+
   const rasgos: string[] = [];
 
   if (filtros.compatibleNinios) rasgos.push(RASGO_COMPATIBLE_NINIOS);

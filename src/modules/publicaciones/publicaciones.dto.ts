@@ -170,6 +170,9 @@ export const filtrosFeedSchema = z
     edadMin: enteroOpcionalSchema('La edad mínima'),
     /** Años cumplidos, exclusivo: el rango "1–3 años" es `edadMin=1&edadMax=3`. */
     edadMax: enteroOpcionalSchema('La edad máxima'),
+    /** Perfiles públicos (spec 023): publicaciones de un refugio o de una persona a título personal. */
+    refugioId: z.coerce.number().int().positive('El refugio no es válido').optional(),
+    usuarioId: z.coerce.number().int().positive('El usuario no es válido').optional(),
     castrado: banderaSchema,
     compatibleNinios: banderaSchema,
     compatibleOtrasMascotas: banderaSchema,
@@ -249,7 +252,7 @@ export interface PublicacionFeedDto {
    * La persona que la publicó, solo cuando no es de un refugio (`refugio` null): la ficha la
    * muestra en «Publicado por». En una de refugio es null, para no exponer a su personal.
    */
-  publicadoPor: { nombre: string; apellido: string } | null;
+  publicadoPor: { id: number; nombre: string; apellido: string; imagenUrl: string | null } | null;
   /**
    * Distancia en km entre la ubicación de quien publicó y las coordenadas del usuario que
    * consulta, cuando las manda (`GET /:id?latitud=&longitud=`). `null` si el usuario no mandó

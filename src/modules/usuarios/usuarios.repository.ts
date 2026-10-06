@@ -11,7 +11,9 @@ const includePerfil = {
   roles: { include: { rol: true } },
   // Mismo dato que devuelve el login: si no viniera acá, refrescar el perfil lo borraría de
   // la sesión (y el encabezado de Chats se quedaría sin el nombre del refugio).
-  refugio: { select: { id: true, nombre: true } },
+  refugio: {
+    select: { id: true, nombre: true, fechaBaja: true, estado: { select: { nombre: true } } },
+  },
   _count: {
     select: {
       // Las mascotas no se cuentan acá: dependen del perfil con el que se mira (personal o
@@ -257,5 +259,24 @@ export async function darDeBajaCuenta(
       where: { id: usuarioId },
       data: { estadoId: estadoInactivoId, ...baja },
     });
+  });
+}
+
+/** Lo mínimo para el perfil público (spec 023): sin email, teléfono, DNI ni dirección exacta. */
+export function buscarPerfilPublico(id: number) {
+  return prisma.usuario.findFirst({
+    where: { id, fechaBaja: null },
+    select: {
+      id: true,
+      nombre: true,
+      apellido: true,
+      email: true,
+      imagenUrl: true,
+      verificado: true,
+      provincia: true,
+      localidad: true,
+      fechaAlta: true,
+      estado: { select: { nombre: true } },
+    },
   });
 }

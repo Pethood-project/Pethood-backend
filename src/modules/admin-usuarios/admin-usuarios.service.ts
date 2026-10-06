@@ -1,6 +1,7 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_API, ROL_DB, rolApiADb, rolesDbAApi } from '../../shared/roles';
+import { listarDeRefugio, listarDeUsuario } from '../resenas/resenas.service';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import type {
   AltaRefugioBody,
@@ -80,6 +81,24 @@ export async function listarUsuarios(filtros: FiltrosUsuarios) {
     page: filtros.page,
     limit: filtros.limit,
     usuarios: usuarios.map(aUsuarioDto),
+  };
+}
+
+export async function obtenerDetalleUsuario(id: number) {
+  const usuario = await buscarUsuarioOFallar(id);
+  const [resumen, resenas] = await Promise.all([repo.resumenUsuario(id), listarDeUsuario(id)]);
+
+  return {
+    usuario: {
+      ...aUsuarioDto(usuario),
+      imagenUrl: usuario.imagenUrl,
+      fechaNacimiento: usuario.fechaNacimiento,
+      fechaAlta: usuario.fechaAlta,
+      ubicacion: etiquetaUbicacion(usuario),
+      refugio: usuario.refugio ? { id: usuario.refugio.id, nombre: usuario.refugio.nombre } : null,
+    },
+    resumen,
+    resenas,
   };
 }
 
@@ -213,6 +232,15 @@ export async function gestionarRoles(adminId: number, usuarioId: number, body: R
     );
   }
 
+  // Todo usuario es adoptante siempre: lo que cambia es su vínculo con un refugio (MIEMBRO_REFUGIO).
+  if (body.quitar.includes(ROL_API.ADOPTANTE)) {
+    throw new AppError(
+      'NO_SE_PUEDE_QUITAR_ADOPTANTE',
+      'El rol de adoptante no se puede quitar: todos los usuarios son adoptantes.',
+      409,
+    );
+  }
+
   if (body.agregar.includes(ROL_API.MIEMBRO_REFUGIO) && body.refugioId !== undefined) {
     await buscarRefugioOFallar(body.refugioId);
   }
@@ -239,6 +267,14 @@ export async function gestionarRoles(adminId: number, usuarioId: number, body: R
 
     const vinculo = await repo.buscarVinculoRolActivo(usuarioId, rol.id);
     if (vinculo) await repo.quitarRol(vinculo.id, adminId);
+  }
+
+  // Sin rol de refugio no queda asociado a ningún refugio.
+  if (
+    body.quitar.includes(ROL_API.MIEMBRO_REFUGIO) &&
+    !body.agregar.includes(ROL_API.MIEMBRO_REFUGIO)
+  ) {
+    await repo.desasignarRefugio(usuarioId, adminId);
   }
 
   if (body.agregar.includes(ROL_API.MIEMBRO_REFUGIO) && body.refugioId !== undefined) {
@@ -283,7 +319,7 @@ export async function obtenerDetalleRefugio(id: number) {
   const refugio = await repo.buscarRefugioDetalle(id);
   if (!refugio) throw new AppError('REFUGIO_NO_ENCONTRADO', 'No encontramos ese refugio.', 404);
 
-  const resumen = await repo.resumenRefugio(id);
+  const [resumen, resenas] = await Promise.all([repo.resumenRefugio(id), listarDeRefugio(id)]);
 
   return {
     refugio: aRefugioDto(refugio),
@@ -295,6 +331,7 @@ export async function obtenerDetalleRefugio(id: number) {
       roles: rolesDbAApi(u.roles.map((v) => v.rol.nombre)),
     })),
     resumen,
+    resenas,
   };
 }
 

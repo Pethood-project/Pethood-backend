@@ -90,3 +90,72 @@ export async function geocodificarDireccion(
     return null;
   }
 }
+
+/**
+ * URL de Google Maps que BUSCA un texto, para cuando no hay coordenadas (el geocoder no
+ * encontró el lugar). Maps resuelve la búsqueda por su cuenta, así el link sirve igual.
+ */
+export function construirMapaUrlDeBusqueda(texto: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(texto)}`;
+}
+
+/** Un lugar sin calle: provincia y localidad, y opcionalmente una referencia libre. */
+export interface LugarAGeocodificar {
+  provincia: string;
+  localidad: string;
+  /** Aclaratorio libre ("cerca de la plaza Italia"): puede no ser geocodificable. */
+  referencia?: string | null;
+}
+
+/** Texto del lugar para el geocoder o para buscar en Maps: «<referencia>, <localidad>, <provincia>, Argentina». */
+export function textoDeLugar(lugar: LugarAGeocodificar): string {
+  return [lugar.referencia, lugar.localidad, lugar.provincia, 'Argentina']
+    .filter((parte) => parte && parte.trim() !== '')
+    .join(', ');
+}
+
+/**
+ * Tope de espera del geocoder al publicar: si el proveedor tarda, el alta sigue sin
+ * coordenadas del lugar en vez de quedar colgada.
+ */
+const ESPERA_MAXIMA_LUGAR_MS = 6000;
+
+async function coordenadasDeTexto(texto: string): Promise<Coordenadas | null> {
+  let temporizador: ReturnType<typeof setTimeout> | undefined;
+
+  const vencimiento = new Promise<null>((resolver) => {
+    temporizador = setTimeout(() => resolver(null), ESPERA_MAXIMA_LUGAR_MS);
+  });
+
+  try {
+    const busqueda = obtenerGeocoder()
+      .geocode(texto)
+      .then(([resultado]) =>
+        resultado?.latitude !== undefined && resultado?.longitude !== undefined
+          ? { latitud: resultado.latitude, longitud: resultado.longitude }
+          : null,
+      );
+
+    return await Promise.race([busqueda, vencimiento]);
+  } catch (error) {
+    console.error('Error al geocodificar el lugar:', error);
+    return null;
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
+
+/**
+ * Coordenadas de un lugar sin calle (el de un aviso de mascota perdida, spec 020). La
+ * referencia es texto libre y muchas veces el geocoder no la entiende ("en la esquina del
+ * kiosco"), así que primero se prueba con ella y, si no hay resultado, sólo con localidad y
+ * provincia, que siempre salen del catálogo. `null` si no se encontró nada. No lanza.
+ */
+export async function geocodificarLugar(lugar: LugarAGeocodificar): Promise<Coordenadas | null> {
+  if (lugar.referencia && lugar.referencia.trim() !== '') {
+    const conReferencia = await coordenadasDeTexto(textoDeLugar(lugar));
+    if (conReferencia) return conReferencia;
+  }
+
+  return coordenadasDeTexto(textoDeLugar({ ...lugar, referencia: null }));
+}

@@ -8,12 +8,14 @@ import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
 import type { ArchivoSubida } from '../../shared/r2';
 import type {
+  PerfilPublicoUsuarioDto,
   ActualizarPerfilBody,
   CambiarPasswordBody,
   PerfilPropio,
   PreviewUbicacionBody,
   UbicacionGeocodificadaDto,
 } from './usuarios.dto';
+import { aRefugioDeSesion } from '../../shared/refugioSesion';
 import type { UsuarioPerfil } from './usuarios.repository';
 import * as repo from './usuarios.repository';
 
@@ -45,7 +47,7 @@ function aPerfil(
     ubicacionVerificada: usuario.ubicacionVerificada,
     imagenUrl: usuario.imagenUrl,
     roles: rolesDbAApi(nombresDeRol(usuario)),
-    refugio: usuario.refugio,
+    refugio: aRefugioDeSesion(usuario.refugio),
     tienePassword: Boolean(usuario.contrasena),
     mascotas,
     favoritos: usuario._count.favoritos,
@@ -253,4 +255,37 @@ export async function darDeBajaCuenta(usuarioId: number): Promise<void> {
     entidad: 'Usuario',
     entidadId: usuarioId,
   });
+}
+
+/** Email del usuario SISTEMA (prisma/seed): una cuenta interna que no es un perfil. */
+const EMAIL_SISTEMA = 'sistema@pethood.internal';
+
+/** Spec 023. Una persona suspendida, inactiva, dada de baja o el usuario SISTEMA no se muestran. */
+export async function obtenerPerfilPublico(
+  id: number,
+  actorId: number,
+): Promise<PerfilPublicoUsuarioDto> {
+  const usuario = await repo.buscarPerfilPublico(id);
+  const estado = usuario?.estado.nombre;
+  const visible =
+    usuario !== null &&
+    usuario.email !== EMAIL_SISTEMA &&
+    estado !== ESTADO_USUARIO.SUSPENDIDO &&
+    estado !== ESTADO_USUARIO.INACTIVO;
+
+  if (!usuario || !visible) {
+    throw new AppError('NO_ENCONTRADO', 'No encontramos a esa persona', 404);
+  }
+
+  return {
+    id: usuario.id,
+    nombre: usuario.nombre,
+    apellido: usuario.apellido,
+    imagenUrl: usuario.imagenUrl,
+    verificado: usuario.verificado,
+    provincia: usuario.provincia,
+    localidad: usuario.localidad,
+    fechaAlta: usuario.fechaAlta.toISOString(),
+    esPropio: usuario.id === actorId,
+  };
 }

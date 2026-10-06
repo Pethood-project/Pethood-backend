@@ -27,10 +27,10 @@ Filtros: `estados`, `refugioId`, `usuarioId`, `q` (título o nombre de mascota),
   "fechaBaja": null
 }
 ```
-`publicador.tipo`: `REFUGIO` | `ADOPTANTE`. `cantidadReportes` es 0 hasta que exista el módulo de reportes.
+`publicador.tipo`: `REFUGIO` | `ADOPTANTE`. `cantidadReportes` cuenta los reportes pendientes de la publicación (spec 008).
 
 ### `GET /admin/publicaciones/:id`
-El ítem de arriba más `descripcion`, `ubicacion`, `requisitos[]`, `personalidad[]`, `desparasitado`, `imagenes[]`, `mascota` ampliada (fecha de nacimiento, género, tamaño, castrado, raza), `historialEstados[]` (`estado`, `fechaAlta`, `fechaBaja`, `usuarioAlta`) y `reportes[]` (vacío por ahora). Incluye las dadas de baja.
+El ítem de arriba más `descripcion`, `ubicacion`, `requisitos[]`, `personalidad[]`, `desparasitado`, `imagenes[]`, `mascota` ampliada (fecha de nacimiento, género, tamaño, castrado, raza), `historialEstados[]` (`estado`, `fechaAlta`, `fechaBaja`, `usuarioAlta`) y `reportes[]` (todos los reportes de la publicación: `id`, `motivo`, `resuelto`, `respuesta`, `reportante`, `fechaAlta`). Incluye las dadas de baja.
 
 ### `PATCH /admin/publicaciones/:id/estado`
 Body `{ "accion": "PAUSAR" | "REACTIVAR" | "FINALIZAR", "motivo": "..." }`. Devuelve el detalle.
@@ -109,3 +109,13 @@ El ítem más `publicacionId`, `motivacion`, `comentario`, `fechaRespuesta`, `fe
 | 400 | `VALIDACION` | Body, query o `:id` inválido |
 | 401 / 403 | — / `ROL_NO_AUTORIZADO` | Sin token / sin rol admin |
 | 404 | `NO_ENCONTRADO` | El recurso no existe |
+
+---
+
+## Reportes y avisos de mascota perdida
+
+El contrato de `GET /admin/reportes`, `GET /admin/reportes/:id` y `PATCH /admin/reportes/:id/resolver` está en `docs/specs/008-moderacion-reportes.md` §4.
+
+### `PATCH /admin/animales-perdidos/:id/baja`
+Body `{ motivo }`. Baja lógica de un aviso de mascota perdida reportado; **notifica a quien lo publicó** con el motivo. Responde `204`.
+Errores: `404 NO_ENCONTRADO`, `409 AVISO_DE_BAJA`.

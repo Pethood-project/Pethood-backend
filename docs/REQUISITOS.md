@@ -197,9 +197,11 @@ Todos los filtros son de selección múltiple (ver tabla de validez, sección 4)
 
 - **HU-13.1 Registrar mascota perdida**.
 - **HU-13.2 Reclamar mascota perdida/encontrada** — abre chat de reencuentro directamente.
-- **HU-13.3 Gestión de estados de publicación de animal perdido**, incluyendo marcar como "Resuelto" (cierra el caso y el chat asociado).
+- **HU-13.3 Gestión de estados de publicación de animal perdido**, incluyendo marcar como "Resuelto" (cierra el caso ~~y el chat asociado~~ — ver la nota de abajo).
 
 **Nota:** se guardan `latitud`/`longitud` al reportar (ver `MODELO_DATOS.md`), pero la app no muestra mapa interactivo — el usuario filtra/visualiza por ubicación administrativa (Provincia/Localidad).
+
+**Nota (2026-10-01): marcar "Resuelto" NO cierra el chat.** Ese pedazo de HU-13.3 se **descarta** por decisión del equipo, y el botón "Resuelto" se implementó en HU-13.2 ([spec 024](specs/024-reclamar-mascota-perdida.md)) sin él. El motivo: el chat de reencuentro es la conversación que las dos personas ya tienen —el reclamo entra en la que existía, como hace una segunda solicitud—, así que cerrarla silenciaría charlas que no tienen nada que ver con el aviso; y aun con una sala dedicada, silenciarla justo cuando el caso se resolvió es lo peor para coordinar la entrega real del animal. Cuando se escribió el requisito no se había definido todavía qué conversación era "el chat asociado". El razonamiento completo está en la spec 024 §9, decisión 2.
 
 ### Módulo 14: Dashboards y Reportes
 

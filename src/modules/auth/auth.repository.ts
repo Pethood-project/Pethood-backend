@@ -9,7 +9,9 @@ const includeUsuario = {
   // El refugio al que pertenece la persona, para que la sesión sepa en nombre de quién
   // atiende (GUI-31 muestra "Refugio Esperanza · 4 sin leer"). Sólo nombre e id: el resto
   // del refugio se pide a su propio endpoint.
-  refugio: { select: { id: true, nombre: true } },
+  refugio: {
+    select: { id: true, nombre: true, fechaBaja: true, estado: { select: { nombre: true } } },
+  },
 } as const;
 
 export type UsuarioConRoles = Prisma.UsuarioGetPayload<{ include: typeof includeUsuario }>;
@@ -121,6 +123,73 @@ export async function crearUsuarioConRol(
         where: { id: usuario.id },
         include: includeUsuario,
       });
+    });
+  } catch (error) {
+    mapearErrorUnico(error);
+  }
+}
+
+/** Estado del refugio al que pertenece la persona, o `null` si no pertenece a ninguno. */
+export async function buscarEstadoRefugioDeUsuario(usuarioId: number): Promise<string | null> {
+  const usuario = await prisma.usuario.findUnique({
+    where: { id: usuarioId },
+    select: { refugio: { select: { fechaBaja: true, estado: { select: { nombre: true } } } } },
+  });
+  const refugio = usuario?.refugio;
+  if (!refugio) return null;
+  return refugio.fechaBaja ? 'Inactivo' : refugio.estado.nombre;
+}
+
+export async function buscarEstadoRefugioPorNombre(nombre: string) {
+  return prisma.estadoRefugio.findUnique({ where: { nombre } });
+}
+
+export interface DatosNuevoRefugio {
+  nombre: string;
+  provincia: string;
+  localidad: string;
+  calleAltura: string;
+  telefono?: string;
+  email?: string;
+  descripcion?: string | null;
+  imagenUrl?: string;
+  estadoId: number;
+}
+
+/**
+ * Persona + refugio en una sola transacción: la persona queda con los roles Adoptante y
+ * Refugio y asociada al refugio, que nace sin verificar.
+ */
+export async function crearRefugioConMiembro(
+  persona: DatosNuevoUsuario,
+  refugio: DatosNuevoRefugio,
+  rolIds: number[],
+) {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const usuario = await tx.usuario.create({
+        data: {
+          nombre: persona.nombre,
+          apellido: persona.apellido,
+          email: persona.email,
+          contrasena: persona.contrasena,
+          verificado: false,
+          estadoId: persona.estadoId,
+          ...datosAlta(USUARIO_SISTEMA_ID),
+        },
+      });
+
+      const creado = await tx.refugio.create({
+        data: { ...refugio, verificado: false, ...datosAlta(usuario.id) },
+        include: { estado: true },
+      });
+
+      await tx.usuario.update({ where: { id: usuario.id }, data: { refugioId: creado.id } });
+      await tx.rolUsuario.createMany({
+        data: rolIds.map((rolId) => ({ usuarioId: usuario.id, rolId, ...datosAlta(usuario.id) })),
+      });
+
+      return { usuarioId: usuario.id, refugio: creado };
     });
   } catch (error) {
     mapearErrorUnico(error);
