@@ -13,6 +13,7 @@ type CatalogoSimple =
   | 'estadoPublicacion'
   | 'estadoSolicitud'
   | 'estadoCampania'
+  | 'estadoDonacion'
   | 'estadoAnimalPerdido'
   | 'rol';
 
@@ -38,6 +39,9 @@ async function upsertPorNombre(catalogo: CatalogoSimple, nombres: string[], usua
         break;
       case 'estadoCampania':
         await prisma.estadoCampania.upsert(args);
+        break;
+      case 'estadoDonacion':
+        await prisma.estadoDonacion.upsert(args);
         break;
       case 'estadoAnimalPerdido':
         await prisma.estadoAnimalPerdido.upsert(args);
@@ -226,6 +230,7 @@ export async function seedCatalogos(): Promise<number> {
     ['Inactiva', 'Activa', 'Finalizada', 'Cancelada'],
     sistemaId,
   );
+  await upsertPorNombre('estadoDonacion', ['Pendiente', 'Realizada', 'Cancelada'], sistemaId);
   await upsertPorNombre('estadoAnimalPerdido', ['Perdido', 'Encontrado', 'Resuelto'], sistemaId);
   await upsertPorNombre('rol', ['Administrador', 'Refugio', 'Adoptante'], sistemaId);
   await seedTiposSolicitud(sistemaId);
@@ -250,6 +255,7 @@ export async function cargarCatalogos(sistemaId: number): Promise<Catalogos> {
     estadosPublicacion: mapaPorNombre(await prisma.estadoPublicacion.findMany()),
     estadosSolicitud: mapaPorNombre(await prisma.estadoSolicitud.findMany()),
     estadosCampania: mapaPorNombre(await prisma.estadoCampania.findMany()),
+    estadosDonacion: mapaPorNombre(await prisma.estadoDonacion.findMany()),
     estadosAnimalPerdido: mapaPorNombre(await prisma.estadoAnimalPerdido.findMany()),
     roles: mapaPorNombre(await prisma.rol.findMany()),
     tiposSolicitud: mapaPorNombre(await prisma.tipoSolicitud.findMany()),

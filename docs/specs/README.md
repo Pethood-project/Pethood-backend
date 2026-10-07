@@ -37,3 +37,5 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 023 | Perfiles públicos: persona y refugio (GUI-26) | 13 | IMPLEMENTADA |
 | 024 | Reclamar mascota perdida/encontrada (HU-13.2) | 13 | APROBADA |
 | 025 | Gestión del aviso de mascota perdida por quien lo publicó (HU-13.3) | 13 | IMPLEMENTADA |
+| 026 | Campañas de donación (HU-12.1 a HU-12.7) | 13 | APROBADA |
+| 027 | Confirmación automática de donaciones con Mercado Pago | 13 | APROBADA |

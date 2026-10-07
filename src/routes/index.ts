@@ -9,6 +9,11 @@ import { adminMascotasRouter } from '../modules/admin-mascotas/admin-mascotas.ro
 import { adminPublicacionesRouter } from '../modules/admin-publicaciones/admin-publicaciones.routes';
 import { adminSolicitudesRouter } from '../modules/admin-solicitudes/admin-solicitudes.routes';
 import { animalesPerdidosRouter } from '../modules/animales-perdidos/animales-perdidos.routes';
+import { campaniasRefugioRouter, campaniasRouter } from '../modules/campanias/campanias.routes';
+import {
+  mercadopagoRefugioRouter,
+  mercadopagoRouter,
+} from '../modules/mercadopago/mercadopago.routes';
 import { usuariosRouter } from '../modules/usuarios/usuarios.routes';
 import { refugiosRouter } from '../modules/refugios/refugios.routes';
 import { catalogosRouter } from '../modules/catalogos/catalogos.routes';
@@ -57,6 +62,10 @@ apiRouter.use('/reportes', reportesRouter); // spec 008 — HU-3.1 a 3.3
 apiRouter.use('/resenas', resenasRouter); // Módulo 10 — Sistema de Reputación
 apiRouter.use('/chats', chatsRouter);
 apiRouter.use('/animales-perdidos', animalesPerdidosRouter); // spec 020 — HU-13.1
+apiRouter.use('/campanias', campaniasRouter); // spec 026 — HU-12.1 a HU-12.7
+apiRouter.use('/refugio', campaniasRefugioRouter); // spec 026
+apiRouter.use('/refugio', mercadopagoRefugioRouter); // spec 027
+apiRouter.use('/mercadopago', mercadopagoRouter); // spec 027 — callback OAuth
 apiRouter.use('/', catalogosRouter);
 apiRouter.use('/', historiaClinicaRouter); // spec 005
 apiRouter.use('/', seguimientoRouter); // spec 011

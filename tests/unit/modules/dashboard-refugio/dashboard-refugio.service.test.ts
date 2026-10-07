@@ -294,15 +294,16 @@ describe('prepararExportEntidad', () => {
         fechaAlta: new Date(2026, 4, 1),
         usuario: { nombre: 'Ana', apellido: 'Gómez' },
         campania: { titulo: 'Vacunación 2026' },
+        estadoDonacion: { nombre: 'Realizada' },
       },
     ] as never);
     mockedRepo.paginaDonacionesParaExport.mockResolvedValueOnce([]);
 
     const { headers, filasGeneradas } = await filasDe('donaciones');
 
-    expect(headers).toEqual(['id', 'donante', 'campania', 'monto', 'fechaAlta']);
+    expect(headers).toEqual(['id', 'donante', 'campania', 'monto', 'estado', 'fechaAlta']);
     expect(filasGeneradas).toEqual([
-      [7, 'Ana Gómez', 'Vacunación 2026', '5000', new Date(2026, 4, 1)],
+      [7, 'Ana Gómez', 'Vacunación 2026', '5000', 'Realizada', new Date(2026, 4, 1)],
     ]);
   });
 });

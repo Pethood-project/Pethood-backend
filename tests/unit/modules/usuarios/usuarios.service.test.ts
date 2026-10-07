@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../../../src/middlewares/errorHandler';
 import type { UsuarioPerfil } from '../../../../src/modules/usuarios/usuarios.repository';
@@ -15,6 +16,7 @@ vi.mock('../../../../src/modules/usuarios/usuarios.repository', () => ({
   buscarEstadoUsuarioPorNombre: vi.fn(),
   buscarEstadoSolicitudPorNombre: vi.fn(),
   darDeBajaCuenta: vi.fn(),
+  guardarDni: vi.fn(),
 }));
 
 vi.mock('../../../../src/shared/logAuditoria', () => ({
@@ -30,6 +32,7 @@ import {
   actualizarPerfil,
   actualizarUbicacion,
   cambiarPassword,
+  cargarDni,
   darDeBajaCuenta,
   obtenerPerfil,
 } from '../../../../src/modules/usuarios/usuarios.service';
@@ -257,5 +260,55 @@ describe('usuarios.service', () => {
       httpStatus: 403,
     });
     expect(mockedRepo.darDeBajaCuenta).not.toHaveBeenCalled();
+  });
+});
+
+describe('cargarDni (spec 027)', () => {
+  beforeEach(() => {
+    mockedRepo.promedioValoracion.mockResolvedValue(null);
+    mockedRepo.contarMascotasDelAmbito.mockResolvedValue(0);
+  });
+
+  it('sin DNI: lo guarda, audita y devuelve el perfil con el DNI', async () => {
+    mockedRepo.buscarPerfil
+      .mockResolvedValueOnce(perfilFake({ dni: null }))
+      .mockResolvedValueOnce(perfilFake({ dni: '30123456' }));
+    mockedRepo.guardarDni.mockResolvedValue(true);
+
+    const perfil = await cargarDni(10, '30123456', 'PERSONAL');
+
+    expect(mockedRepo.guardarDni).toHaveBeenCalledWith(10, '30123456');
+    expect(perfil.dni).toBe('30123456');
+  });
+
+  it('con DNI ya cargado: DNI_YA_CARGADO y no guarda', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ dni: '30123456' }));
+
+    await expect(cargarDni(10, '40111222', 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'DNI_YA_CARGADO',
+      httpStatus: 409,
+    });
+    expect(mockedRepo.guardarDni).not.toHaveBeenCalled();
+  });
+
+  it('si otro pedido lo cargó en el medio: DNI_YA_CARGADO', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ dni: null }));
+    mockedRepo.guardarDni.mockResolvedValue(false);
+
+    await expect(cargarDni(10, '30123456', 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'DNI_YA_CARGADO',
+    });
+  });
+
+  it('un DNI de otra cuenta: DNI_DUPLICADO', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ dni: null }));
+    mockedRepo.guardarDni.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: '5' }),
+    );
+
+    await expect(cargarDni(10, '30123456', 'PERSONAL')).rejects.toMatchObject({
+      codigo: 'DNI_DUPLICADO',
+      mensaje: 'Ya existe una cuenta con ese DNI.',
+    });
   });
 });

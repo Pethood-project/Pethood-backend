@@ -143,3 +143,5 @@ uploads
 
 # Config local de Docker Compose, no se commitea
 docker-compose.override.yml
+# Config local de ngrok (authtoken personal de cada uno), no se commitea
+ngrok.yml

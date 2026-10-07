@@ -15,3 +15,4 @@ catalogosRouter.get('/estados-mascota', autenticar, controller.listarEstadosMasc
 catalogosRouter.get('/estados-publicacion', autenticar, controller.listarEstadosPublicacion);
 // Spec 020: filtro del portal de perdidos y selector del alta del aviso.
 catalogosRouter.get('/estados-animal-perdido', autenticar, controller.listarEstadosAnimalPerdido);
+catalogosRouter.get('/estados-campania', autenticar, controller.listarEstadosCampania);
