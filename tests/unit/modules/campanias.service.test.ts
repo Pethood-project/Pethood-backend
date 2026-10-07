@@ -7,10 +7,19 @@ import * as service from '../../../src/modules/campanias/campanias.service';
 import { USUARIO_SISTEMA_ID } from '../../../src/shared/auditoria';
 import { registrarAuditoria } from '../../../src/shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../../src/shared/storage';
+import * as mpCliente from '../../../src/modules/mercadopago/mercadopago.cliente';
+import * as mpService from '../../../src/modules/mercadopago/mercadopago.service';
+import { programarReintentos } from '../../../src/modules/campanias/campanias.reintentos';
 
 vi.mock('../../../src/modules/campanias/campanias.repository');
 vi.mock('../../../src/shared/storage');
 vi.mock('../../../src/shared/logAuditoria');
+vi.mock('../../../src/modules/mercadopago/mercadopago.service');
+vi.mock('../../../src/modules/campanias/campanias.reintentos');
+vi.mock('../../../src/modules/mercadopago/mercadopago.cliente', async (importOriginal) => {
+  const real = await importOriginal<typeof mpCliente>();
+  return { ...real, buscarPagos: vi.fn() };
+});
 
 const USUARIO = 7;
 const REFUGIO = 3;
@@ -39,7 +48,14 @@ function enDias(n: number): Date {
 
 function campania(
   id: number,
-  opciones: { estado?: string; refugioId?: number; objetivo?: number; fechaInicio?: Date } = {},
+  opciones: {
+    estado?: string;
+    refugioId?: number;
+    objetivo?: number;
+    fechaInicio?: Date;
+    fechaFin?: Date;
+    vinculado?: boolean;
+  } = {},
 ): repo.CampaniaConRelaciones {
   const refugioId = opciones.refugioId ?? REFUGIO;
   return {
@@ -49,21 +65,32 @@ function campania(
     imagenUrl: URL_IMAGEN,
     objetivo: new Prisma.Decimal(opciones.objetivo ?? 100000),
     fechaInicio: opciones.fechaInicio ?? enDias(-10),
-    fechaFin: enDias(30),
+    fechaFin: opciones.fechaFin ?? enDias(30),
     alias: 'patitas.castra.mp',
     cbu: null,
     refugioId,
     fechaAlta: new Date('2026-09-01T12:00:00.000Z'),
     estadoCampania: ESTADOS_CAMPANIA.find((e) => e.nombre === (opciones.estado ?? 'Activa'))!,
-    refugio: { id: refugioId, nombre: 'Patitas', imagenUrl: null },
+    refugio: {
+      id: refugioId,
+      nombre: 'Patitas',
+      imagenUrl: null,
+      conexionMercadoPago: opciones.vinculado ? { estado: 'VINCULADA', fechaBaja: null } : null,
+    },
   };
 }
 
-function donacion(id: number, estado = 'Pendiente'): repo.DonacionConRelaciones {
+function donacion(
+  id: number,
+  estado = 'Pendiente',
+  mpPagoId: string | null = null,
+): repo.DonacionConRelaciones {
   return {
     id,
     monto: new Prisma.Decimal(5000),
     motivoRechazo: null,
+    mpPagoId,
+    origen: 'MERCADO_PAGO',
     fechaAlta: new Date('2026-09-20T15:00:00.000Z'),
     estadoDonacion: ESTADOS_DONACION.find((e) => e.nombre === estado)!,
     usuario: { id: 20, nombre: 'Ana', apellido: 'Gómez', imagenUrl: null },
@@ -77,11 +104,17 @@ function resumen(entradas: [number, Partial<repo.ResumenDonaciones>][]) {
 }
 
 function usuarioDeRefugio(
-  opciones: { refugioId?: number | null; verificado?: boolean; estado?: string } = {},
+  opciones: {
+    refugioId?: number | null;
+    verificado?: boolean;
+    estado?: string;
+    dni?: string | null;
+  } = {},
 ) {
   const refugioId = opciones.refugioId === undefined ? REFUGIO : opciones.refugioId;
   return {
     id: USUARIO,
+    dni: opciones.dni === undefined ? '30123456' : opciones.dni,
     refugioId,
     refugio:
       refugioId === null
@@ -129,6 +162,9 @@ beforeEach(() => {
   vi.mocked(repo.resumirDonaciones).mockImplementation(async (ids) =>
     resumen(ids.map((id) => [id, {}])),
   );
+  vi.mocked(mpService.tokenDeRefugio).mockResolvedValue(null);
+  vi.mocked(mpService.disponible).mockReturnValue(false);
+  vi.mocked(repo.pagosYaUsados).mockResolvedValue(new Set());
   vi.mocked(guardarImagen).mockResolvedValue(URL_IMAGEN);
 });
 
@@ -307,10 +343,10 @@ describe('donar', () => {
   });
 
   it('registra la donación Pendiente sin tocar el estado de la campaña', async () => {
-    const creada = await service.donar(8, { monto: 5000 }, USUARIO);
+    const creada = await service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO);
 
     expect(repo.crearDonacion).toHaveBeenCalledWith(
-      { campaniaId: 8, monto: 5000, estadoDonacionId: 11 },
+      { campaniaId: 8, monto: 5000, estadoDonacionId: 11, origen: 'MERCADO_PAGO' },
       USUARIO,
     );
     expect(repo.cambiarEstadoSi).not.toHaveBeenCalled();
@@ -320,23 +356,35 @@ describe('donar', () => {
   it('no se dona a una campaña que no está Activa', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { estado: 'Inactiva' }));
 
-    expect(await codigoDeError(service.donar(8, { monto: 5000 }, USUARIO))).toBe(
-      'CAMPANIA_NO_ACTIVA',
-    );
+    expect(
+      await codigoDeError(service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO)),
+    ).toBe('CAMPANIA_NO_ACTIVA');
+  });
+
+  it('una Activa con la fecha de fin vencida (el cron no corrió) no recibe y se cierra en el acto', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { fechaFin: enDias(-1) }));
+
+    expect(
+      await codigoDeError(service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO)),
+    ).toBe('CAMPANIA_NO_ACTIVA');
+    expect(repo.crearDonacion).not.toHaveBeenCalled();
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(8, 2, 3, USUARIO_SISTEMA_ID);
   });
 
   it('un miembro no dona a su propio refugio', async () => {
     vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(usuarioDeRefugio() as never);
 
-    expect(await codigoDeError(service.donar(8, { monto: 5000 }, USUARIO))).toBe('DONACION_PROPIA');
+    expect(
+      await codigoDeError(service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO)),
+    ).toBe('DONACION_PROPIA');
   });
 
   it('una campaña inexistente es 404', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(null);
 
-    expect(await codigoDeError(service.donar(8, { monto: 5000 }, USUARIO))).toBe(
-      'CAMPANIA_NO_ENCONTRADA',
-    );
+    expect(
+      await codigoDeError(service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO)),
+    ).toBe('CAMPANIA_NO_ENCONTRADA');
   });
 });
 
@@ -437,5 +485,166 @@ describe('listarDonaciones', () => {
     expect(repo.listarDonaciones).toHaveBeenCalledWith(8, 'Pendiente', 1, undefined);
     expect(lista).toMatchObject({ hayMas: true, proximoCursor: 31 });
     expect(lista.donaciones).toHaveLength(1);
+  });
+});
+
+describe('confirmación con Mercado Pago (spec 027)', () => {
+  const PAGO = {
+    id: 'p1',
+    monto: 5000,
+    fecha: new Date(),
+    estado: 'approved',
+    tipoDoc: 'CUIL',
+    numeroDoc: '20301234569',
+  };
+
+  function pendiente(id = 30) {
+    return {
+      id,
+      monto: new Prisma.Decimal(5000),
+      fechaAlta: new Date(),
+      campaniaId: 8,
+      usuario: { dni: '30123456' },
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(
+      usuarioDeRefugio({ refugioId: null }) as never,
+    );
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { vinculado: true }));
+    vi.mocked(repo.crearDonacion).mockResolvedValue(donacion(30));
+    vi.mocked(mpService.tokenDeRefugio).mockResolvedValue('AT');
+    vi.mocked(repo.pendientesDelGrupo).mockResolvedValue([pendiente()] as never);
+    vi.mocked(mpCliente.buscarPagos).mockResolvedValue([PAGO]);
+    vi.mocked(repo.confirmarConPagoMp).mockResolvedValue(true);
+  });
+
+  it('donar sin DNI: DNI_REQUERIDO y no crea nada', async () => {
+    vi.mocked(repo.buscarUsuarioConRefugio).mockResolvedValue(
+      usuarioDeRefugio({ refugioId: null, dni: null }) as never,
+    );
+
+    expect(
+      await codigoDeError(service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO)),
+    ).toBe('DNI_REQUERIDO');
+    expect(repo.crearDonacion).not.toHaveBeenCalled();
+  });
+
+  it('donar con la transferencia ya acreditada: vuelve Realizada y confirmada por Mercado Pago', async () => {
+    vi.mocked(repo.buscarDonacionCompleta).mockResolvedValue(donacion(30, 'Realizada', 'p1'));
+
+    const creada = await service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO);
+
+    expect(mpCliente.buscarPagos).toHaveBeenCalledWith(
+      'AT',
+      expect.objectContaining({ monto: 5000 }),
+      5000,
+    );
+    expect(repo.confirmarConPagoMp).toHaveBeenCalledWith(30, 11, 12, 'p1', USUARIO_SISTEMA_ID);
+    expect(creada).toMatchObject({
+      estado: { nombre: 'Realizada' },
+      confirmadaPorMercadoPago: true,
+    });
+  });
+
+  it('si la transferencia todavía no llegó, programa reintentos para esa donación (spec 027 §6.5)', async () => {
+    vi.mocked(mpCliente.buscarPagos).mockResolvedValue([]);
+
+    await service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO);
+
+    expect(programarReintentos).toHaveBeenCalledWith(
+      `${REFUGIO}|${USUARIO}|5000`,
+      expect.any(Function),
+    );
+  });
+
+  it('si se confirmó en el acto no programa reintentos', async () => {
+    vi.mocked(repo.buscarDonacionCompleta).mockResolvedValue(donacion(30, 'Realizada', 'p1'));
+
+    await service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO);
+
+    expect(programarReintentos).not.toHaveBeenCalled();
+  });
+
+  it('con el refugio sin Mercado Pago vinculado no programa reintentos', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8));
+    vi.mocked(mpService.tokenDeRefugio).mockResolvedValue(null);
+
+    await service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO);
+
+    expect(programarReintentos).not.toHaveBeenCalled();
+  });
+
+  it('desde otro banco no se busca en Mercado Pago ni se programan reintentos (spec 027)', async () => {
+    vi.mocked(repo.crearDonacion).mockResolvedValue({ ...donacion(30), origen: 'OTRO_BANCO' });
+
+    const creada = await service.donar(8, { monto: 5000, origen: 'OTRO_BANCO' }, USUARIO);
+
+    expect(repo.crearDonacion).toHaveBeenCalledWith(
+      expect.objectContaining({ origen: 'OTRO_BANCO' }),
+      USUARIO,
+    );
+    expect(mpCliente.buscarPagos).not.toHaveBeenCalled();
+    expect(programarReintentos).not.toHaveBeenCalled();
+    expect(creada).toMatchObject({ origen: 'OTRO_BANCO', estado: { nombre: 'Pendiente' } });
+  });
+
+  it('Mercado Pago caído: la donación se crea igual, Pendiente y sin error', async () => {
+    vi.mocked(mpCliente.buscarPagos).mockRejectedValue(new Error('timeout'));
+
+    const creada = await service.donar(8, { monto: 5000, origen: 'MERCADO_PAGO' }, USUARIO);
+
+    expect(creada).toMatchObject({
+      estado: { nombre: 'Pendiente' },
+      confirmadaPorMercadoPago: false,
+    });
+    expect(repo.confirmarConPagoMp).not.toHaveBeenCalled();
+  });
+
+  it('token revocado: marca revincular y no confirma', async () => {
+    vi.mocked(mpCliente.buscarPagos).mockRejectedValue(new mpCliente.TokenMercadoPagoInvalido());
+
+    expect(
+      await service.conciliarGrupo({ refugioId: REFUGIO, usuarioId: USUARIO, monto: 5000 }),
+    ).toBe(0);
+    expect(mpService.marcarTokenInvalido).toHaveBeenCalledWith(REFUGIO);
+  });
+
+  it('el mismo pago tomado por otra corrida en paralelo: se ignora sin error', async () => {
+    vi.mocked(repo.confirmarConPagoMp).mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: '5' }),
+    );
+
+    expect(
+      await service.conciliarGrupo({ refugioId: REFUGIO, usuarioId: USUARIO, monto: 5000 }),
+    ).toBe(0);
+  });
+
+  it('confirmar la que completa el objetivo finaliza la campaña', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { objetivo: 5000, vinculado: true }));
+    vi.mocked(repo.resumirDonaciones).mockResolvedValue(resumen([[8, { recaudado: 5000 }]]));
+
+    expect(
+      await service.conciliarGrupo({ refugioId: REFUGIO, usuarioId: USUARIO, monto: 5000 }),
+    ).toBe(1);
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(8, 2, 3, USUARIO_SISTEMA_ID);
+  });
+
+  it('sin token del refugio no consulta nada', async () => {
+    vi.mocked(mpService.tokenDeRefugio).mockResolvedValue(null);
+
+    expect(
+      await service.conciliarGrupo({ refugioId: REFUGIO, usuarioId: USUARIO, monto: 5000 }),
+    ).toBe(0);
+    expect(mpCliente.buscarPagos).not.toHaveBeenCalled();
+  });
+
+  it('confirmacionAutomatica sólo con Mercado Pago disponible y el refugio vinculado', async () => {
+    vi.mocked(mpService.disponible).mockReturnValue(true);
+    expect((await service.obtenerCampania(8)).confirmacionAutomatica).toBe(true);
+
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8));
+    expect((await service.obtenerCampania(8)).confirmacionAutomatica).toBe(false);
   });
 });

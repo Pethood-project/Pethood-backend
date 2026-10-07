@@ -220,7 +220,7 @@ model EstadoCampania {
   @@map("estado_campania")
 }
 
-// Estado de una donación declarada (spec 021, HU-12.3): Pendiente hasta que el refugio la
+// Estado de una donación declarada (spec 026, HU-12.3): Pendiente hasta que el refugio la
 // aplica (Realizada, suma al progreso) o la rechaza (Cancelada, no suma).
 model EstadoDonacion {
   id          Int     @id @default(autoincrement()) @map("estado_donacion_id")
@@ -406,6 +406,7 @@ model Refugio {
   usuarios             Usuario[]
   mascotas             Mascota[]
   campanias            Campania[]
+  conexionMercadoPago  ConexionMercadoPago?
   resenasComoReportado Resena[]   @relation("ResenaReportado")
   chats                Chat[]
 
@@ -969,7 +970,7 @@ model Campania {
   fechaInicio      DateTime @map("campania_fecha_inicio")
   fechaFin         DateTime @map("campania_fecha_fin")
   imagenUrl        String?  @map("campania_imagen_url")
-  // Datos para transferir (spec 021): al menos uno de los dos, lo exige el DTO.
+  // Datos para transferir (spec 026): al menos uno de los dos, lo exige el DTO.
   alias            String?  @map("campania_alias")
   cbu              String?  @map("campania_cbu")
   refugioId        Int      @map("refugio_id")
@@ -1000,6 +1001,12 @@ model Donacion {
   estadoDonacionId Int     @map("estado_donacion_id")
   /// NO_RECIBIDA | MONTO_NO_COINCIDE. Sólo en una donación Cancelada.
   motivoRechazo    String? @map("donacion_motivo_rechazo")
+  /// Id del pago de Mercado Pago que la confirmó sola (spec 027). Único: una transferencia
+  /// no confirma dos donaciones.
+  mpPagoId         String? @unique @map("donacion_mp_pago_id")
+  /// MERCADO_PAGO | OTRO_BANCO: desde dónde dijo el donante que transfirió (spec 027). Sólo las
+  /// de Mercado Pago se confirman solas. Nulo en las donaciones anteriores a este campo.
+  origen           String? @map("donacion_origen")
 
   usuarioAlta         Int       @map("donacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("donacion_fecha_alta")
@@ -1015,6 +1022,30 @@ model Donacion {
 
   @@index([campaniaId, estadoDonacionId])
   @@map("donacion")
+}
+
+// Conexión de un refugio con su cuenta de Mercado Pago por OAuth (spec 027). Una por
+// refugio: revincular reactiva la misma fila. Los tokens van cifrados (shared/cifrado.ts).
+model ConexionMercadoPago {
+  id           Int      @id @default(autoincrement()) @map("conexion_mp_id")
+  refugioId    Int      @unique @map("refugio_id")
+  mpUserId     String   @map("conexion_mp_user_id")
+  accessToken  String   @map("conexion_mp_access_token")
+  refreshToken String   @map("conexion_mp_refresh_token")
+  vence        DateTime @map("conexion_mp_vence")
+  /// VINCULADA | REVINCULAR
+  estado       String   @map("conexion_mp_estado")
+
+  usuarioAlta         Int       @map("conexion_mp_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("conexion_mp_fecha_alta")
+  usuarioModificacion Int?      @map("conexion_mp_usuario_modificacion")
+  fechaModificacion   DateTime? @map("conexion_mp_fecha_modificacion")
+  usuarioBaja         Int?      @map("conexion_mp_usuario_baja")
+  fechaBaja           DateTime? @map("conexion_mp_fecha_baja")
+
+  refugio Refugio @relation(fields: [refugioId], references: [id])
+
+  @@map("conexion_mercado_pago")
 }
 
 // ─────────────── MASCOTAS PERDIDAS Y ENCONTRADAS ───────────────

@@ -1,5 +1,5 @@
 /**
- * Máquina de estados de la campaña y cuentas del progreso (spec 021 §6.4). Funciones puras:
+ * Máquina de estados de la campaña y cuentas del progreso (spec 026 §6.4). Funciones puras:
  * las usan el servicio (alta, finalizar/cancelar, aplicar una donación) y el cron (HU-12.4),
  * así la regla vive en un solo lugar.
  */
@@ -31,6 +31,14 @@ export const ESTADOS_VIGENTES: readonly NombreEstadoCampania[] = [
 /** Los únicos estados que un miembro del refugio puede pedir a mano (HU-12.5 y HU-12.6). */
 export const ESTADOS_MANUALES = [ESTADO_CAMPANIA.FINALIZADA, ESTADO_CAMPANIA.CANCELADA] as const;
 export type EstadoManual = (typeof ESTADOS_MANUALES)[number];
+
+/**
+ * Desde dónde transfirió el donante (spec 027). Mercado Pago sólo informa quién transfirió en
+ * las transferencias entre cuentas de Mercado Pago: las de otro banco o billetera llegan con el
+ * dueño de la cuenta del refugio como pagador, así que esas no se pueden confirmar solas.
+ */
+export const ORIGENES_DONACION = ['MERCADO_PAGO', 'OTRO_BANCO'] as const;
+export type OrigenDonacion = (typeof ORIGENES_DONACION)[number];
 
 /** Por qué el refugio rechaza una donación (HU-12.3). */
 export const MOTIVOS_RECHAZO = ['NO_RECIBIDA', 'MONTO_NO_COINCIDE'] as const;

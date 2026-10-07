@@ -77,7 +77,7 @@ export async function listarEstadosMascota() {
  * Estados del aviso de animal perdido: alimentan el filtro del portal (todos) y el selector del
  * alta (sólo los que tienen `seleccionableEnAlta`).
  */
-/** Filtro por estado de «Mis Campañas» (spec 021). */
+/** Filtro por estado de «Mis Campañas» (spec 026). */
 export function listarEstadosCampania() {
   return repo.listarEstadosCampania();
 }

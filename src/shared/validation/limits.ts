@@ -235,9 +235,9 @@ export const LIMITES = {
     pagina: { porDefecto: 20, maximo: 50 },
   },
 
-  /** Campaña de donación (spec 021, HU-12.1). */
+  /** Campaña de donación (spec 026, HU-12.1). */
   campania: {
-    /** La HU no lo fija: el equipo lo acotó a lo que entra en la tarjeta (spec 021 §6.1). */
+    /** La HU no lo fija: el equipo lo acotó a lo que entra en la tarjeta (spec 026 §6.1). */
     titulo: { min: 3, max: 50 },
     /** Lo fija la HU. */
     descripcion: { max: 300 },
@@ -247,13 +247,13 @@ export const LIMITES = {
     alias: { min: 6, max: 20 },
     /** CBU o CVU: siempre 22 dígitos. */
     cbu: { largo: 22 },
-    /** Campañas Inactiva + Activa por refugio (regla transversal 7, spec 021 §6.3). */
+    /** Campañas Inactiva + Activa por refugio (regla transversal 7, spec 026 §6.3). */
     vigentesPorRefugio: 5,
     /** Tamaño de página de los listados (paginación por cursor). */
     pagina: { porDefecto: 20, maximo: 50 },
   },
 
-  /** Donación declarada por el adoptante (spec 021, HU-12.3). */
+  /** Donación declarada por el adoptante (spec 026, HU-12.3). */
   donacion: {
     /** La HU no lo fija: el techo es el objetivo máximo de una campaña. */
     monto: { min: 1, max: 2500000, decimales: 2 },

@@ -12,6 +12,20 @@ describe('jwt', () => {
     expect(payload.roles).toEqual(['Adoptante']);
   });
 
+  it('verificarToken no acepta otro JWT firmado con el mismo secreto (con audience, sin usuario)', () => {
+    // Ej. el state de la vinculación con Mercado Pago: usado como Bearer dejaba usuarioId en
+    // undefined y los filtros por usuario desaparecían (hallazgo de la revisión de la spec 027).
+    const conAudiencia = jwt.sign({ r: 3, u: 7, v: 'x' }, env.JWT_SECRET, {
+      audience: 'mp-vinculacion',
+    });
+    const sinUsuario = jwt.sign({ roles: [] }, env.JWT_SECRET);
+    const sinRoles = jwt.sign({ usuarioId: 1 }, env.JWT_SECRET);
+
+    expect(() => verificarToken(conAudiencia)).toThrow();
+    expect(() => verificarToken(sinUsuario)).toThrow();
+    expect(() => verificarToken(sinRoles)).toThrow();
+  });
+
   it('verificarToken tira si el token está corrompido', () => {
     expect(() => verificarToken('esto-no-es-un-jwt')).toThrow();
   });

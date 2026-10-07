@@ -85,7 +85,7 @@ Cada módulo lista sus HUs con: actor, qué hace, y las reglas de validación/ne
 
 ### Módulo 1: Gestión de Perfiles
 
-- **HU-1.1 Registro de usuario** (Adoptante). Campos: Nombre, Apellido, DNI, email, contraseña, teléfono. Al confirmar: crea cuenta, envía email de confirmación, redirige a login. Errores cubiertos: email duplicado, contraseñas no coinciden, campos vacíos, DNI duplicado.
+- **HU-1.1 Registro de usuario** (Adoptante). Campos: Nombre, Apellido, DNI (obligatorio, 7 u 8 dígitos, único; spec 027), email, contraseña, teléfono. Al confirmar: crea cuenta, envía email de confirmación, redirige a login. Errores cubiertos: email duplicado, contraseñas no coinciden, campos vacíos, DNI duplicado.
 - **HU-1.2 Inicio de sesión** (Adoptante y refugio). Login con email + contraseña. Redirige según rol. Soporta sesiones concurrentes en múltiples dispositivos. Opción "olvidé mi contraseña".
 - **HU-1.3 Visualizar perfil personal**.
 - **HU-1.4 Editar perfil personal**. Al cancelar con cambios sin guardar, pide confirmación en modal. Valida email duplicado al cambiarlo.
@@ -262,7 +262,7 @@ Estas son restricciones lógicas que **no tienen pantalla propia** pero son obli
 6. **Cron — cancelación automática**: solicitudes "Pendiente" > 6 meses → baja con usuario "SISTEMA".
 7. **Cron — estados de campaña**: evaluación diaria de fechas y montos para transicionar Inactiva→Activa→Finalizada automáticamente.
 8. **Auditoría interna obligatoria** en todas las tablas de PostgreSQL (alta/mod/baja con usuario y fecha).
-9. **Validación manual de donaciones**: el monto declarado no suma al progreso hasta que el refugio confirme el ingreso real.
+9. **Confirmación de donaciones**: el monto declarado no suma al progreso hasta que se confirma el ingreso real: automáticamente con Mercado Pago (monto + DNI del donante) si el refugio vinculó su cuenta, o a mano por el refugio (spec 027, decisión del equipo 2026-09-30).
 10. **Procesamiento de CSV por streams**: import/export masivo nunca debe cargar el archivo completo en memoria.
 
 ## 9. Matriz de trazabilidad (resumen — HU → entidad → módulo)
@@ -290,7 +290,7 @@ El propio documento de Etapa 5 incluye, en la sección 20.3, una nota donde se d
 
 1. **Resuelto:** el diagrama de clases tiene `animal_perdido_latitud` / `animal_perdido_longitud` — esos campos SÍ se guardan (se captura la coordenada al reportar un animal perdido/encontrado), pero **no hay mapa interactivo en la UI**. La búsqueda/visualización para el usuario es por ubicación administrativa (Provincia/Localidad), no por mapa con pines. No implementar ningún SDK de mapas; sí persistir lat/long si el flujo de reporte las captura (ej. desde el GPS del dispositivo al momento de reportar), como dato adicional no explotado visualmente por ahora.
 2. La entidad `Reporte_Problema` se menciona en texto pero no se ve dibujada en las capturas de diagrama revisadas.
-3. **Resuelto (2026-09-30, spec 021):** HU-12.7 es la gestión de estados de **campaña** (Inactiva, Activa, Finalizada, Cancelada); la referencia a `Estado_Mascota` de la matriz de trazabilidad era un error del documento fuente.
+3. **Resuelto (2026-09-30, spec 026):** HU-12.7 es la gestión de estados de **campaña** (Inactiva, Activa, Finalizada, Cancelada); la referencia a `Estado_Mascota` de la matriz de trazabilidad era un error del documento fuente.
 4. **HU-7.1 pide datos que el diagrama de clases no tiene.** Los criterios de aceptación hablan del "tiempo de inicio y el tiempo de fin" del tránsito, y `Solicitud` no tiene dónde guardarlos; el formulario aprobado (GUI-7.1.1) además pregunta por niños en la casa, experiencia previa con mascotas, horas que el animal quedaría solo y qué espacio al aire libre hay, y `Hogar` solo tenía un booleano de patio. Se agregaron dos columnas a `Solicitud` y cinco a `Hogar` (detalle en `MODELO_DATOS.md`), conservando `hogar_tiene_patio` como derivado para no romper el diagrama. **Decisión tomada con el equipo el 2026-09-09; falta reflejarla en el diagrama de clases de la entrega.**
 5. **HU-7.1 referencia GUI-0.1.4 para dos mensajes que no son de campo vacío.** "No podés solicitar otra mascota" (tope de 5 pendientes) y "Tenés que verificarte antes de solicitar una adopción" son bloqueos de precondición, pero la HU los etiqueta como GUI-0.1.4, que según la sección 5 de este documento es el componente de *campo obligatorio vacío*. Por el tono corresponderían a GUI-0.1.2 (Advertencia). Se implementaron con los textos literales de la HU, en un cartel modal con la salida del bloqueo. **Confirmar la referencia de GUI con el equipo antes de la entrega.**
 

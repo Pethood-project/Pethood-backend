@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { validarAliasOpcional, validarCbuOpcional } from './bancario';
+import { validarDni } from './documento';
 import {
   parsearFecha,
   validarFechaFutura,
@@ -163,6 +164,20 @@ export function aliasOpcionalSchema() {
 export function cbuOpcionalSchema() {
   return z.unknown().transform((valor, ctx) => {
     const resultado = validarCbuOpcional(valor);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
+  });
+}
+
+/** DNI obligatorio: 7 u 8 dígitos (spec 027). */
+export function dniSchema() {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = validarDni(valor);
 
     if (!resultado.valido) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });

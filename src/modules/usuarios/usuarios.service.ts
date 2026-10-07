@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { AppError } from '../../middlewares/errorHandler';
 import type { Ambito } from '../../shared/ambito';
@@ -38,6 +39,7 @@ function aPerfil(
     apellido: usuario.apellido,
     email: usuario.email,
     telefono: usuario.telefono,
+    dni: usuario.dni,
     provincia: usuario.provincia,
     localidad: usuario.localidad,
     calleAltura: usuario.calleAltura,
@@ -288,4 +290,43 @@ export async function obtenerPerfilPublico(
     fechaAlta: usuario.fechaAlta.toISOString(),
     esPropio: usuario.id === actorId,
   };
+}
+
+/** Carga única del DNI (spec 027 §6.11): con DNI ya cargado sólo lo corrige un admin. */
+export async function cargarDni(
+  usuarioId: number,
+  dni: string,
+  ambito: Ambito,
+): Promise<PerfilPropio> {
+  const yaCargado = () =>
+    new AppError(
+      'DNI_YA_CARGADO',
+      'Tu DNI ya está cargado. Si hay un error, escribinos desde Soporte.',
+      409,
+    );
+
+  const usuario = await repo.buscarPerfil(usuarioId);
+  if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
+  if (usuario.dni) throw yaCargado();
+
+  let guardado: boolean;
+  try {
+    guardado = await repo.guardarDni(usuarioId, dni);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new AppError('DNI_DUPLICADO', 'Ya existe una cuenta con ese DNI.', 409);
+    }
+    throw err;
+  }
+  if (!guardado) throw yaCargado();
+
+  // El DNI no va al detalle: el log de auditoría no guarda datos personales de más.
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CARGAR_DNI',
+    entidad: 'Usuario',
+    entidadId: usuarioId,
+  });
+
+  return obtenerPerfil(usuarioId, ambito);
 }

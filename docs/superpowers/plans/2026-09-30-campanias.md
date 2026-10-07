@@ -8,7 +8,7 @@
 
 **Tech Stack:** Express 5 + TypeScript + Prisma 5 + PostgreSQL + Zod 3 + Vitest (backend). Expo SDK 57 + Expo Router + NativeWind + `node:test` para helpers puros (mobile).
 
-**Spec:** `docs/specs/021-campanias.md` (APROBADA). Leerla antes de cada tarea.
+**Spec:** `docs/specs/026-campanias.md` (APROBADA). Leerla antes de cada tarea.
 
 ## Global Constraints
 
@@ -229,7 +229,7 @@ Crear `src/shared/validation/bancario.ts`:
 
 ```ts
 /**
- * Datos para transferir: alias y CBU/CVU (spec 021). Funciones puras, sin dependencias.
+ * Datos para transferir: alias y CBU/CVU (spec 026). Funciones puras, sin dependencias.
  *
  * Los dos son opcionales por separado (la campaña exige al menos uno, eso lo decide el DTO).
  * Sólo se valida el formato: los dígitos verificadores del CBU quedan fuera de alcance.
@@ -324,9 +324,9 @@ export function cbuOpcionalSchema() {
 `src/shared/validation/limits.ts` — agregar al final del objeto `LIMITES`, después de `animalPerdido`:
 
 ```ts
-  /** Campaña de donación (spec 021, HU-12.1). */
+  /** Campaña de donación (spec 026, HU-12.1). */
   campania: {
-    /** La HU no lo fija: el equipo lo acotó a lo que entra en la tarjeta (spec 021 §6.1). */
+    /** La HU no lo fija: el equipo lo acotó a lo que entra en la tarjeta (spec 026 §6.1). */
     titulo: { min: 3, max: 50 },
     /** Lo fija la HU. */
     descripcion: { max: 300 },
@@ -336,13 +336,13 @@ export function cbuOpcionalSchema() {
     alias: { min: 6, max: 20 },
     /** CBU o CVU: siempre 22 dígitos. */
     cbu: { largo: 22 },
-    /** Campañas Inactiva + Activa por refugio (regla transversal 7, spec 021 §6.3). */
+    /** Campañas Inactiva + Activa por refugio (regla transversal 7, spec 026 §6.3). */
     vigentesPorRefugio: 5,
     /** Tamaño de página de los listados (paginación por cursor). */
     pagina: { porDefecto: 20, maximo: 50 },
   },
 
-  /** Donación declarada por el adoptante (spec 021, HU-12.3). */
+  /** Donación declarada por el adoptante (spec 026, HU-12.3). */
   donacion: {
     /** La HU no lo fija: el techo es el objetivo máximo de una campaña. */
     monto: { min: 1, max: 2500000, decimales: 2 },
@@ -376,7 +376,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `prisma/migrations/<timestamp>_hu12_campanias_donaciones/migration.sql`
 - Modify: `prisma/seed/catalogos.ts`, `prisma/seed/comun.ts`, `prisma/seed/comunidad.ts`
 - Modify: `docs/MODELO_DATOS.md` (secciones Campaña, Estado_Campaña, Donacion, catálogo nuevo)
-- Add: `docs/specs/021-campanias.md`, `docs/specs/README.md` (vienen sin commitear desde `dev`)
+- Add: `docs/specs/026-campanias.md`, `docs/specs/README.md` (vienen sin commitear desde `dev`)
 
 **Interfaces:**
 - Produces: `prisma.estadoDonacion`; `Campania.alias: string | null`, `Campania.cbu: string | null`; `Donacion.estadoDonacionId: number`, `Donacion.motivoRechazo: string | null`, relación `Donacion.estadoDonacion`; `Catalogos.estadosDonacion: Map<string, number>`.
@@ -386,7 +386,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 En `model Campania`, después de `imagenUrl`:
 
 ```prisma
-  // Datos para transferir (spec 021): al menos uno de los dos, lo exige el DTO.
+  // Datos para transferir (spec 026): al menos uno de los dos, lo exige el DTO.
   alias            String?  @map("campania_alias")
   cbu              String?  @map("campania_cbu")
 ```
@@ -400,7 +400,7 @@ y antes de `@@map("campania")`:
 Agregar el catálogo nuevo después de `model EstadoCampania { ... }`:
 
 ```prisma
-// Estado de una donación declarada (spec 021, HU-12.3): Pendiente hasta que el refugio la
+// Estado de una donación declarada (spec 026, HU-12.3): Pendiente hasta que el refugio la
 // aplica (Realizada, suma al progreso) o la rechaza (Cancelada, no suma).
 model EstadoDonacion {
   id          Int     @id @default(autoincrement()) @map("estado_donacion_id")
@@ -451,7 +451,7 @@ npx prisma migrate dev --create-only --name hu12_campanias_donaciones
 Prisma genera un `ALTER TABLE "donacion" ADD COLUMN "estado_donacion_id" INTEGER NOT NULL`, que falla con donaciones existentes. Reemplazar TODO el contenido del `migration.sql` generado por:
 
 ```sql
--- Spec 021 (HU-12.1 a HU-12.3): alias/CBU por campaña y estado de la donación.
+-- Spec 026 (HU-12.1 a HU-12.3): alias/CBU por campaña y estado de la donación.
 
 -- CreateTable
 CREATE TABLE "estado_donacion" (
@@ -570,7 +570,7 @@ Expected: la migración se aplica; `migrate diff` sale con código 0 («No diffe
 - En `seedCampanias`, en el `create` de la campaña sumar `alias: def.alias ?? null, cbu: def.cbu ?? null,`. Y justo después del bloque `if (!campania) { ... }`, completar las campañas sembradas antes de esta migración:
 
 ```ts
-    // Campañas sembradas antes de la spec 021: sin datos para transferir no se puede donar.
+    // Campañas sembradas antes de la spec 026: sin datos para transferir no se puede donar.
     if (campania.alias === null && campania.cbu === null && (def.alias || def.cbu)) {
       campania = await prisma.campania.update({
         where: { id: campania.id },
@@ -598,16 +598,16 @@ Expected: el seed termina sin error las dos veces; `npm test` en verde (el clien
 
 - [ ] **Step 7: Actualizar `docs/MODELO_DATOS.md`**
 
-- En «### Campaña», agregar a la lista de campos `campaña_alias` y `campaña_cbu`, y un párrafo: «**Campos agregados fuera del diagrama de clases (2026-09-30, spec 021):** `campaña_alias` y `campaña_cbu`, nullables; la campaña exige al menos uno (DTO). Índice `(refugio_id, estado_campaña_id)` para la quota y el listado del refugio.»
-- Nueva sección «### Estado_Donacion» después de «### Estado_Campaña»: «Catálogo nuevo (spec 021). Valores: Pendiente, Realizada, Cancelada.»
+- En «### Campaña», agregar a la lista de campos `campaña_alias` y `campaña_cbu`, y un párrafo: «**Campos agregados fuera del diagrama de clases (2026-09-30, spec 026):** `campaña_alias` y `campaña_cbu`, nullables; la campaña exige al menos uno (DTO). Índice `(refugio_id, estado_campaña_id)` para la quota y el listado del refugio.»
+- Nueva sección «### Estado_Donacion» después de «### Estado_Campaña»: «Catálogo nuevo (spec 026). Valores: Pendiente, Realizada, Cancelada.»
 - En «### Donacion», agregar `FK estado_donacion_id FK NOT NULL` y `donacion_motivo_rechazo` (nullable: `NO_RECIBIDA` | `MONTO_NO_COINCIDE`), y reemplazar la «Regla de negocio crítica» por: «El monto declarado nace en «Pendiente» y NO impacta el progreso. Sólo suman las «Realizada»: el refugio verifica el ingreso real y la aplica (HU-12.3). Si la rechaza queda «Cancelada» con motivo. Quién y cuándo la revisó sale de la auditoría (`donacion_usuario_modificacion`, `donacion_fecha_modificacion`).»
 - En el catálogo de estados de la sección de catálogos (línea ~31, junto a `Estado_Campaña`), agregar la línea de `Estado_Donacion`.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add prisma/schema.prisma prisma/migrations prisma/seed docs/MODELO_DATOS.md docs/specs/021-campanias.md docs/specs/README.md
-git commit -m "Modelo de campañas: alias/CBU y estado de la donación (spec 021)
+git add prisma/schema.prisma prisma/migrations prisma/seed docs/MODELO_DATOS.md docs/specs/026-campanias.md docs/specs/README.md
+git commit -m "Modelo de campañas: alias/CBU y estado de la donación (spec 026)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -731,7 +731,7 @@ Expected: FAIL, «Failed to resolve import».
 
 ```ts
 /**
- * Máquina de estados de la campaña y cuentas del progreso (spec 021 §6.4). Funciones puras:
+ * Máquina de estados de la campaña y cuentas del progreso (spec 026 §6.4). Funciones puras:
  * las usan el servicio (alta, finalizar/cancelar, aplicar una donación) y el cron (HU-12.4),
  * así la regla vive en un solo lugar.
  */
@@ -960,7 +960,7 @@ Expected: FAIL, import no resuelto.
 
 ```ts
 /**
- * Entrada y salida de campañas y donaciones (spec 021). Las reglas genéricas salen de
+ * Entrada y salida de campañas y donaciones (spec 026). Las reglas genéricas salen de
  * `shared/validation`; acá sólo se compone lo propio de la campaña.
  */
 import { z } from 'zod';
@@ -1089,7 +1089,7 @@ export interface CampaniaDto {
   id: number;
   titulo: string;
   descripcion: string;
-  /** `null` sólo en campañas sembradas antes de la spec 021. */
+  /** `null` sólo en campañas sembradas antes de la spec 026. */
   imagenUrl: string | null;
   objetivo: number;
   /** Suma de las donaciones Realizada: lo único que mueve la barra (regla transversal 11). */
@@ -1464,7 +1464,7 @@ Expected: PASS y sin errores de tipos. Si `prisma.donacion.groupBy` con `_count`
 
 ```bash
 git add src/modules/campanias tests/unit/modules/campanias.dto.test.ts
-git commit -m "DTOs y repository de campañas y donaciones (spec 021)
+git commit -m "DTOs y repository de campañas y donaciones (spec 026)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -1904,7 +1904,7 @@ Expected: FAIL, import no resuelto.
 
 ```ts
 /**
- * Campañas de donación (spec 021, HU-12.1 a HU-12.7).
+ * Campañas de donación (spec 026, HU-12.1 a HU-12.7).
  *
  * Dos lados del mostrador:
  * - El REFUGIO (perfil Refugio) crea sus campañas, las finaliza o cancela, y revisa las
@@ -2060,7 +2060,7 @@ async function resumenDe(campaniaId: number): Promise<repo.ResumenDonaciones> {
 /**
  * Refugio del miembro que opera. Con `paraCrear` además exige que esté verificado y activo
  * (precondición de HU-12.1). Las campañas existentes siguen su ciclo aunque el refugio se
- * suspenda (spec 021 §8).
+ * suspenda (spec 026 §8).
  */
 async function refugioDe(usuarioId: number, paraCrear = false): Promise<number> {
   const usuario = await repo.buscarUsuarioConRefugio(usuarioId);
@@ -2405,7 +2405,7 @@ export async function donar(
     throw new AppError('CAMPANIA_NO_ENCONTRADA', 'No encontramos esa campaña', 404);
   }
 
-  // Igual que no se adopta una mascota propia (spec 021 §6.6).
+  // Igual que no se adopta una mascota propia (spec 026 §6.6).
   if (usuario.refugioId !== null && usuario.refugioId === campania.refugioId) {
     throw new AppError('DONACION_PROPIA', 'No podés donar a una campaña de tu propio refugio', 403);
   }
@@ -2625,7 +2625,7 @@ import { ROL_API } from '../../shared/roles';
 import * as controller from './campanias.controller';
 
 /**
- * Lado del adoptante (spec 021). Portal y donar exigen el perfil Personal: desde el perfil
+ * Lado del adoptante (spec 026). Portal y donar exigen el perfil Personal: desde el perfil
  * Refugio no se dona. El detalle lo ve cualquiera (lo abre también el refugio).
  */
 export const campaniasRouter = Router();
@@ -2676,8 +2676,8 @@ campaniasRefugioRouter.patch('/donaciones/:id/estado', ...soloRefugio, controlle
 Sumar el import `import { campaniasRefugioRouter, campaniasRouter } from '../modules/campanias/campanias.routes';` junto a los demás, y después de la línea de `animalesPerdidosRouter`:
 
 ```ts
-apiRouter.use('/campanias', campaniasRouter); // spec 021 — HU-12.1 a HU-12.7
-apiRouter.use('/refugio', campaniasRefugioRouter); // spec 021
+apiRouter.use('/campanias', campaniasRouter); // spec 026 — HU-12.1 a HU-12.7
+apiRouter.use('/refugio', campaniasRefugioRouter); // spec 026
 ```
 
 - [ ] **Step 4: Catálogo `GET /estados-campania`**
@@ -2697,7 +2697,7 @@ export function listarEstadosCampania() {
 `catalogos.service.ts`:
 
 ```ts
-/** Filtro por estado de «Mis Campañas» (spec 021). */
+/** Filtro por estado de «Mis Campañas» (spec 026). */
 export function listarEstadosCampania() {
   return repo.listarEstadosCampania();
 }
@@ -2999,7 +2999,7 @@ Expected: FAIL en el test del export (falta la columna).
 
 ```ts
 /**
- * Sólo donaciones Realizada: las que el refugio confirmó (spec 021, regla transversal 11). El
+ * Sólo donaciones Realizada: las que el refugio confirmó (spec 026, regla transversal 11). El
  * nombre y el campo `montoDonadoDeclarado` de la API se conservan para no romper web-admin.
  */
 export async function sumarMontoDonadoDeclarado(): Promise<number> {
@@ -3050,14 +3050,14 @@ Expected: PASS.
 
 - [ ] **Step 5: Notas en las specs 009 y 010**
 
-- `009` §3: reemplazar el «Gap detectado» por «**Resuelto por la spec 021 (2026-09-30):** `Donacion` tiene estado. `montoDonadoDeclarado` suma sólo las «Realizada»; se conserva el nombre del campo para no romper web-admin.» y en §6 punto 3 cambiar «declarado» por «confirmado (Realizada)».
-- `010` §9 (Notas): «2026-09-30 (spec 021): `donaciones` y `donacionesPorMes` cuentan sólo donaciones «Realizada»; el CSV de donaciones suma la columna `estado`.»
+- `009` §3: reemplazar el «Gap detectado» por «**Resuelto por la spec 026 (2026-09-30):** `Donacion` tiene estado. `montoDonadoDeclarado` suma sólo las «Realizada»; se conserva el nombre del campo para no romper web-admin.» y en §6 punto 3 cambiar «declarado» por «confirmado (Realizada)».
+- `010` §9 (Notas): «2026-09-30 (spec 026): `donaciones` y `donacionesPorMes` cuentan sólo donaciones «Realizada»; el CSV de donaciones suma la columna `estado`.»
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/modules/dashboard-admin src/modules/dashboard-refugio tests/unit/modules/dashboard-refugio docs/specs/009-dashboards-reportes-admin.md docs/specs/010-dashboard-refugio.md
-git commit -m "Dashboards: sólo suman donaciones confirmadas (spec 021)
+git commit -m "Dashboards: sólo suman donaciones confirmadas (spec 026)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -3068,22 +3068,22 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `docs/api-campanias.md`
-- Modify: `docs/specs/021-campanias.md` (§4 queda con la tabla y el link; estado IMPLEMENTADA sólo cuando el front también esté)
+- Modify: `docs/specs/026-campanias.md` (§4 queda con la tabla y el link; estado IMPLEMENTADA sólo cuando el front también esté)
 - Modify: `docs/REQUISITOS.md` §10 punto 3 (resuelta)
 - Modify: `docs/DEUDA_TECNICA.md` (resolver el conflicto de merge + deuda nueva)
 - Modify: `AGENTS.md` (listado de `jobs/` ya menciona `transicion-estados-campana.job.ts`: verificar que coincide el nombre)
 
 - [ ] **Step 1: `docs/api-campanias.md`**
 
-Con la misma estructura que `docs/api-mascotas-perdidas.md` (leerlo primero): una sección por endpoint de la tabla de la spec §4 con headers (`Authorization`, `X-Ambito`), query/body, respuesta 2xx con un ejemplo JSON real (copiar la forma de la spec §4), y la tabla de errores con `codigo`, HTTP y mensaje literal tal como los lanza el servicio (`IMAGEN_REQUERIDA`, `REFUGIO_NO_HABILITADO`, `LIMITE_CAMPANIAS`, `CAMPANIA_NO_ENCONTRADA`, `CAMPANIA_NO_ACTIVA`, `DONACION_PROPIA`, `TRANSICION_INVALIDA`, `DONACION_NO_ENCONTRADA`, `CURSOR_INVALIDO`, `VALIDACION`, `SIN_REFUGIO`, `AMBITO_NO_PERMITIDO`). Sección final «Pendientes»: edición de campañas, «Mis donaciones» del adoptante, spec 022 (Mercado Pago), GUI-36 web-admin.
+Con la misma estructura que `docs/api-mascotas-perdidas.md` (leerlo primero): una sección por endpoint de la tabla de la spec §4 con headers (`Authorization`, `X-Ambito`), query/body, respuesta 2xx con un ejemplo JSON real (copiar la forma de la spec §4), y la tabla de errores con `codigo`, HTTP y mensaje literal tal como los lanza el servicio (`IMAGEN_REQUERIDA`, `REFUGIO_NO_HABILITADO`, `LIMITE_CAMPANIAS`, `CAMPANIA_NO_ENCONTRADA`, `CAMPANIA_NO_ACTIVA`, `DONACION_PROPIA`, `TRANSICION_INVALIDA`, `DONACION_NO_ENCONTRADA`, `CURSOR_INVALIDO`, `VALIDACION`, `SIN_REFUGIO`, `AMBITO_NO_PERMITIDO`). Sección final «Pendientes»: edición de campañas, «Mis donaciones» del adoptante, spec 027 (Mercado Pago), GUI-36 web-admin.
 
-- [ ] **Step 2: Spec 021 §4**
+- [ ] **Step 2: Spec 026 §4**
 
 Borrar los subtítulos «Forma de una campaña», «Bodies» y «Errores» de la spec y dejar la tabla + «**Contrato completo:** [`docs/api-campanias.md`](../api-campanias.md)», como la spec 020.
 
 - [ ] **Step 3: `REQUISITOS.md` §10 punto 3**
 
-Reemplazar por: «3. **Resuelto (2026-09-30, spec 021):** HU-12.7 es la gestión de estados de **campaña** (Inactiva, Activa, Finalizada, Cancelada); la referencia a `Estado_Mascota` de la matriz era un error del documento fuente.» y en §9 (matriz), módulo 12: `Campaña`, `Estado_Campaña`, `Donacion`, `Estado_Donacion`.
+Reemplazar por: «3. **Resuelto (2026-09-30, spec 026):** HU-12.7 es la gestión de estados de **campaña** (Inactiva, Activa, Finalizada, Cancelada); la referencia a `Estado_Mascota` de la matriz era un error del documento fuente.» y en §9 (matriz), módulo 12: `Campaña`, `Estado_Campaña`, `Donacion`, `Estado_Donacion`.
 
 - [ ] **Step 4: `DEUDA_TECNICA.md`**
 
@@ -3174,7 +3174,7 @@ describe('textoPendientes', () => {
 });
 
 describe('accionesDisponibles', () => {
-  it('sigue la máquina de estados de la spec 021', () => {
+  it('sigue la máquina de estados de la spec 026', () => {
     assert.deepEqual(accionesDisponibles('Activa'), ['finalizar', 'cancelar']);
     assert.deepEqual(accionesDisponibles('Inactiva'), ['cancelar']);
     assert.deepEqual(accionesDisponibles('Finalizada'), []);
@@ -3190,7 +3190,7 @@ Expected: FAIL, módulo inexistente.
 
 ```ts
 /**
- * Textos y reglas de presentación de las campañas (spec 021 del backend). Puro, sin React:
+ * Textos y reglas de presentación de las campañas (spec 026 del backend). Puro, sin React:
  * se testea con `node --test`.
  */
 
@@ -3217,7 +3217,7 @@ export type AccionCampania = 'finalizar' | 'cancelar';
 
 /**
  * Qué puede hacer el refugio con la campaña según su estado. Espejo de la máquina de estados
- * del backend (spec 021 §6.4): el backend igual valida, esto sólo decide qué botones mostrar.
+ * del backend (spec 026 §6.4): el backend igual valida, esto sólo decide qué botones mostrar.
  */
 export function accionesDisponibles(estado: string): AccionCampania[] {
   if (estado === 'Activa') return ['finalizar', 'cancelar'];
@@ -3239,7 +3239,7 @@ export type MotivoRechazo = keyof typeof ETIQUETA_MOTIVO;
 `shared/validation/limits.ts` — agregar al final del objeto (mismos números que el backend):
 
 ```ts
-  /** Campaña de donación (spec 021, HU-12.1). Espejo del backend. */
+  /** Campaña de donación (spec 026, HU-12.1). Espejo del backend. */
   campania: {
     titulo: { min: 3, max: 50 },
     descripcion: { max: 300 },
@@ -3251,7 +3251,7 @@ export type MotivoRechazo = keyof typeof ETIQUETA_MOTIVO;
     pagina: { porDefecto: 20, maximo: 50 },
   },
 
-  /** Donación declarada (spec 021, HU-12.3). Espejo del backend. */
+  /** Donación declarada (spec 026, HU-12.3). Espejo del backend. */
   donacion: {
     monto: { min: 1, max: 2500000, decimales: 2 },
     pagina: { porDefecto: 30, maximo: 50 },
@@ -3305,7 +3305,7 @@ Crear `shared/validation/bancario.ts`:
 
 ```ts
 /**
- * Alias y CBU/CVU para transferir (spec 021). Espejo de
+ * Alias y CBU/CVU para transferir (spec 026). Espejo de
  * `pethood-backend/src/shared/validation/bancario.ts`. Devuelven el error o `null`; vacío es
  * válido porque cada uno es opcional por separado (la pantalla exige al menos uno).
  */
@@ -3350,7 +3350,7 @@ Expected: PASS y sin errores.
 
 ```bash
 git add apps/mobile/lib/campanias.ts apps/mobile/lib/campanias.test.ts apps/mobile/shared/validation
-git commit -m "Campañas mobile: validaciones espejo y helpers de presentación (spec 021)
+git commit -m "Campañas mobile: validaciones espejo y helpers de presentación (spec 026)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -3372,7 +3372,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```ts
 /**
- * Campañas de donación (spec 021 del backend, HU-12.1 a HU-12.7). Contrato completo en
+ * Campañas de donación (spec 026 del backend, HU-12.1 a HU-12.7). Contrato completo en
  * `pethood-backend/docs/api-campanias.md`.
  *
  * El perfil activo viaja solo en la cabecera `X-Ambito` (`api.ts`): el portal y donar son del
@@ -3546,7 +3546,7 @@ Verificar la firma real de `adjuntarArchivo` en `services/api.ts:85` (en `animal
 En `services/catalogos.ts`, junto a `listarEstadosPublicacion`:
 
 ```ts
-/** Filtro por estado de «Mis Campañas» (spec 021). */
+/** Filtro por estado de «Mis Campañas» (spec 026). */
 export function listarEstadosCampania(): Promise<OpcionCatalogo[]> {
   return get('/estados-campania');
 }
@@ -3580,7 +3580,7 @@ export function tomarCampaniaCreada(): CampaniaRefugio | null {
 ```bash
 npx tsc --noEmit
 git add apps/mobile/services/campanias.ts apps/mobile/services/catalogos.ts apps/mobile/lib/campaniaRecienCreada.ts
-git commit -m "Campañas mobile: cliente de la API (spec 021)
+git commit -m "Campañas mobile: cliente de la API (spec 026)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -3979,7 +3979,7 @@ export default function CampaniasAdoptanteScreen() {
 
 ```tsx
 /**
- * Donar a una campaña (spec 021, HU-12.2 y HU-12.3). No está en el prototipo.
+ * Donar a una campaña (spec 026, HU-12.2 y HU-12.3). No está en el prototipo.
  *
  * Muestra alias y/o CBU para transferir desde el homebanking o la billetera, y un campo con el
  * monto transferido. «Terminar donación» avisa al refugio: la donación queda Pendiente y suma
@@ -4199,7 +4199,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```tsx
 /**
- * GUI-36 Campañas Refugio — «Mis Campañas» (spec 021, HU-12.1, HU-12.5, HU-12.6).
+ * GUI-36 Campañas Refugio — «Mis Campañas» (spec 026, HU-12.1, HU-12.5, HU-12.6).
  *
  * Listado de las campañas del refugio, de la más reciente a la más vieja, con filtros por
  * estado (selección múltiple) y por fecha de inicio (desde obligatoria, hasta opcional).
@@ -4430,7 +4430,7 @@ Revisar al implementar: que `BotonFlotante` acepte `accessibilityLabel` y `onPre
 
 ```tsx
 /**
- * GUI-37 Crear Campaña — HU-12.1 (spec 021). Pantalla 27 del diseño («Nueva Campaña»).
+ * GUI-37 Crear Campaña — HU-12.1 (spec 026). Pantalla 27 del diseño («Nueva Campaña»).
  *
  * Campos: imagen, título, descripción (≤300), meta (sólo números, $10.000 a $2.500.000),
  * fecha de inicio (desde hoy), fecha límite (posterior al inicio), alias y CBU/CVU (al menos
@@ -4719,7 +4719,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```tsx
 /**
- * Revisar donaciones de una campaña (spec 021, HU-12.3). No está en el prototipo.
+ * Revisar donaciones de una campaña (spec 026, HU-12.3). No está en el prototipo.
  *
  * Abre en «Pendientes»: lo que el refugio tiene que hacer. «Aplicar» suma el monto a la
  * campaña (después de verificar el ingreso en su cuenta) y «Rechazar» pide el motivo. Las dos
@@ -4970,7 +4970,7 @@ Mover el contenido de `SeccionesProximamente.tsx` y convertir cada bloque en `Pr
 
 ```tsx
 /**
- * Accesos de Inicio a las campañas (spec 021): el bloque naranja del adoptante lleva al portal
+ * Accesos de Inicio a las campañas (spec 026): el bloque naranja del adoptante lleva al portal
  * (GUI-13) y la tarjeta chica del refugio a «Mis Campañas» (GUI-36). Conservan el diseño que
  * tenían mientras el módulo no existía; sólo dejaron de decir «Muy pronto».
  */
@@ -5093,6 +5093,6 @@ Expected: todo en verde.
 
 - [ ] **Step 2: Recorrido de punta a punta en la app** (criterios de aceptación de la spec §7, uno por uno, tildando cada uno en la spec).
 
-- [ ] **Step 3: Spec 021 → IMPLEMENTADA** (estado en la cabecera y en `docs/specs/README.md`), commit en el backend.
+- [ ] **Step 3: Spec 026 → IMPLEMENTADA** (estado en la cabecera y en `docs/specs/README.md`), commit en el backend.
 
 - [ ] **Step 4:** Invocar `superpowers:finishing-a-development-branch` para decidir PRs (uno por repo, contra `dev`).

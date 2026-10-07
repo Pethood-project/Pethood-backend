@@ -1,4 +1,4 @@
-# Spec 021 — Campañas de donación (HU-12.1 a HU-12.7)
+# Spec 026 — Campañas de donación (HU-12.1 a HU-12.7)
 
 **Estado:** APROBADA
 **Sprint:** 13 · **Responsable:** Grupo 09 · **Última actualización:** 2026-09-30
@@ -29,8 +29,8 @@ por monto alcanzado.
 - **NO incluye:**
   - Editar una campaña (el botón «Editar» de la pantalla 21 queda sin acción): spec posterior.
   - Confirmación automática contra Mercado Pago y montos con centavos únicos: spike y luego
-    **spec 022**. El modelo de esta spec la admite sin cambios (ver §9, decisión 8).
-  - Comprobante adjunto a la donación (captura de la transferencia): se evalúa si la spec 022
+    **spec 027**. El modelo de esta spec la admite sin cambios (ver §9, decisión 8).
+  - Comprobante adjunto a la donación (captura de la transferencia): se evalúa si la spec 027
     no resulta viable.
   - «Mis donaciones» del adoptante (historial y estado de lo que donó): spec posterior.
   - Panel web (GUI-36 en `web-admin`): sigue con datos de ejemplo; esta spec cubre la app mobile.
@@ -152,7 +152,8 @@ Todas se validan en el backend; el frontend las repite sólo para UX.
 6. **Donar (HU-12.2 / 12.3):** sólo desde el perfil Personal y sólo a campañas «Activa». Un
    miembro no puede donar a una campaña de su propio refugio (`DONACION_PROPIA`), igual que no
    adopta mascotas propias. Monto entre $1 y $2.500.000, hasta 2 decimales. Nace «Pendiente» y
-   **no suma** al progreso.
+   **no suma** al progreso. Si la campaña figura «Activa» pero ya le corresponde cerrar (venció o llegó al
+   objetivo y el cron no corrió), no recibe y se cierra en el acto con la regla del cron.
 7. **Revisar donaciones (HU-12.3):** Pendiente → Realizada (suma) o Pendiente → Cancelada con
    motivo obligatorio (no suma). Realizada y Cancelada son finales. Se pueden revisar aunque
    la campaña ya esté Finalizada o Cancelada: la plata pudo haberse transferido antes del
@@ -224,7 +225,7 @@ Todas se validan en el backend; el frontend las repite sólo para UX.
 7. Las rutas de gestión van bajo `/refugio/...` y exigen el perfil Refugio, como
    `perfil-refugio` y `dashboard-refugio`. El portal y la donación van bajo `/campanias` y
    exigen el perfil Personal: desde el perfil Refugio no se dona.
-8. **Preparado para la spec 022 (Mercado Pago):** la confirmación automática sería otro
+8. **Preparado para la spec 027 (Mercado Pago):** la confirmación automática sería otro
    camino hacia «Realizada» con `usuario_modificacion = SISTEMA`; el monto ya admite centavos
    (`Decimal(12,2)`), que es lo que necesita el matching por centavos únicos. La regla 11 dice
    «cuando el refugio confirma manualmente»: si se automatiza, hay que registrar el cambio de

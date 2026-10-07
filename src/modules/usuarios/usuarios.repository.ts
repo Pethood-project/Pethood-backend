@@ -280,3 +280,12 @@ export function buscarPerfilPublico(id: number) {
     },
   });
 }
+
+/** Carga el DNI sólo si todavía no tiene (spec 027 §6.11). `false` si ya tenía. */
+export async function guardarDni(usuarioId: number, dni: string): Promise<boolean> {
+  const { count } = await prisma.usuario.updateMany({
+    where: { id: usuarioId, fechaBaja: null, dni: null },
+    data: { dni, ...datosModificacion(usuarioId) },
+  });
+  return count === 1;
+}

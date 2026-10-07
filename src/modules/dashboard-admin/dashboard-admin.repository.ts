@@ -60,7 +60,7 @@ export function contarCampaniasActivas() {
 }
 
 /**
- * Sólo donaciones Realizada: las que el refugio confirmó (spec 021, regla transversal 11). El
+ * Sólo donaciones Realizada: las que el refugio confirmó (spec 026, regla transversal 11). El
  * nombre y el campo `montoDonadoDeclarado` de la API se conservan para no romper web-admin.
  */
 export async function sumarMontoDonadoDeclarado(): Promise<number> {

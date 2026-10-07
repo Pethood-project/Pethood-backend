@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
+  dniSchema,
   textoOpcionalSchema,
   textoSchema,
   urlSchema,
@@ -32,6 +33,11 @@ export const actualizarPerfilBodySchema = z.object({
 });
 
 export type ActualizarPerfilBody = z.infer<typeof actualizarPerfilBodySchema>;
+
+/** Carga única del DNI (spec 027 §6.11). */
+export const cargarDniBodySchema = z.object({ dni: dniSchema() });
+
+export type CargarDniBody = z.infer<typeof cargarDniBodySchema>;
 
 /**
  * Preview del link de Google Maps: geocodifica la dirección estructurada SIN guardarla, para
@@ -75,6 +81,8 @@ export interface PerfilPropio {
   apellido: string;
   email: string;
   telefono: string | null;
+  /** Se carga una sola vez; `null` en cuentas viejas y de Google (spec 027). */
+  dni: string | null;
   /** Dirección estructurada del perfil (para geocodificar). */
   provincia: string | null;
   localidad: string | null;

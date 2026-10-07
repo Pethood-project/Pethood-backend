@@ -1,6 +1,6 @@
 # Contrato de API — Campañas de donación
 
-Endpoints de **HU-12.1 a HU-12.7 (Campañas de Recaudación)**, listos para consumir desde `pethood-frontend`. Están implementados, testeados y verificados contra el servidor local con las campañas del seed. Alcance, reglas y criterios de aceptación: [spec 021](specs/021-campanias.md).
+Endpoints de **HU-12.1 a HU-12.7 (Campañas de Recaudación)**, listos para consumir desde `pethood-frontend`. Están implementados, testeados y verificados contra el servidor local con las campañas del seed. Alcance, reglas y criterios de aceptación: [spec 026](specs/026-campanias.md).
 
 > Este documento describe **solo lo que el backend expone**. Los textos de UI y las reglas de la pantalla salen de `REQUISITOS.md` y de la spec.
 
@@ -66,7 +66,7 @@ Igual en el portal, en el detalle y en «Mis Campañas»:
 | `recaudado` | Suma de las donaciones **Realizada**: lo único que mueve la barra (regla transversal 11). Puede superar el objetivo. |
 | `porcentaje` | 0 a 100, hacia abajo y topeado en 100. Listo para la barra. |
 | `donantes` | Usuarios distintos con al menos una donación Realizada. |
-| `alias` / `cbu` | Al menos uno viene cargado (salvo campañas sembradas antes de la spec 021). |
+| `alias` / `cbu` | Al menos uno viene cargado (salvo campañas sembradas antes de la spec 026). |
 | `imagenUrl` | Ruta relativa: pasarla por `urlAbsoluta`. `null` sólo en campañas viejas del seed. |
 
 En «Mis Campañas» cada campaña suma **`pendientes`**: cuántas donaciones esperan revisión.
@@ -106,7 +106,9 @@ Cualquier perfil. **Respuesta 200:** una campaña. **Errores:** `400 VALIDACION`
 
 ## `POST /api/v1/campanias/:id/donaciones` — «Terminar donación» (HU-12.3)
 
-Perfil **PERSONAL**. El adoptante avisa cuánto transfirió.
+> **Spec 027:** si el refugio vinculó Mercado Pago, la donación puede volver ya `Realizada` (`confirmadaPorMercadoPago: true`) cuando la transferencia estaba acreditada. Sin DNI cargado responde `409 DNI_REQUERIDO` («Cargá tu DNI para donar.»). Detalle en [`api-mercadopago.md`](api-mercadopago.md).
+
+Perfil **PERSONAL**. El adoptante avisa cuánto transfirió y **desde dónde**: `origen` obligatorio, `MERCADO_PAGO` u `OTRO_BANCO` («Elegí desde dónde vas a transferir»). Sólo las de Mercado Pago se confirman solas; la donación devuelve `origen` (`null` en las anteriores a este campo).
 
 **Body (JSON):** `{ "monto": "1500,50" }` — de 1 a 2.500.000, hasta 2 decimales, coma o punto.
 
@@ -118,7 +120,7 @@ Perfil **PERSONAL**. El adoptante avisa cuánto transfirió.
 | `AMBITO_NO_PERMITIDO` | 403 | Desde el perfil de refugio |
 | `DONACION_PROPIA` | 403 | «No podés donar a una campaña de tu propio refugio» |
 | `CAMPANIA_NO_ENCONTRADA` | 404 | «No encontramos esa campaña» |
-| `CAMPANIA_NO_ACTIVA` | 409 | «Esta campaña no está recibiendo donaciones» |
+| `CAMPANIA_NO_ACTIVA` | 409 | «Esta campaña no está recibiendo donaciones». También si figura Activa pero ya venció o llegó al objetivo y el cron todavía no corrió: en ese caso se cierra en el acto. |
 
 ## `GET /api/v1/refugio/campanias` — «Mis Campañas» (HU-12.1)
 
@@ -231,7 +233,7 @@ No es un endpoint: corre desde el cron del sistema (una vez por día) con el usu
 
 ## Pendiente para otros módulos
 
-- **Editar una campaña:** fuera de alcance de la spec 021 (el botón «Editar» de GUI-36 queda deshabilitado).
+- **Editar una campaña:** fuera de alcance de la spec 026 (el botón «Editar» de GUI-36 queda deshabilitado).
 - **«Mis donaciones» del adoptante:** historial y estado de lo que donó.
-- **Confirmación automática con Mercado Pago:** spike y luego spec 022. El modelo ya la admite (otro camino a Realizada con usuario SISTEMA).
+- **Confirmación automática con Mercado Pago:** spike y luego spec 027. El modelo ya la admite (otro camino a Realizada con usuario SISTEMA).
 - **GUI-36 en `web-admin`:** sigue con datos de ejemplo.

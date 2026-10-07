@@ -8,7 +8,7 @@ import { ROL_API } from '../../shared/roles';
 import * as controller from './campanias.controller';
 
 /**
- * Lado del adoptante (spec 021). Portal y donar exigen el perfil Personal: desde el perfil
+ * Lado del adoptante (spec 026). Portal y donar exigen el perfil Personal: desde el perfil
  * Refugio no se dona. El detalle lo ve cualquiera (lo abre también el refugio).
  */
 export const campaniasRouter = Router();

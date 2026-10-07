@@ -20,7 +20,7 @@ Ninguna nueva — son vistas agregadas de solo lectura sobre `Usuario`, `Refugio
 
 **Fuera de esta spec — `distribucionGeografica`:** se evaluó agregar publicaciones/adopciones por departamento, pero `Publicacion.ubicacion` es texto libre (`prisma/schema.prisma:380`, sin FK a Provincia/Localidad) — agrupar por ese campo cuenta variantes/typos como filas distintas. Decisión 2026-08-18: no implementar hasta que exista un catálogo geográfico real en el modelo (ningún módulo lo tiene todavía).
 
-**Gap resuelto por la spec 021 (2026-09-30):** `Donacion` ahora tiene estado (`Pendiente` / `Realizada` / `Cancelada`). `montoDonadoDeclarado` suma sólo las «Realizada», las que el refugio confirmó (regla transversal #11). El campo conserva su nombre para no romper web-admin.
+**Gap resuelto por la spec 026 (2026-09-30):** `Donacion` ahora tiene estado (`Pendiente` / `Realizada` / `Cancelada`). `montoDonadoDeclarado` suma sólo las «Realizada», las que el refugio confirmó (regla transversal #11). El campo conserva su nombre para no romper web-admin.
 
 ## 4. API (contrato backend)
 
@@ -85,7 +85,7 @@ No aplica a mobile.
 
 1. Solo rol Administrador accede (`middlewares/roles.ts`).
 2. Los conteos excluyen bajas lógicas (`fechaBaja IS NULL`) salvo que la métrica sea explícitamente histórica.
-3. `donacion.monto` se reporta como "confirmado": sólo donaciones «Realizada» (spec 021, ver sección 3).
+3. `donacion.monto` se reporta como "confirmado": sólo donaciones «Realizada» (spec 026, ver sección 3).
 4. Export siempre por streams (regla transversal #12 de CLAUDE.md) — usar streaming de Prisma (`cursor` / `findMany` paginado) hacia el stream de respuesta, nunca `findMany()` completo + `join('\n')`.
 5. El `service.ts` de este módulo solo lee (ningún endpoint escribe) — sin reglas de auditoría de alta/baja propias.
 

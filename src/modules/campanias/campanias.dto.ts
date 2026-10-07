@@ -1,5 +1,5 @@
 /**
- * Entrada y salida de campañas y donaciones (spec 021). Las reglas genéricas salen de
+ * Entrada y salida de campañas y donaciones (spec 026). Las reglas genéricas salen de
  * `shared/validation`; acá sólo se compone lo propio de la campaña.
  */
 import { z } from 'zod';
@@ -19,7 +19,9 @@ import {
   ESTADO_DONACION,
   ESTADOS_MANUALES,
   MOTIVOS_RECHAZO,
+  ORIGENES_DONACION,
   type MotivoRechazo,
+  type OrigenDonacion,
 } from './campanias.estados';
 
 const { campania, donacion } = LIMITES;
@@ -85,6 +87,10 @@ export type FiltrosMisCampaniasDto = z.infer<typeof filtrosMisCampaniasSchema>;
 /** «Terminar donación» (HU-12.3): lo que el adoptante dice que transfirió. */
 export const donarSchema = z.object({
   monto: decimalSchema({ ...donacion.monto, etiqueta: 'El monto' }),
+  /** Sólo las de Mercado Pago se confirman solas (spec 027). */
+  origen: z.enum(ORIGENES_DONACION, {
+    errorMap: () => ({ message: 'Elegí desde dónde vas a transferir' }),
+  }),
 });
 
 export type DonarDto = z.infer<typeof donarSchema>;
@@ -133,7 +139,7 @@ export interface CampaniaDto {
   id: number;
   titulo: string;
   descripcion: string;
-  /** `null` sólo en campañas sembradas antes de la spec 021. */
+  /** `null` sólo en campañas sembradas antes de la spec 026. */
   imagenUrl: string | null;
   objetivo: number;
   /** Suma de las donaciones Realizada: lo único que mueve la barra (regla transversal 11). */
@@ -149,6 +155,8 @@ export interface CampaniaDto {
   alias: string | null;
   cbu: string | null;
   refugio: { id: number; nombre: string; imagenUrl: string | null };
+  /** El refugio tiene Mercado Pago vinculado: las donaciones se confirman solas (spec 027). */
+  confirmacionAutomatica: boolean;
 }
 
 /** En «Mis Campañas», además, cuántas donaciones esperan revisión. */
@@ -168,6 +176,10 @@ export interface DonacionDto {
   estado: { id: number; nombre: string };
   /** Sólo en una Cancelada. */
   motivoRechazo: MotivoRechazo | null;
+  /** La confirmó el sistema al encontrar la transferencia en Mercado Pago (spec 027). */
+  confirmadaPorMercadoPago: boolean;
+  /** Desde dónde dijo que transfirió; `null` en donaciones anteriores al campo (spec 027). */
+  origen: OrigenDonacion | null;
   /** ISO 8601: cuándo la declaró el adoptante. */
   fechaAlta: string;
   donante: { id: number; nombre: string; apellido: string; imagenUrl: string | null };

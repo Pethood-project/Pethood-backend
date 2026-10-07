@@ -23,7 +23,15 @@ const SELECCION_CAMPANIA = {
   refugioId: true,
   fechaAlta: true,
   estadoCampania: { select: { id: true, nombre: true } },
-  refugio: { select: { id: true, nombre: true, imagenUrl: true } },
+  refugio: {
+    select: {
+      id: true,
+      nombre: true,
+      imagenUrl: true,
+      // Si el refugio confirma solo con Mercado Pago (spec 027).
+      conexionMercadoPago: { select: { estado: true, fechaBaja: true } },
+    },
+  },
 } satisfies Prisma.CampaniaSelect;
 
 export type CampaniaConRelaciones = Prisma.CampaniaGetPayload<{
@@ -34,6 +42,8 @@ const SELECCION_DONACION = {
   id: true,
   monto: true,
   motivoRechazo: true,
+  mpPagoId: true,
+  origen: true,
   fechaAlta: true,
   estadoDonacion: { select: { id: true, nombre: true } },
   usuario: { select: { id: true, nombre: true, apellido: true, imagenUrl: true } },
@@ -94,6 +104,7 @@ export function buscarUsuarioConRefugio(usuarioId: number) {
     where: { id: usuarioId, fechaBaja: null },
     select: {
       id: true,
+      dni: true,
       refugioId: true,
       refugio: {
         select: {
@@ -248,7 +259,7 @@ export function listarVigentesParaCron() {
 }
 
 export function crearDonacion(
-  datos: { campaniaId: number; monto: number; estadoDonacionId: number },
+  datos: { campaniaId: number; monto: number; estadoDonacionId: number; origen: string },
   usuarioId: number,
 ) {
   return prisma.donacion.create({
@@ -311,4 +322,85 @@ export async function resolverDonacionSi(
     data: { estadoDonacionId: haciaEstadoId, motivoRechazo, ...datosModificacion(usuarioId) },
   });
   return count === 1;
+}
+
+// ─────────────── CONCILIACIÓN CON MERCADO PAGO (spec 027) ───────────────
+
+/** Pendientes de un donante y monto en un refugio, dentro de la ventana de conciliación. */
+export function pendientesDelGrupo(
+  grupo: { refugioId: number; usuarioId: number; monto: number },
+  desde: Date,
+) {
+  return prisma.donacion.findMany({
+    where: {
+      usuarioId: grupo.usuarioId,
+      monto: grupo.monto,
+      fechaBaja: null,
+      fechaAlta: { gte: desde },
+      estadoDonacion: { nombre: ESTADO_DONACION.PENDIENTE },
+      // Sólo las de Mercado Pago traen al donante en el pago (spec 027).
+      origen: 'MERCADO_PAGO',
+      campania: { refugioId: grupo.refugioId },
+    },
+    orderBy: [{ fechaAlta: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      monto: true,
+      fechaAlta: true,
+      campaniaId: true,
+      usuario: { select: { dni: true } },
+    },
+  });
+}
+
+export async function pagosYaUsados(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const filas = await prisma.donacion.findMany({
+    where: { mpPagoId: { in: ids } },
+    select: { mpPagoId: true },
+  });
+  return new Set(filas.map((fila) => fila.mpPagoId!));
+}
+
+/** Pendiente → Realizada con el pago que la confirmó. Condicional, como la manual. */
+export async function confirmarConPagoMp(
+  id: number,
+  pendienteId: number,
+  realizadaId: number,
+  mpPagoId: string,
+  usuarioId: number,
+): Promise<boolean> {
+  const { count } = await prisma.donacion.updateMany({
+    where: { id, estadoDonacionId: pendienteId, fechaBaja: null },
+    data: { estadoDonacionId: realizadaId, mpPagoId, ...datosModificacion(usuarioId) },
+  });
+  return count === 1;
+}
+
+/** Lo que recorre el cron: grupos donante + refugio + monto con algo para conciliar. */
+export async function gruposConciliables(desde: Date) {
+  const filas = await prisma.donacion.findMany({
+    where: {
+      fechaBaja: null,
+      fechaAlta: { gte: desde },
+      estadoDonacion: { nombre: ESTADO_DONACION.PENDIENTE },
+      origen: 'MERCADO_PAGO',
+      usuario: { dni: { not: null } },
+      campania: {
+        refugio: { conexionMercadoPago: { estado: 'VINCULADA', fechaBaja: null } },
+      },
+    },
+    select: { usuarioId: true, monto: true, campania: { select: { refugioId: true } } },
+  });
+
+  const vistos = new Map<string, { refugioId: number; usuarioId: number; monto: number }>();
+  for (const fila of filas) {
+    const grupo = {
+      refugioId: fila.campania.refugioId,
+      usuarioId: fila.usuarioId,
+      monto: Number(fila.monto),
+    };
+    vistos.set(`${grupo.refugioId}|${grupo.usuarioId}|${grupo.monto}`, grupo);
+  }
+  return [...vistos.values()];
 }

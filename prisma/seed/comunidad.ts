@@ -30,7 +30,7 @@ interface DefCampania {
   inicioHaceMeses: number;
   finEnDias: number;
   imagen?: string;
-  /** Datos para transferir (spec 021). */
+  /** Datos para transferir (spec 026). */
   alias?: string;
   cbu?: string;
   /** Repartidas en varios meses para poblar donacionesPorMes. Sin estado → Realizada. */
@@ -155,7 +155,7 @@ async function seedCampanias(catalogos: Catalogos, actores: Actores) {
       nuevas += 1;
     }
 
-    // Campañas sembradas antes de la spec 021: sin datos para transferir no se puede donar.
+    // Campañas sembradas antes de la spec 026: sin datos para transferir no se puede donar.
     if (campania.alias === null && campania.cbu === null && (def.alias || def.cbu)) {
       campania = await prisma.campania.update({
         where: { id: campania.id },

@@ -67,14 +67,24 @@ describe('crearCampaniaSchema', () => {
 });
 
 describe('donarSchema', () => {
+  const MP = { origen: 'MERCADO_PAGO' };
+
   it('acepta coma o punto decimal', () => {
-    expect(donarSchema.parse({ monto: '5000,50' }).monto).toBe(5000.5);
-    expect(donarSchema.parse({ monto: '5000.50' }).monto).toBe(5000.5);
+    expect(donarSchema.parse({ ...MP, monto: '5000,50' }).monto).toBe(5000.5);
+    expect(donarSchema.parse({ ...MP, monto: '5000.50' }).monto).toBe(5000.5);
   });
 
   it('rechaza 0 y más de dos decimales', () => {
-    expect(donarSchema.safeParse({ monto: '0' }).success).toBe(false);
-    expect(donarSchema.safeParse({ monto: '10,555' }).success).toBe(false);
+    expect(donarSchema.safeParse({ ...MP, monto: '0' }).success).toBe(false);
+    expect(donarSchema.safeParse({ ...MP, monto: '10,555' }).success).toBe(false);
+  });
+
+  it('exige desde dónde se transfiere: Mercado Pago u otro banco (spec 027)', () => {
+    expect(donarSchema.parse({ monto: '5000', origen: 'OTRO_BANCO' }).origen).toBe('OTRO_BANCO');
+    expect(primerError(donarSchema.safeParse({ monto: '5000' }))).toBe(
+      'Elegí desde dónde vas a transferir',
+    );
+    expect(donarSchema.safeParse({ monto: '5000', origen: 'EFECTIVO' }).success).toBe(false);
   });
 });
 

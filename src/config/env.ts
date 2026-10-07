@@ -24,6 +24,12 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_REDIRECT_URI: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  // Mercado Pago (spec 027). Sin las cuatro, el módulo queda apagado y todo es manual.
+  MP_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MP_CLIENT_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MP_REDIRECT_URI: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  // 32 bytes en base64: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+  MP_CLAVE_CIFRADO: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   FRONTEND_WEB_URL: z.string().url().default('http://localhost:3001'),
   // Cloudflare R2: con R2_ENABLED=false el registro ignora la foto y no usa R2.
   // Con R2_ENABLED=true se exige el resto de keys; la foto se sube y se guarda el link.

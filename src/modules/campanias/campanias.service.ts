@@ -1,5 +1,5 @@
 /**
- * Campañas de donación (spec 021, HU-12.1 a HU-12.7).
+ * Campañas de donación (spec 026, HU-12.1 a HU-12.7).
  *
  * Dos lados del mostrador:
  * - El REFUGIO (perfil Refugio) crea sus campañas, las finaliza o cancela, y revisa las
@@ -10,6 +10,7 @@
  *
  * Las transiciones automáticas (HU-12.4) las comparte con el cron vía `campanias.estados.ts`.
  */
+import { Prisma } from '@prisma/client';
 import { AppError } from '../../middlewares/errorHandler';
 import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { registrarAuditoria } from '../../shared/logAuditoria';
@@ -38,9 +39,14 @@ import {
   type EstadoManual,
   type MotivoRechazo,
   type NombreEstadoCampania,
+  type OrigenDonacion,
   type NombreEstadoDonacion,
 } from './campanias.estados';
 import * as repo from './campanias.repository';
+import { buscarPagos, TokenMercadoPagoInvalido } from '../mercadopago/mercadopago.cliente';
+import * as mpService from '../mercadopago/mercadopago.service';
+import { emparejar, VENTANA_ANTES_MS, VENTANA_DESPUES_MS } from './campanias.conciliacion';
+import { programarReintentos } from './campanias.reintentos';
 
 const SUBCARPETA_IMAGENES = 'campanias';
 
@@ -113,7 +119,15 @@ function aDto(campania: repo.CampaniaConRelaciones, resumen: repo.ResumenDonacio
       nombre: campania.refugio.nombre,
       imagenUrl: campania.refugio.imagenUrl,
     },
+    // El refugio confirma solo con Mercado Pago (spec 027): la pantalla Donar elige el texto.
+    confirmacionAutomatica: mpService.disponible() && refugioVinculado(campania),
   };
+}
+
+/** El refugio de la campaña tiene su cuenta de Mercado Pago vinculada (spec 027). */
+function refugioVinculado(campania: repo.CampaniaConRelaciones): boolean {
+  const conexion = campania.refugio.conexionMercadoPago;
+  return conexion?.estado === 'VINCULADA' && conexion.fechaBaja === null;
 }
 
 function aDtoRefugio(
@@ -129,6 +143,8 @@ function aDtoDonacion(donacion: repo.DonacionConRelaciones): DonacionDto {
     monto: Number(donacion.monto),
     estado: { id: donacion.estadoDonacion.id, nombre: donacion.estadoDonacion.nombre },
     motivoRechazo: donacion.motivoRechazo as MotivoRechazo | null,
+    confirmadaPorMercadoPago: donacion.mpPagoId !== null,
+    origen: donacion.origen as OrigenDonacion | null,
     fechaAlta: donacion.fechaAlta.toISOString(),
     donante: {
       id: donacion.usuario.id,
@@ -155,7 +171,7 @@ async function resumenDe(campaniaId: number): Promise<repo.ResumenDonaciones> {
 /**
  * Refugio del miembro que opera. Con `paraCrear` además exige que esté verificado y activo
  * (precondición de HU-12.1). Las campañas existentes siguen su ciclo aunque el refugio se
- * suspenda (spec 021 §8).
+ * suspenda (spec 026 §8).
  */
 async function refugioDe(usuarioId: number, paraCrear = false): Promise<number> {
   const usuario = await repo.buscarUsuarioConRefugio(usuarioId);
@@ -494,24 +510,53 @@ export async function donar(
 ): Promise<DonacionDto> {
   const usuario = await repo.buscarUsuarioConRefugio(usuarioId);
   if (!usuario) throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
+  // Sin DNI no hay forma de reconocer la transferencia (spec 027 §6.11). La app lo pide antes;
+  // esto cubre a una app vieja.
+  if (!usuario.dni) throw new AppError('DNI_REQUERIDO', 'Cargá tu DNI para donar.', 409);
 
   const campania = await repo.buscarPorId(campaniaId);
   if (!campania) {
     throw new AppError('CAMPANIA_NO_ENCONTRADA', 'No encontramos esa campaña', 404);
   }
 
-  // Igual que no se adopta una mascota propia (spec 021 §6.6).
+  // Igual que no se adopta una mascota propia (spec 026 §6.6).
   if (usuario.refugioId !== null && usuario.refugioId === campania.refugioId) {
     throw new AppError('DONACION_PROPIA', 'No podés donar a una campaña de tu propio refugio', 403);
   }
 
-  if (campania.estadoCampania.nombre !== ESTADO_CAMPANIA.ACTIVA) {
-    throw new AppError('CAMPANIA_NO_ACTIVA', 'Esta campaña no está recibiendo donaciones', 409);
+  const noRecibe = new AppError(
+    'CAMPANIA_NO_ACTIVA',
+    'Esta campaña no está recibiendo donaciones',
+    409,
+  );
+
+  if (campania.estadoCampania.nombre !== ESTADO_CAMPANIA.ACTIVA) throw noRecibe;
+
+  // Si el cron todavía no la cerró pero ya venció (o llegó al objetivo), se cierra ahora con la
+  // misma regla: aceptarla sería recibir plata para una campaña terminada.
+  // Se decide por la regla y no por si esta escritura ganó: si otro la cerró en el medio,
+  // igual está cerrada.
+  const { recaudado } = await resumenDe(campania.id);
+  const vencida =
+    siguienteEstadoAutomatico(
+      {
+        estado: campania.estadoCampania.nombre,
+        fechaInicio: campania.fechaInicio,
+        fechaFin: campania.fechaFin,
+        objetivo: Number(campania.objetivo),
+        recaudado,
+      },
+      new Date(),
+    ) !== null;
+
+  if (vencida) {
+    await aplicarReglaAutomatica(campania, recaudado, await idsEstadosCampania());
+    throw noRecibe;
   }
 
   const estados = await idsEstadosDonacion();
   const donacion = await repo.crearDonacion(
-    { campaniaId, monto: datos.monto, estadoDonacionId: estados.Pendiente },
+    { campaniaId, monto: datos.monto, estadoDonacionId: estados.Pendiente, origen: datos.origen },
     usuarioId,
   );
 
@@ -523,5 +568,107 @@ export async function donar(
     detalle: `campania=${campaniaId} monto=${datos.monto}`,
   });
 
-  return aDtoDonacion(donacion);
+  // Si el refugio tiene Mercado Pago, se intenta confirmar ya (spec 027 §6.5): la
+  // transferencia suele acreditarse antes de «Terminar donación». Si todavía no aparece, lo
+  // retoma el cron.
+  // Desde otro banco Mercado Pago no informa quién transfirió: la confirma el refugio (spec 027).
+  if (datos.origen === 'OTRO_BANCO') return aDtoDonacion(donacion);
+
+  const grupo = { refugioId: campania.refugioId, usuarioId, monto: datos.monto };
+  const confirmadas = await conciliarGrupo(grupo);
+
+  // La transferencia suele acreditarse unos segundos o minutos después de «Terminar donación»:
+  // se vuelve a buscar en segundo plano, sin hacer esperar al usuario (§6.5).
+  if (confirmadas === 0 && refugioVinculado(campania)) {
+    programarReintentos(`${grupo.refugioId}|${grupo.usuarioId}|${grupo.monto}`, () =>
+      conciliarGrupo(grupo),
+    );
+  }
+
+  const actualizada = await repo.buscarDonacionCompleta(donacion.id);
+  return aDtoDonacion(actualizada ?? donacion);
+}
+
+/**
+ * Confirma con Mercado Pago las Pendientes de un donante y monto en un refugio (spec 027 §6).
+ * Busca una sola vez los pagos de ese monto en la ventana de todas, empareja y confirma. Nunca
+ * tira: cualquier problema deja las donaciones Pendientes para el refugio o para el cron.
+ */
+export async function conciliarGrupo(
+  grupo: { refugioId: number; usuarioId: number; monto: number },
+  ahora = new Date(),
+  timeoutMs = 5000,
+): Promise<number> {
+  try {
+    const token = await mpService.tokenDeRefugio(grupo.refugioId);
+    if (!token) return 0;
+
+    const pendientes = (
+      await repo.pendientesDelGrupo(grupo, new Date(ahora.getTime() - VENTANA_DESPUES_MS))
+    ).filter((pendiente) => pendiente.usuario.dni);
+    if (pendientes.length === 0) return 0;
+
+    const desde = new Date(pendientes[0]!.fechaAlta.getTime() - VENTANA_ANTES_MS);
+    const hasta = new Date(
+      Math.min(
+        ahora.getTime(),
+        pendientes[pendientes.length - 1]!.fechaAlta.getTime() + VENTANA_DESPUES_MS,
+      ),
+    );
+
+    let pagos;
+    try {
+      pagos = await buscarPagos(token, { monto: grupo.monto, desde, hasta }, timeoutMs);
+    } catch (err) {
+      if (err instanceof TokenMercadoPagoInvalido) {
+        await mpService.marcarTokenInvalido(grupo.refugioId);
+      }
+      return 0;
+    }
+
+    const usados = await repo.pagosYaUsados(pagos.map((pago) => pago.id));
+    const pares = emparejar(
+      pendientes.map((pendiente) => ({
+        id: pendiente.id,
+        monto: Number(pendiente.monto),
+        fechaAlta: pendiente.fechaAlta,
+        dni: pendiente.usuario.dni!,
+      })),
+      pagos,
+      usados,
+    );
+
+    const estados = await idsEstadosDonacion();
+    let confirmadas = 0;
+    for (const par of pares) {
+      const pendiente = pendientes.find((candidata) => candidata.id === par.donacionId)!;
+      try {
+        const confirmada = await repo.confirmarConPagoMp(
+          par.donacionId,
+          estados.Pendiente,
+          estados.Realizada,
+          par.pagoId,
+          USUARIO_SISTEMA_ID,
+        );
+        if (!confirmada) continue;
+      } catch (err) {
+        // El mismo pago lo tomó otra corrida en paralelo (donacion_mp_pago_id es único).
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') continue;
+        throw err;
+      }
+
+      confirmadas++;
+      await registrarAuditoria({
+        usuarioId: USUARIO_SISTEMA_ID,
+        accion: 'CONFIRMAR_MP',
+        entidad: 'Donacion',
+        entidadId: par.donacionId,
+        detalle: `pago=${par.pagoId}`,
+      });
+      await cerrarSiCompleta(pendiente.campaniaId);
+    }
+    return confirmadas;
+  } catch {
+    return 0;
+  }
 }

@@ -108,7 +108,7 @@ export function listarDonaciones(refugioId: number, desde: Date, hasta: Date) {
       fechaBaja: null,
       fechaAlta: { gte: desde, lte: hasta },
       campania: { refugioId, fechaBaja: null },
-      // Sólo lo confirmado por el refugio (spec 021, regla transversal 11).
+      // Sólo lo confirmado por el refugio (spec 026, regla transversal 11).
       estadoDonacion: { nombre: ESTADO_DONACION.REALIZADA },
     },
     select: { fechaAlta: true, monto: true },
@@ -194,7 +194,8 @@ export function paginaDonacionesParaExport(
       fechaBaja: null,
       fechaAlta: { gte: desde, lte: hasta },
       campania: { refugioId, fechaBaja: null },
-      estadoDonacion: { nombre: ESTADO_DONACION.REALIZADA },
+      // A diferencia de los KPI, el CSV trae TODAS con su estado: al refugio le sirve ver
+      // también las pendientes y las rechazadas (spec 026 §6.10).
       ...(cursorId ? { id: { gt: cursorId } } : {}),
     },
     orderBy: { id: 'asc' },

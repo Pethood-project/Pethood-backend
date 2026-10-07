@@ -84,6 +84,19 @@ export async function cambiarPassword(
   }
 }
 
+/** Carga única del DNI (spec 027). */
+export async function cargarDni(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError('NO_AUTENTICADO', 'Falta el token de autenticación', 401);
+    }
+    const usuario = await service.cargarDni(req.usuario.usuarioId, req.body.dni, req.ambito!);
+    res.json({ usuario });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function darDeBajaMe(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.usuario) {

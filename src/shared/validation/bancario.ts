@@ -1,5 +1,5 @@
 /**
- * Datos para transferir: alias y CBU/CVU (spec 021). Funciones puras, sin dependencias.
+ * Datos para transferir: alias y CBU/CVU (spec 026). Funciones puras, sin dependencias.
  *
  * Los dos son opcionales por separado (la campaña exige al menos uno, eso lo decide el DTO).
  * Sólo se valida el formato: los dígitos verificadores del CBU quedan fuera de alcance.
