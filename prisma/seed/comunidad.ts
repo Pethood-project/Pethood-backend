@@ -30,8 +30,17 @@ interface DefCampania {
   inicioHaceMeses: number;
   finEnDias: number;
   imagen?: string;
-  /** Repartidas en varios meses para poblar donacionesPorMes. */
-  donaciones: { usuario: Donante; monto: number; haceMeses: number }[];
+  /** Datos para transferir (spec 026). */
+  alias?: string;
+  cbu?: string;
+  /** Repartidas en varios meses para poblar donacionesPorMes. Sin estado → Realizada. */
+  donaciones: {
+    usuario: Donante;
+    monto: number;
+    haceMeses: number;
+    estado?: 'Pendiente' | 'Realizada' | 'Cancelada';
+    motivo?: 'NO_RECIBIDA' | 'MONTO_NO_COINCIDE';
+  }[];
 }
 
 const CAMPANIAS: DefCampania[] = [
@@ -46,6 +55,8 @@ const CAMPANIAS: DefCampania[] = [
     inicioHaceMeses: 5,
     finEnDias: 60,
     imagen: foto('photo-1548199973-03cce0bbc87b'),
+    alias: 'patitas.castra.mp',
+    cbu: '0000003100012345678901',
     donaciones: [
       { usuario: 'ana', monto: 5000, haceMeses: 5 },
       { usuario: 'carla', monto: 8000, haceMeses: 3 },
@@ -53,6 +64,15 @@ const CAMPANIAS: DefCampania[] = [
       { usuario: 'martin', monto: 12000, haceMeses: 1 },
       { usuario: 'elena', monto: 6000, haceMeses: 0 },
       { usuario: 'ana', monto: 4000, haceMeses: 0 },
+      { usuario: 'carla', monto: 3500, haceMeses: 0, estado: 'Pendiente' },
+      { usuario: 'lucia', monto: 2500, haceMeses: 0, estado: 'Pendiente' },
+      {
+        usuario: 'martin',
+        monto: 20000,
+        haceMeses: 1,
+        estado: 'Cancelada',
+        motivo: 'MONTO_NO_COINCIDE',
+      },
     ],
   },
   {
@@ -66,6 +86,7 @@ const CAMPANIAS: DefCampania[] = [
     inicioHaceMeses: 10,
     finEnDias: -120,
     imagen: foto('photo-1587300003388-59208cc962cb'),
+    alias: 'patitas.techo.mp',
     donaciones: [
       { usuario: 'ana', monto: 80000, haceMeses: 6 },
       { usuario: 'martin', monto: 120000, haceMeses: 5 },
@@ -81,6 +102,7 @@ const CAMPANIAS: DefCampania[] = [
     objetivo: 90000,
     inicioHaceMeses: 8,
     finEnDias: -200,
+    alias: 'patitas.rifa.mp',
     donaciones: [],
   },
   {
@@ -92,9 +114,11 @@ const CAMPANIAS: DefCampania[] = [
     objetivo: 120000,
     inicioHaceMeses: 2,
     finEnDias: 30,
+    cbu: '2850590940090418135201',
     donaciones: [
       { usuario: 'ana', monto: 10000, haceMeses: 1 },
       { usuario: 'elena', monto: 7000, haceMeses: 0 },
+      { usuario: 'martin', monto: 5000, haceMeses: 0, estado: 'Pendiente' },
     ],
   },
 ];
@@ -120,6 +144,8 @@ async function seedCampanias(catalogos: Catalogos, actores: Actores) {
           fechaInicio: haceMeses(def.inicioHaceMeses, 1),
           fechaFin: enDias(def.finEnDias),
           imagenUrl: def.imagen ?? null,
+          alias: def.alias ?? null,
+          cbu: def.cbu ?? null,
           refugioId: refugio.id,
           estadoCampaniaId: id(catalogos.estadosCampania, def.estado),
           usuarioAlta: operador.id,
@@ -127,6 +153,14 @@ async function seedCampanias(catalogos: Catalogos, actores: Actores) {
         },
       });
       nuevas += 1;
+    }
+
+    // Campañas sembradas antes de la spec 026: sin datos para transferir no se puede donar.
+    if (campania.alias === null && campania.cbu === null && (def.alias || def.cbu)) {
+      campania = await prisma.campania.update({
+        where: { id: campania.id },
+        data: { alias: def.alias ?? null, cbu: def.cbu ?? null },
+      });
     }
 
     for (const donacion of def.donaciones) {
@@ -141,6 +175,8 @@ async function seedCampanias(catalogos: Catalogos, actores: Actores) {
           monto: donacion.monto,
           campaniaId: campania.id,
           usuarioId: donante.id,
+          estadoDonacionId: id(catalogos.estadosDonacion, donacion.estado ?? 'Realizada'),
+          motivoRechazo: donacion.motivo ?? null,
           usuarioAlta: donante.id,
           fechaAlta: haceMeses(donacion.haceMeses),
         },

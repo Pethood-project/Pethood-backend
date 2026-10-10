@@ -50,7 +50,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
 | 21 | El catálogo de Provincia/Localidad vive sólo en el cliente, y la publicación sigue con ubicación en texto libre | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
-| 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
+| 23 | Las tarjetas de Inicio no muestran datos de campañas, y el refugio arma sus contadores con cuatro pedidos | Baja | frontend |
 | 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
 | 25 | Reseña no avisa al recibir una reseña (el reporte ya existe, spec 008) | Baja | ambos |
 | 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
@@ -61,8 +61,13 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
 | 32 | En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy | Media | backend |
 | 33 | `chat` tiene dos FK de origen y nada en base impide llenar las dos | Baja | backend |
-| 34 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
-| 35 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
+| 34 | Sin tope de donaciones pendientes por adoptante | Baja | backend |
+| 35 | La quota de campañas no es atómica | Baja | backend |
+| 36 | «Hoy» depende de la zona horaria del proceso Node, que no está fijada | Media | backend |
+| 37 | Sin webhook de Mercado Pago: una transferencia que llega después de «Terminar donación» tarda hasta 5 minutos en confirmarse | Baja | backend |
+| 38 | Las donaciones desde otro banco o billetera no se confirman solas | Media | ambos |
+| 39 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
+| 40 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
 
 ---
 
@@ -476,19 +481,21 @@ id y quedó corregido para todos los módulos en esa misma spec.
 
 ---
 
-## 23. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
+## 23. Las tarjetas de Inicio no muestran datos de campañas, y el refugio arma sus contadores con cuatro pedidos — Baja
 
-**Qué pasa.** El rediseño de Inicio (adoptante y refugio) trae secciones de Campañas y de
-Mascotas perdidas con datos reales (montos, donantes, reportes cerca). Esos módulos son las
-fases 10 y 11 del roadmap y todavía no tienen backend, así que en
-`apps/mobile/components/home/SeccionesProximamente.tsx` se muestran con el color y la forma
-del diseño pero con un texto genérico y la pastilla «Muy pronto», sin números inventados.
-Además, el panel de solicitudes del refugio saca sus contadores (pendientes, en revisión,
-aprobadas del mes, llegadas hoy) del `total` de cuatro `GET /solicitudes/recibidas` con
-distinto filtro, porque no hay un endpoint de resumen.
+> Numerado 21 en `origin/dev`, que chocó con el 21 y el 22 de otra rama en el merge de la
+> spec 020: se renumeró a 23 al resolver el conflicto (los números no se reciclan). Hasta la
+> spec 026 se llamaba «Inicio muestra Campañas y Mascotas perdidas como «Muy pronto»».
 
-**Cómo se arregla.** Cuando se implemente cada módulo, reemplazar su tarjeta de
-`SeccionesProximamente.tsx` por una con datos (el diseño de referencia está en el proyecto
+**Qué pasa.** Campañas (spec 026) y Mascotas perdidas (spec 020) ya tienen módulo y sus
+tarjetas de Inicio llevan a sus pantallas (`CampaniasInicio.tsx`, `PerdidasInicio.tsx`), pero
+el rediseño de Inicio las dibujaba con datos reales (montos, donantes, reportes cerca) y hoy
+muestran un texto fijo. Además, el panel de solicitudes del refugio saca sus contadores
+(pendientes, en revisión, aprobadas del mes, llegadas hoy) del `total` de cuatro
+`GET /solicitudes/recibidas` con distinto filtro, porque no hay un endpoint de resumen.
+
+**Cómo se arregla.** Pedir la primera campaña del portal (o las del refugio) desde
+`useDatosInicio` y pintarla en la tarjeta (el diseño de referencia está en el proyecto
 «Pethood - Ideas de inicio» de Claude Design). El «Ver mapa» del prototipo no se implementa:
 el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se notan lentos,
 sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
@@ -698,7 +705,67 @@ porque conviene decidir antes si el origen de una sala no debería ser **una** c
 (`origen_tipo` + `origen_id`, como ya hace `reporte_problema`) en lugar de una FK por tipo. Con
 una tercera clase de sala, el patrón actual suma una columna más.
 
-## 34. Notificaciones de Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica y Soporte — pausado a propósito
+---
+
+## 34. Sin tope de donaciones pendientes por adoptante — Baja
+
+**Qué pasa.** Un adoptante puede declarar donaciones sin límite (spec 026, HU-12.3): cada
+«Terminar donación» crea una donación Pendiente que el refugio tiene que revisar a mano.
+Alguien malintencionado podría llenar la bandeja de un refugio con donaciones falsas.
+
+**Cómo se arregla.** Si molesta en la práctica, un tope de pendientes por adoptante y por
+campaña, con el mismo criterio que el de solicitudes (regla transversal 7). Ningún requisito
+lo pide todavía.
+
+## 35. La quota de campañas no es atómica — Baja
+
+**Qué pasa.** El alta de campaña cuenta las Inactiva + Activa del refugio y después crea
+(spec 026 §6.3). Dos altas simultáneas del mismo refugio pueden pasar las dos el conteo y
+dejar 6 campañas vigentes. Es el mismo criterio que el resto de las quotas del proyecto.
+
+**Cómo se arregla.** Contar y crear dentro de una transacción serializable, o con un lock
+por refugio, si alguna vez se ve en la práctica.
+
+## 36. «Hoy» depende de la zona horaria del proceso Node, que no está fijada — Media
+
+**Qué pasa.** `parsearFecha`, `inicioDelDia`, `finDelDia`, `esPasada` y `esFutura`
+(`src/shared/validation/dates.ts`) trabajan en la hora LOCAL del proceso, y ni `.env.example`
+ni `server.ts` ni los jobs fijan `TZ`. Con el servidor en UTC (lo típico en un contenedor o en
+Render): a las 22 hs de Argentina una campaña que «empieza hoy» se rechaza por fecha pasada, y
+el cron de campañas (spec 026) finaliza unas 3 horas antes las que terminan «hoy». Es un
+patrón de todo el proyecto (fecha de nacimiento, visitas médicas); campañas es el primer
+módulo donde el cron lo vuelve visible.
+
+**Cómo se arregla.** Fijar `TZ=America/Argentina/Buenos_Aires` en el entorno del servidor y
+del cron (y sumarlo a `.env.example` y a la guía de despliegue), o poner
+`process.env.TZ` al principio de `server.ts` y de cada entrypoint de `src/jobs/`.
+
+## 37. Sin webhook de Mercado Pago: la confirmación tardía espera al cron — Baja
+
+**Qué pasa.** La spec 027 confirma las donaciones consultando `/v1/payments/search`: en el
+momento de «Terminar donación» y después cada 5 minutos con el cron
+`conciliar-donaciones-mp`. Si la transferencia se acredita después de que el adoptante tocó
+el botón (una transferencia bancaria demorada), la donación se ve Pendiente hasta la próxima
+corrida.
+
+**Cómo se arregla.** Suscribir la aplicación al webhook de pagos de Mercado Pago (evento
+`payment`, validando la firma `x-signature`) y conciliar el grupo de ese pago al recibirlo. El
+cron queda como respaldo. Necesita una URL pública estable.
+
+## 38. Las donaciones desde otro banco o billetera no se confirman solas — Media
+
+**Qué pasa.** En una transferencia desde otro banco o billetera a la cuenta de Mercado Pago del
+refugio (Naranja X, por ejemplo), la API de Mercado Pago informa como pagador al dueño de la
+cuenta que recibe, no al que transfirió (spec 027 §9, decisión 8). Sin el DNI del que
+transfirió no hay match, así que esas donaciones (`origen = OTRO_BANCO`) las confirma el
+refugio a mano.
+
+**Cómo se arregla.** Montos con centavos únicos: al elegir «Otro banco», la app le indica al
+donante un monto exacto con centavos que ninguna otra donación pendiente de ese refugio esté
+usando (por ejemplo, $2.000,37), y un ingreso por ese monto exacto confirma la donación sin
+necesitar el DNI. Cambia el flujo de «Donar» (el monto se reserva antes de transferir).
+
+## 39. Notificaciones de Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica y Soporte — pausado a propósito
 
 **Qué pasa.** La spec 004 (Notificaciones) implementa el servicio central `notificar(...)`,
 la bandeja y los escenarios de "Fase 1" del documento fuente del módulo (Cuenta, Solicitudes,
@@ -714,7 +781,7 @@ función `notificar(...)`): agregar estos escenarios es, en cada módulo nuevo, 
 de 3-6 líneas que ya se usa en `solicitudes`/`seguimiento`/`chats` — no hace falta rediseñar
 nada, solo enganchar el módulo dueño cuando exista.
 
-## 35. `usuarios.repository.ts` usa un `PrismaClient` distinto al del resto del proyecto — Media
+## 40. `usuarios.repository.ts` usa un `PrismaClient` distinto al del resto del proyecto — Media
 
 **Qué pasa.** `src/modules/usuarios/usuarios.repository.ts` importa `prisma` desde
 `config/prisma.ts`, un `PrismaClient` propio, en vez de la instancia única de

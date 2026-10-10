@@ -55,7 +55,7 @@ Dos frontends distintos consumiendo **una única API REST** de este backend. El 
 8. **Historia clínica inmutable**: nunca se edita un registro persistido; baja lógica + alta de uno nuevo.
 9. **Seguimiento post-adopción anti-fraude**: la foto debe venir de la cámara nativa, bloqueando galería (regla de frontend mobile, pero el backend no debe asumir que toda imagen recibida es confiable).
 10. **Cron jobs** con usuario "SISTEMA": solicitudes "Pendiente" > 6 meses → baja automática; campañas "Inactiva"→"Activa" al llegar `fecha_inicio`, →"Finalizada" al llegar `fecha_fin` o alcanzar el monto objetivo.
-11. **Donaciones**: el monto declarado NUNCA impacta la barra de progreso automáticamente, solo cuando el refugio confirma manualmente.
+11. **Donaciones**: el monto declarado suma a la barra de progreso sólo cuando se confirma la transferencia: automáticamente con Mercado Pago (monto + DNI del donante) si el refugio lo vinculó, o a mano por el refugio (spec 027, decisión del equipo 2026-09-30).
 12. **CSV (import/export masivo)** siempre por streams, nunca cargar el archivo completo en memoria.
 
 ## Comandos

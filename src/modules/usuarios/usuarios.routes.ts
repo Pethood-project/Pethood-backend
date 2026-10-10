@@ -6,6 +6,7 @@ import { validar } from '../../middlewares/validar';
 import * as controller from './usuarios.controller';
 import {
   actualizarPerfilBodySchema,
+  cargarDniBodySchema,
   actualizarUbicacionBodySchema,
   cambiarPasswordBodySchema,
   previewUbicacionBodySchema,
@@ -22,6 +23,8 @@ usuariosRouter.patch(
   validar(actualizarPerfilBodySchema),
   controller.actualizarMe,
 );
+// Carga única del DNI (spec 027): con DNI ya cargado responde DNI_YA_CARGADO.
+usuariosRouter.patch('/me/dni', autenticar, validar(cargarDniBodySchema), controller.cargarDni);
 usuariosRouter.patch(
   '/me/password',
   autenticar,

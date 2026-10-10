@@ -38,6 +38,14 @@ export function listarEstadosAnimalPerdido() {
   });
 }
 
+export function listarEstadosCampania() {
+  return prisma.estadoCampania.findMany({
+    where: { fechaBaja: null },
+    select: { id: true, nombre: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
 export function listarEstadosMascota() {
   return prisma.estadoMascota.findMany({
     where: { fechaBaja: null },

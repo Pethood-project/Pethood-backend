@@ -121,3 +121,16 @@ export function validarFechaFutura(
 
   return { valida: true, fecha };
 }
+
+/** Fecha de algo planificado (inicio de una campaña): existente y de hoy en adelante. */
+export function validarFechaNoPasada(
+  valor: string | Date | null | undefined,
+  etiqueta: string,
+): ResultadoFecha {
+  const fecha = parsearFecha(valor);
+
+  if (!fecha) return { valida: false, error: `${etiqueta} no es válida` };
+  if (esPasada(fecha)) return { valida: false, error: `${etiqueta} no puede ser anterior a hoy` };
+
+  return { valida: true, fecha };
+}

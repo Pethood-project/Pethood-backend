@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
-import { textoOpcionalSchema, textoSchema } from '../../shared/validation/schemas';
+import { dniSchema, textoOpcionalSchema, textoSchema } from '../../shared/validation/schemas';
 import { ROL_API } from '../../shared/roles';
 
 export const nombrePersonaSchema = z
@@ -42,11 +42,9 @@ export const registroBodySchema = z.object({
     .trim()
     .regex(/^\d{2}\/\d{2}\/\d{4}$/, 'La fecha de nacimiento debe tener el formato DD/MM/AAAA.'),
   telefono: telefonoSchema,
-  dni: z
-    .string()
-    .trim()
-    .regex(/^\d{7,8}$/, 'El DNI debe tener 7 u 8 dígitos numéricos.')
-    .optional(),
+  // Obligatorio (HU-1.1): es la identidad que valida el admin y la que confirma las
+  // donaciones por Mercado Pago (spec 027).
+  dni: dniSchema(),
   // Dirección estructurada opcional que se geocodifica al crear la cuenta (node-geocoder).
   provincia: textoOpcionalSchema({
     max: LIMITES.usuario.provincia.max,
