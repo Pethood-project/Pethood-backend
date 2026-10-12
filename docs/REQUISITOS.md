@@ -132,6 +132,8 @@ Motor de eventos asíncronos: push + posible email, disparado por eventos de Sol
 
 Chats habilitados exclusivamente entre adoptante↔refugio, o entre adoptantes en el caso de coordinación de mascotas perdidas.
 
+**Nota (2026-10-12): responder y eliminar mensajes.** Por pedido del equipo, con WhatsApp como referencia, la sala suma dos funciones que el documento fuente no tiene como HU: **responder un mensaje puntual** (se desliza la burbuja y la respuesta lo cita) y **eliminar un mensaje propio**, para los dos participantes y sin límite de tiempo (queda el aviso "Se eliminó este mensaje"). La segunda **contradice la nota del documento fuente** "El mensaje solo va a tener alta": se resolvió con baja lógica, así que la fila nunca se borra y moderación la sigue viendo. Ver `MODELO_DATOS.md` (Mensaje) y `api-chat-sala.md`. En la misma fecha se sacaron de la hoja "Enviar en el chat" las opciones "Enviar solicitud" y "Coordinar visita".
+
 ### Módulo 6: Publicación de Mascotas
 
 - **HU-6.1 Crear mascota** (propia o para publicar en adopción). Ver detalle completo de validaciones en sección 7 de este documento — es la HU más rica en reglas de UI/validación de todo el relevamiento.

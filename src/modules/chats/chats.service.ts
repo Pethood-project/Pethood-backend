@@ -45,7 +45,9 @@ import type {
   HistorialQuery,
   LeidosDto,
   ListaChatsDto,
+  MensajeCitadoDto,
   MensajeDto,
+  MensajeEliminadoDto,
   SolicitudEnChatDto,
 } from './chats.dto';
 import * as repo from './chats.repository';
@@ -130,6 +132,10 @@ function aConversacion(
   // Una sala sin mensajes se ordena por su fecha de creación: es lo último que pasó en ella.
   const orden = ultimo?.fechaAlta ?? chat.fechaAlta;
 
+  // Un último mensaje eliminado no muestra nada de lo que decía, igual que en la sala.
+  const eliminado = ultimo?.fechaBaja != null;
+  const imagenUrl = eliminado ? null : (ultimo?.imagenUrl ?? null);
+
   return {
     orden,
     conversacion: {
@@ -137,12 +143,13 @@ function aConversacion(
       contacto,
       ultimoMensaje: ultimo
         ? {
-            contenido: ultimo.contenido,
+            contenido: eliminado ? '' : ultimo.contenido,
             fecha: ultimo.fechaAlta.toISOString(),
             esMio: ultimo.usuarioId === usuarioId,
-            tieneImagen: ultimo.imagenUrl !== null,
-            tieneVideo: ultimo.imagenUrl !== null && tipoDeUrl(ultimo.imagenUrl) === 'VIDEO',
+            tieneImagen: imagenUrl !== null,
+            tieneVideo: imagenUrl !== null && tipoDeUrl(imagenUrl) === 'VIDEO',
             tipo: ultimo.tipo,
+            eliminado,
           }
         : null,
       noLeidos: noLeidos.get(chat.id) ?? 0,
@@ -274,6 +281,16 @@ interface MarcaParticipante {
   ultimaEntrega: Date | null;
 }
 
+/** El mensaje citado por una respuesta, como lo trae el `include` del repository. */
+interface CitaFila {
+  id: number;
+  usuarioId: number;
+  contenido: string;
+  imagenes: string[];
+  tipo: TipoMensaje;
+  fechaBaja: Date | null;
+}
+
 /** La fila de `mensaje` que este módulo devuelve al cliente. */
 interface MensajeFila {
   id: number;
@@ -286,6 +303,38 @@ interface MensajeFila {
   animalPerdidoId: number | null;
   usuarioId: number;
   fechaAlta: Date;
+  /** Opcionales: las filas que no pasan por el `include` de la cita (tarjetas) no los traen. */
+  fechaBaja?: Date | null;
+  mensajeRespondido?: CitaFila | null;
+}
+
+/**
+ * Lo que la respuesta muestra del mensaje citado. Si el citado se eliminó, la cita lo dice y
+ * no lleva nada de lo que decía: ni el texto ni la miniatura.
+ */
+function aCita(cita: CitaFila): MensajeCitadoDto {
+  if (cita.fechaBaja !== null) {
+    return { id: cita.id, usuarioId: cita.usuarioId, contenido: '', adjunto: null, eliminado: true };
+  }
+
+  const adjuntos = clasificarAdjuntos(cita.imagenes);
+  const primero = adjuntos[0];
+
+  return {
+    id: cita.id,
+    usuarioId: cita.usuarioId,
+    contenido: cita.contenido,
+    adjunto: primero
+      ? {
+          tipo: primero.tipo,
+          cantidad: adjuntos.length,
+          // Firmada como cualquier adjunto de la sala. Un video no tiene miniatura: el
+          // servidor no genera fotogramas.
+          miniaturaUrl: primero.tipo === 'IMAGEN' ? firmarUrlArchivo(primero.url) : null,
+        }
+      : null,
+    eliminado: false,
+  };
 }
 
 /**
@@ -333,16 +382,21 @@ function aMensajeDto(
   solicitud: SolicitudEnChatDto | null,
   aviso: AvisoEnChatDto | null = null,
 ): MensajeDto {
+  // Un mensaje eliminado viaja vacío: el hecho sí, nada de lo que decía. Tampoco sus
+  // adjuntos, porque con la URL firmada en la mano se podrían seguir abriendo hasta que venza.
+  const eliminado = mensaje.fechaBaja != null;
+  const imagenes = eliminado ? [] : mensaje.imagenes;
+
   return {
     id: mensaje.id,
     chatId: mensaje.chatId,
-    contenido: mensaje.contenido,
+    contenido: eliminado ? '' : mensaje.contenido,
     // Los adjuntos de una conversación son privados: la URL sale firmada y vence. El tipo se
     // clasifica ANTES de firmar, porque la firma le agrega query params y `tipoDeUrl` mira la
     // extensión del final.
-    imagenUrl: firmarUrlArchivo(mensaje.imagenUrl),
-    imagenes: firmarUrlsArchivo(mensaje.imagenes),
-    adjuntos: clasificarAdjuntos(mensaje.imagenes).map((adjunto) => ({
+    imagenUrl: eliminado ? null : firmarUrlArchivo(mensaje.imagenUrl),
+    imagenes: firmarUrlsArchivo(imagenes),
+    adjuntos: clasificarAdjuntos(imagenes).map((adjunto) => ({
       ...adjunto,
       url: firmarUrlArchivo(adjunto.url) ?? adjunto.url,
     })),
@@ -360,6 +414,10 @@ function aMensajeDto(
       mensaje.tipo === 'ANIMAL_PERDIDO' && aviso !== null && aviso.id === mensaje.animalPerdidoId
         ? aviso
         : null,
+    eliminado,
+    // Un eliminado tampoco muestra a qué respondía: en su lugar va sólo el aviso.
+    respondeA:
+      eliminado || !mensaje.mensajeRespondido ? null : aCita(mensaje.mensajeRespondido),
     fechaAlta: mensaje.fechaAlta.toISOString(),
   };
 }
@@ -604,6 +662,25 @@ export async function listarHistorial(
   };
 }
 
+/**
+ * Guard del mensaje que se cita al responder: tiene que ser de ESTA sala y de tipo TEXTO.
+ *
+ * Un id de otra sala dejaría leer, a través de la cita, un pedazo de una conversación ajena.
+ * Las tarjetas (`SOLICITUD`, `ANIMAL_PERDIDO`) no se responden: no las escribió nadie de la
+ * sala, y la cita no tendría qué mostrar.
+ *
+ * Un mensaje ya eliminado SÍ se acepta: el otro pudo eliminarlo mientras se escribía la
+ * respuesta, y rechazarla haría perder lo escrito. La cita va a decir "Se eliminó este
+ * mensaje", que es exactamente lo que pasó.
+ */
+async function exigirMensajeRespondible(chatId: number, mensajeId: number): Promise<void> {
+  const citado = await repo.buscarMensajeDeChat(chatId, mensajeId);
+
+  if (!citado || citado.tipo !== 'TEXTO') {
+    throw new AppError('RESPUESTA_INVALIDA', 'No podés responder a ese mensaje', 400);
+  }
+}
+
 export interface ContextoEnvio {
   usuarioId: number;
   chatId: number;
@@ -683,6 +760,10 @@ export async function enviarMensaje(
     );
   }
 
+  if (datos.respondeAId !== undefined) {
+    await exigirMensajeRespondible(contexto.chatId, datos.respondeAId);
+  }
+
   // En paralelo y en orden: `guardarImagenes` conserva la posición de cada archivo, que es
   // la que el cliente ve en la grilla.
   const imagenes = archivos.length === 0 ? [] : await guardarImagenes(archivos, SUBCARPETA_FOTOS);
@@ -694,6 +775,7 @@ export async function enviarMensaje(
       usuarioId: contexto.usuarioId,
       contenido: datos.contenido,
       imagenes,
+      mensajeRespondidoId: datos.respondeAId ?? null,
     });
   } catch (err) {
     // No dejar las fotos huérfanas si la escritura en base falló.
@@ -719,6 +801,55 @@ export async function enviarMensaje(
   });
 
   return dto;
+}
+
+/**
+ * El autor elimina un mensaje que mandó: baja lógica y aviso a la sala.
+ *
+ * **Para todos y sin límite de tiempo** (decisión del 2026-10-12). En el historial de los dos
+ * queda el aviso "Se eliminó este mensaje" en vez de la burbuja; la fila sigue en la base con
+ * su contenido, que es lo que permite que un reporte previo se siga pudiendo moderar.
+ *
+ * Sólo los propios: un mensaje ajeno se reporta, no se borra. Eso cubre también las tarjetas,
+ * que las emite SISTEMA y no son de nadie de la sala. Eliminar no depende de que el contacto
+ * siga activo —retirar lo que uno dijo no es escribirle—.
+ *
+ * Idempotente: eliminar algo ya eliminado (un doble toque, un reintento) responde lo mismo
+ * sin volver a escribir ni a despertar a nadie.
+ *
+ * Lo que no se puede deshacer es la push: si el mensaje ya se había notificado, la vista
+ * previa quedó en el celular del otro. La bandeja sólo guarda "Nuevo mensaje de X", sin texto.
+ */
+export async function eliminarMensaje(
+  usuarioId: number,
+  chatId: number,
+  mensajeId: number,
+): Promise<MensajeEliminadoDto> {
+  const sala = await exigirSala(usuarioId, chatId);
+  const mensaje = await repo.buscarMensajeDeChat(chatId, mensajeId);
+
+  // Un id de otra sala se trata como inexistente en ésta, igual que el cursor del historial.
+  if (!mensaje) {
+    throw new AppError('MENSAJE_NO_ENCONTRADO', 'El mensaje no existe', 404);
+  }
+
+  if (mensaje.usuarioId !== usuarioId || mensaje.tipo !== 'TEXTO') {
+    throw new AppError('MENSAJE_AJENO', 'Sólo podés eliminar los mensajes que enviaste vos', 403);
+  }
+
+  const resultado = { chatId, mensajeId };
+
+  if (mensaje.fechaBaja !== null) return resultado;
+
+  await repo.darDeBajaMensaje(mensajeId, usuarioId);
+
+  // A todos, incluido el autor: sus otros dispositivos también tienen que cambiar la burbuja.
+  emisor.emitirMensajeEliminado(resultado, [
+    usuarioId,
+    ...sala.chat.participantes.map((participante) => participante.usuarioId),
+  ]);
+
+  return resultado;
 }
 
 /**

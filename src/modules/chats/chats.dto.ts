@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
 import { idSchema, textoOpcionalNoNuloSchema } from '../../shared/validation/schemas';
-import type { AdjuntoMensaje } from '../../shared/adjuntos';
+import type { AdjuntoMensaje, TipoAdjunto } from '../../shared/adjuntos';
 
 /**
  * El otro lado de la conversación, YA RESUELTO por el backend.
@@ -59,6 +59,11 @@ export interface UltimoMensajeDto {
    * y el cliente pone el texto ("Solicitud", "Mascota perdida"), igual que con la foto.
    */
   tipo: 'TEXTO' | 'SOLICITUD' | 'ANIMAL_PERDIDO';
+  /**
+   * El autor lo eliminó. Viaja con `contenido` vacío y sin adjuntos: el texto ("Se eliminó
+   * este mensaje") lo pone el cliente, igual que con la foto o la tarjeta.
+   */
+  eliminado: boolean;
 }
 
 /**
@@ -156,8 +161,48 @@ export interface MensajeDto {
   solicitud: SolicitudEnChatDto | null;
   /** Sólo en los de tipo `ANIMAL_PERDIDO` (HU-13.2). */
   aviso: AvisoEnChatDto | null;
+  /**
+   * El autor lo eliminó. El mensaje sigue en el historial —en su lugar la sala pinta "Se
+   * eliminó este mensaje"— pero viaja vacío: `contenido` en `""`, sin adjuntos y sin cita. No
+   * alcanza con esconderlo en el cliente: con la URL firmada en la mano, el otro podría seguir
+   * abriendo la foto hasta que venza.
+   */
+  eliminado: boolean;
+  /** El mensaje al que éste responde, ya resumido para la cita, o `null` si no responde a nada. */
+  respondeA: MensajeCitadoDto | null;
   /** ISO 8601 crudo. La hora la formatea el cliente. */
   fechaAlta: string;
+}
+
+/**
+ * Lo que la burbuja que responde muestra del mensaje citado (deslizar para responder).
+ *
+ * Es un resumen y no el mensaje entero, por lo mismo que la solicitud embebida: la cita pinta
+ * una línea de texto y, como mucho, una miniatura. Si el citado se eliminó después, la cita lo
+ * dice (`eliminado`) y no muestra nada de lo que decía.
+ */
+export interface MensajeCitadoDto {
+  id: number;
+  /** Autor del citado. Si dice "Vos" o el nombre del contacto lo decide el cliente. */
+  usuarioId: number;
+  /** Sin truncar. Vacío si el citado era sólo adjuntos o si se eliminó. */
+  contenido: string;
+  /**
+   * Qué adjuntos llevaba, para el "Foto" / "Video" de la cita, o `null` si ninguno.
+   * `miniaturaUrl` es la primera foto, firmada; un video no tiene miniatura (el servidor no
+   * genera fotogramas), así que va `null` y el cliente pone el ícono.
+   */
+  adjunto: { tipo: TipoAdjunto; cantidad: number; miniaturaUrl: string | null } | null;
+  eliminado: boolean;
+}
+
+/**
+ * Respuesta de eliminar un mensaje, y payload del evento `chat:mensaje-eliminado`: con el id
+ * alcanza para que cada cliente reemplace la burbuja por el aviso, sin pedir nada más.
+ */
+export interface MensajeEliminadoDto {
+  chatId: number;
+  mensajeId: number;
 }
 
 /**
@@ -331,12 +376,16 @@ export type HistorialQuery = z.infer<typeof historialQuerySchema>;
  *
  * Las fotos no se declaran acá: viajan como multipart y las valida el middleware de upload
  * (formato, peso y cantidad), no Zod.
+ *
+ * `respondeAId` es el mensaje que se cita al responder. Acá sólo se valida que sea un id: que
+ * exista, que sea de esta sala y que se pueda responder lo decide el service.
  */
 export const enviarMensajeSchema = z.object({
   contenido: textoOpcionalNoNuloSchema({
     max: LIMITES.mensaje.contenido.max,
     etiqueta: 'El mensaje',
   }),
+  respondeAId: idSchema('El mensaje que respondés').optional(),
 });
 
 export type EnviarMensajeDto = z.infer<typeof enviarMensajeSchema>;
