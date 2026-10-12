@@ -35,6 +35,7 @@
  * como siempre.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { posix } from 'node:path';
 
 import { env } from '../config/env';
 import { RUTA_PUBLICA_ARCHIVOS } from './storage';
@@ -78,8 +79,28 @@ function calcularFirma(rutaRelativa: string, exp: number): string {
 
 /** `true` si esa ruta cae en una subcarpeta privada. Espera la ruta SIN el prefijo público. */
 export function esRutaPrivada(rutaRelativa: string): boolean {
-  const primerTramo = rutaRelativa.replace(/^\/+/, '').split('/')[0];
+  const primerTramo = rutaRelativa.replace(/^\/+/, '').split('/')[0]?.toLowerCase();
   return primerTramo !== undefined && NAMESPACES_PRIVADOS.has(primerTramo);
+}
+
+/**
+ * Ruta decodificada y **ya normalizada**, o `null` si el request trae segmentos `.`/`..`, `//`
+ * o un escape inválido.
+ *
+ * Existe porque `express.static` normaliza DESPUÉS de que el middleware de firma decidió con el
+ * primer tramo: `/perfiles/../documentos-identidad/x.jpg` parecía pública, pasaba sin firma y
+ * el estático la resolvía a la carpeta privada. Ninguna URL legítima (`firmarUrlArchivo`) trae
+ * esos segmentos, así que se rechaza todo lo que no sea idéntico a su forma normalizada.
+ */
+export function normalizarRutaArchivo(rutaCruda: string): string | null {
+  let ruta: string;
+  try {
+    ruta = decodeURIComponent(rutaCruda);
+  } catch {
+    return null;
+  }
+  if (ruta.includes('\0') || ruta.includes('\\') || posix.normalize(ruta) !== ruta) return null;
+  return ruta;
 }
 
 /**

@@ -804,4 +804,5 @@ y el DNI de la gente quedaría accesible con solo tener el link.
 
 **Cómo se arregla.** Borrar el archivo anterior con `borrarImagen` al reemplazar (o cron de
 limpieza), y resolver el ítem 14 **antes** de activar R2 en producción: esto sube la urgencia, ya
-no son fotos de mascotas.
+no son fotos de mascotas. Con R2 hay que servir `documentos-identidad/` desde un bucket
+**privado** y firmar con `getSignedUrl` al leer; `R2_PUBLIC_BASE_URL` es público y permanente.
