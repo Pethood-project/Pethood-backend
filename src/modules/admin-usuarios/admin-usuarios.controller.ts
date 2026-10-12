@@ -39,7 +39,7 @@ export async function obtenerUsuario(
   next: NextFunction,
 ): Promise<void> {
   try {
-    res.json(await service.obtenerDetalleUsuario(idDeParametro(req)));
+    res.json(await service.obtenerDetalleUsuario(req.usuario!.usuarioId, idDeParametro(req)));
   } catch (err) {
     next(err);
   }
@@ -53,6 +53,24 @@ export async function verificarUsuario(
   try {
     const usuario = await service.verificarUsuario(req.usuario!.usuarioId, idDeParametro(req));
     res.json({ mensaje: 'Usuario verificado.', usuario });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function revocarVerificacion(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { motivo } = req.body as MotivoBody;
+    const usuario = await service.revocarVerificacion(
+      req.usuario!.usuarioId,
+      idDeParametro(req),
+      motivo,
+    );
+    res.json({ mensaje: 'Verificación revocada.', usuario });
   } catch (err) {
     next(err);
   }

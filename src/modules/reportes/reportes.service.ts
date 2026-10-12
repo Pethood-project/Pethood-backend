@@ -242,12 +242,13 @@ async function cargarObjeto(
       );
     }
     case 'MENSAJE': {
-      const o = await repo.BUSCAR_OBJETO.MENSAJE(id);
+      const o = await repo.BUSCAR_OBJETO.MENSAJE(id, incluirBajas);
       // Los mensajes SOLICITUD los emite el sistema: no se reportan.
       if (!o || o.tipo !== 'TEXTO') return null;
       return {
         etiqueta: recortar(o.contenido || 'Mensaje con imágenes'),
-        estado: 'ACTIVO',
+        // DE_BAJA si su autor lo eliminó después del reporte.
+        estado: estadoDe(o.fechaBaja),
         imagenUrl: null,
         usuarioId: o.usuarioId,
         refugioId: null,

@@ -148,6 +148,36 @@ export async function actualizarPerfil(
   }
 }
 
+/**
+ * Reemplaza el DNI y/o la selfie (spec 002.1). No toca `verificado` ni el estado.
+ *
+ * El estado se exige en el propio `where` y no sólo en el service: entre el chequeo y la
+ * escritura una cuenta puede pasar a Suspendido/Inactivo. Si ya no califica, Prisma lanza
+ * P2025 y se devuelve `null`.
+ */
+export async function actualizarDocumentos(
+  usuarioId: number,
+  datos: { dniImagenUrl?: string; selfieUrl?: string },
+  estadosPermitidos: string[],
+): Promise<UsuarioPerfil | null> {
+  try {
+    return await prisma.usuario.update({
+      where: { id: usuarioId, fechaBaja: null, estado: { nombre: { in: estadosPermitidos } } },
+      data: {
+        ...(datos.dniImagenUrl ? { dniImagenUrl: datos.dniImagenUrl } : {}),
+        ...(datos.selfieUrl ? { selfieUrl: datos.selfieUrl } : {}),
+        ...datosModificacion(usuarioId),
+      },
+      include: includePerfil,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export interface DatosUbicacion {
   mapaUrl: string;
   latitud: number;

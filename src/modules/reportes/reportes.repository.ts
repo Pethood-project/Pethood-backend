@@ -221,11 +221,19 @@ export const BUSCAR_OBJETO = {
         donaciones: { where: { fechaBaja: null }, select: { monto: true } },
       },
     }),
-  // `Mensaje` no tiene baja lógica (solo alta): no hay `fechaBaja` que filtrar.
-  MENSAJE: (id: number) =>
+  // La baja de un mensaje es la de su autor al eliminarlo: para reportar ya no existe (en la
+  // sala sólo queda el aviso), pero el admin lo sigue viendo entero con `incluirBajas`.
+  MENSAJE: (id: number, incluirBajas: boolean) =>
     prisma.mensaje.findFirst({
-      where: { id },
-      select: { id: true, contenido: true, tipo: true, usuarioId: true, chatId: true },
+      where: { id, ...vigente(incluirBajas) },
+      select: {
+        id: true,
+        contenido: true,
+        tipo: true,
+        usuarioId: true,
+        chatId: true,
+        fechaBaja: true,
+      },
     }),
 } as const;
 
@@ -267,6 +275,8 @@ export async function ventanaDeMensajes(chatId: number, mensajeId: number, taman
     contenido: true,
     imagenes: true,
     fechaAlta: true,
+    // El contexto muestra los eliminados enteros: el admin tiene que saber cuáles lo fueron.
+    fechaBaja: true,
     usuario: { select: PERSONA },
   } as const;
 

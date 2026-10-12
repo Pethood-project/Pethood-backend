@@ -40,7 +40,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 
 ### Usuario
 
-`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, `usuario_dni_imagen_url` y `usuario_selfie_url` (nullable, privadas — URL firmada; spec 002.1), FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
 
 **Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de perfil):** `usuario_provincia`, `usuario_localidad`, `usuario_calle_altura` (texto, nullable — dirección estructurada que carga el usuario), `usuario_mapa_url` (texto, nullable — URL de Google Maps generada al geocodificar), `usuario_latitud` / `usuario_longitud` (`Float`, nullable — coordenadas resultantes) y `usuario_ubicacion_verificada` (boolean — si el usuario confirmó que el link apunta a su dirección). El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Las coordenadas se guardan aparte de la URL para calcular la distancia al refugio con Haversine (`distanciaKm`, `src/shared/geo.ts`) sin parsear el link. La geocodificación la hace `src/shared/geocoding.ts` con `node-geocoder` (proveedor `openstreetmap` por defecto o `google`, ver `GEOCODER_PROVIDER`/`GEOCODER_API_KEY`).
 
@@ -213,7 +213,7 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 
 ### Mensaje
 
-`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD` | `ANIMAL_PERDIDO`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable).
+`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD` | `ANIMAL_PERDIDO`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable), FK `mensaje_respondido_id` (nullable, autorreferencia a `mensaje`), `mensaje_usuario_baja` y `mensaje_fecha_baja` (nullable).
 
 - **`mensaje_leido` quedó obsoleto.** Lo reemplazan las marcas de `Usuario_Chat`. Se sigue poblando para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo.
 - **`mensaje_imagen_url` es la PRIMERA de `mensaje_imagenes`**, desnormalizada para que el preview del listado no tenga que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`. Un mensaje admite hasta 5 fotos (`LIMITES.mensaje.fotos.maximo`).
@@ -221,7 +221,9 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 - **`mensaje_tipo = ANIMAL_PERDIDO`** (HU-13.2) es lo mismo con la tarjeta del aviso reclamado: la emite SISTEMA, lleva `animal_perdido_id` y su contenido va vacío. Índice único parcial sobre `(animal_perdido_id, chat_id) WHERE animal_perdido_id IS NOT NULL`: una tarjeta por aviso y por sala, y es el equivalente del índice de `chat.solicitud_id`.
 - **Resolver un aviso no deja ningún mensaje.** Se evaluó una línea de sistema "Volvió con su dueño" en la sala y se descartó junto con el cierre de la conversación (spec 024 §9, decisión 2): la leyenda vive en el portal, que es donde el aviso se mira.
 
-**Nota de auditoría — excepción:** el mensaje **solo tiene alta**, no baja (consistente con la nota del documento de requisitos: "El mensaje solo va a tener alta, y el chat va a tener alta y baja"). No implementar endpoint de borrado de mensaje individual.
+- **`mensaje_respondido_id`** es el mensaje que éste cita (deslizar para responder). Siempre de la misma sala y de tipo `TEXTO`: lo valida el service, la base no lo puede expresar.
+
+**Nota de auditoría — excepción (cambiada el 2026-10-12):** el mensaje tiene **alta y baja lógica, sin modificación**. Hasta esa fecha era "solo alta", siguiendo la nota del documento de requisitos ("El mensaje solo va a tener alta, y el chat va a tener alta y baja"); el equipo decidió que el autor pueda **eliminar un mensaje propio**, para los dos participantes y sin límite de tiempo. La baja es lógica como en el resto del modelo: la fila y sus adjuntos se conservan —moderación los sigue viendo si alguien lo había reportado— y a la sala la API le manda sólo el aviso "Se eliminó este mensaje", sin contenido ni adjuntos. Sólo el autor da de baja (`mensaje_usuario_baja` es siempre él) y nunca un mensaje de sistema. Contrato en `api-chat-sala.md`.
 
 ### Notificacion
 

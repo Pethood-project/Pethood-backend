@@ -7,7 +7,10 @@ import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocod
 import { resolverCoordenadasDeMapsUrl } from '../../shared/geo';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import { estaBloqueado, registrarFallo } from '../../shared/rateLimit';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
+import { borrarImagenes, guardarImagen } from '../../shared/storage';
+import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import type { ArchivoSubida } from '../../shared/r2';
 import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
@@ -50,6 +53,11 @@ function aPerfil(
     longitud: usuario.longitud,
     ubicacionVerificada: usuario.ubicacionVerificada,
     imagenUrl: usuario.imagenUrl,
+    verificado: usuario.verificado,
+    documentos: {
+      dniImagenUrl: firmarUrlArchivo(usuario.dniImagenUrl),
+      selfieUrl: firmarUrlArchivo(usuario.selfieUrl),
+    },
     roles: rolesDbAApi(nombresDeRol(usuario)),
     refugio: aRefugioDeSesion(usuario.refugio),
     tienePassword: Boolean(usuario.contrasena),
@@ -128,6 +136,93 @@ export async function actualizarPerfil(
   });
 
   return armarPerfil(actualizado, ambito);
+}
+
+const SUBCARPETA_DOCUMENTOS = 'documentos-identidad';
+
+export interface ArchivosDocumentos {
+  dni_imagen?: ArchivoSubida[];
+  selfie?: ArchivoSubida[];
+}
+
+/**
+ * Sube o reemplaza el DNI y/o la selfie (spec 002.1). No cambia `verificado` ni el estado:
+ * solo deja la evidencia lista para que un admin decida con `PATCH /admin/usuarios/:id/verificar`.
+ */
+export async function subirDocumentos(usuarioId: number, archivos: ArchivosDocumentos) {
+  const dni = archivos.dni_imagen?.[0];
+  const selfie = archivos.selfie?.[0];
+  if (!dni && !selfie) {
+    throw new AppError('VALIDACION', 'Subí la foto del DNI y/o la selfie.', 400);
+  }
+
+  // Tope de subidas por usuario (5 cada 15 min, el mismo contador en memoria que el login):
+  // cada request son hasta 2 x 5 MB y los reemplazos dejan archivos huérfanos (deuda #41).
+  const claveLimite = `documentos:${usuarioId}`;
+  if (estaBloqueado(claveLimite)) {
+    throw new AppError(
+      'DEMASIADOS_INTENTOS',
+      'Subiste documentación muchas veces seguidas. Probá de nuevo en unos minutos.',
+      429,
+    );
+  }
+  registrarFallo(claveLimite);
+
+  const actual = await repo.buscarPerfil(usuarioId);
+  if (!actual) throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
+
+  // Un usuario verificado no reemplaza sus documentos: la aprobación del admin quedaría
+  // apuntando a archivos distintos de los que revisó. Cambiarlos pasa por un admin.
+  if (actual.verificado) {
+    throw new AppError(
+      'USUARIO_YA_VERIFICADO',
+      'Tu identidad ya está verificada. Si necesitás cambiar tus documentos, escribinos a soporte.',
+      409,
+    );
+  }
+
+  const estadosPermitidos: string[] = [ESTADO_USUARIO.PENDIENTE, ESTADO_USUARIO.ACTIVO];
+  const sinPermiso = new AppError(
+    'CUENTA_NO_ACTIVA',
+    'Tu cuenta no puede subir documentación.',
+    403,
+  );
+  if (!estadosPermitidos.includes(actual.estado.nombre)) throw sinPermiso;
+
+  const [dniImagenUrl, selfieUrl] = await Promise.all([
+    dni ? guardarImagen(dni, SUBCARPETA_DOCUMENTOS) : undefined,
+    selfie ? guardarImagen(selfie, SUBCARPETA_DOCUMENTOS) : undefined,
+  ]);
+  const actualizado = await repo.actualizarDocumentos(
+    usuarioId,
+    { dniImagenUrl, selfieUrl },
+    estadosPermitidos,
+  );
+  // La cuenta dejó de calificar entre el chequeo y la escritura: no queda nada referenciado.
+  if (!actualizado) {
+    await borrarImagenes([dniImagenUrl, selfieUrl].filter((u): u is string => Boolean(u)));
+    throw sinPermiso;
+  }
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'SUBIR_DOCUMENTOS',
+    entidad: 'Usuario',
+    entidadId: usuarioId,
+    // Las rutas reemplazadas quedan acá: el archivo viejo sigue en storage (no se borra) y
+    // sin esto no habría forma de volver a encontrarlo.
+    detalle: [
+      dni ? `dni=${dniImagenUrl} (antes=${actual.dniImagenUrl ?? '-'})` : null,
+      selfie ? `selfie=${selfieUrl} (antes=${actual.selfieUrl ?? '-'})` : null,
+    ]
+      .filter(Boolean)
+      .join(' '),
+  });
+
+  return {
+    dniImagenUrl: firmarUrlArchivo(actualizado.dniImagenUrl),
+    selfieUrl: firmarUrlArchivo(actualizado.selfieUrl),
+  };
 }
 
 /**

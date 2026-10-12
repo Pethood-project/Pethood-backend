@@ -106,6 +106,39 @@ export function verificarUsuario(id: number, adminId: number, estadoActivoId: nu
   });
 }
 
+/**
+ * Baja lógica de la verificación documental (spec 002.1): `verificado=false`, vuelve a
+ * Pendiente_Verificacion y se anulan las referencias a DNI y selfie. No hay DELETE físico ni
+ * se borran los archivos del storage.
+ *
+ * Exige `verificado` y estado Activo en el propio `where`: dos admins a la vez, o un cambio
+ * de estado entre el chequeo y la escritura, dan P2025 y se devuelve `null`.
+ */
+export async function revocarVerificacion(
+  id: number,
+  adminId: number,
+  estadoPendienteId: number,
+): Promise<UsuarioAdmin | null> {
+  try {
+    return await prisma.usuario.update({
+      where: { id, verificado: true, fechaBaja: null, estado: { nombre: 'Activo' } },
+      data: {
+        verificado: false,
+        estadoId: estadoPendienteId,
+        dniImagenUrl: null,
+        selfieUrl: null,
+        ...datosModificacion(adminId),
+      },
+      include: includeUsuario,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export function darDeBajaUsuario(id: number, adminId: number, estadoInactivoId: number) {
   return prisma.usuario.update({
     where: { id },

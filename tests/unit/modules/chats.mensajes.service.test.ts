@@ -427,6 +427,299 @@ describe('enviarMensaje', () => {
   });
 });
 
+describe('enviarMensaje — responder un mensaje puntual', () => {
+  /** El mensaje citado, como lo trae el `include` del repository. */
+  const citado = {
+    id: 30,
+    usuarioId: OTRO,
+    contenido: '¿Se lleva bien con otros perros?',
+    imagenes: [] as string[],
+    tipo: 'TEXTO' as const,
+    fechaBaja: null as Date | null,
+  };
+
+  const respuesta = {
+    id: 56,
+    chatId: CHAT,
+    contenido: 'Sí, convive con tres',
+    imagenUrl: null,
+    imagenes: [],
+    tipo: 'TEXTO' as const,
+    solicitudId: null,
+    usuarioId: USUARIO,
+    leido: false,
+    fechaAlta: FECHA,
+    fechaBaja: null,
+    mensajeRespondido: citado,
+  };
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue({
+      id: citado.id,
+      usuarioId: OTRO,
+      tipo: 'TEXTO',
+      fechaBaja: null,
+    });
+    vi.mocked(repo.crearMensaje).mockResolvedValue(respuesta as never);
+  });
+
+  it('guarda a qué mensaje responde', async () => {
+    await service.enviarMensaje(
+      { contenido: 'Sí, convive con tres', respondeAId: citado.id },
+      { usuarioId: USUARIO, chatId: CHAT },
+    );
+
+    expect(repo.buscarMensajeDeChat).toHaveBeenCalledWith(CHAT, citado.id);
+    expect(repo.crearMensaje).toHaveBeenCalledWith(
+      expect.objectContaining({ mensajeRespondidoId: citado.id }),
+    );
+  });
+
+  it('sin respuesta no consulta nada de más y guarda null', async () => {
+    await service.enviarMensaje({ contenido: 'Hola' }, { usuarioId: USUARIO, chatId: CHAT });
+
+    expect(repo.buscarMensajeDeChat).not.toHaveBeenCalled();
+    expect(repo.crearMensaje).toHaveBeenCalledWith(
+      expect.objectContaining({ mensajeRespondidoId: null }),
+    );
+  });
+
+  it('el DTO trae la cita resuelta', async () => {
+    const dto = await service.enviarMensaje(
+      { contenido: 'Sí, convive con tres', respondeAId: citado.id },
+      { usuarioId: USUARIO, chatId: CHAT },
+    );
+
+    expect(dto.respondeA).toEqual({
+      id: citado.id,
+      usuarioId: OTRO,
+      contenido: '¿Se lleva bien con otros perros?',
+      adjunto: null,
+      eliminado: false,
+    });
+  });
+
+  it('citar un mensaje de otra sala se rechaza sin tocar el storage', async () => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue(null);
+
+    await expect(
+      service.enviarMensaje(
+        { contenido: 'Hola', respondeAId: 999 },
+        { usuarioId: USUARIO, chatId: CHAT, archivos: [ARCHIVO] },
+      ),
+    ).rejects.toMatchObject({ codigo: 'RESPUESTA_INVALIDA', httpStatus: 400 });
+
+    expect(storage.guardarImagenes).not.toHaveBeenCalled();
+    expect(repo.crearMensaje).not.toHaveBeenCalled();
+  });
+
+  it('una tarjeta de sistema no se responde', async () => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue({
+      id: 400,
+      usuarioId: USUARIO_SISTEMA_ID,
+      tipo: 'SOLICITUD',
+      fechaBaja: null,
+    });
+
+    await expect(
+      service.enviarMensaje(
+        { contenido: 'Hola', respondeAId: 400 },
+        { usuarioId: USUARIO, chatId: CHAT },
+      ),
+    ).rejects.toMatchObject({ codigo: 'RESPUESTA_INVALIDA' });
+  });
+
+  it('un citado que se eliminó mientras se escribía se acepta, y la cita lo dice', async () => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue({
+      id: citado.id,
+      usuarioId: OTRO,
+      tipo: 'TEXTO',
+      fechaBaja: FECHA,
+    });
+    vi.mocked(repo.crearMensaje).mockResolvedValue({
+      ...respuesta,
+      mensajeRespondido: { ...citado, fechaBaja: FECHA },
+    } as never);
+
+    const dto = await service.enviarMensaje(
+      { contenido: 'Sí', respondeAId: citado.id },
+      { usuarioId: USUARIO, chatId: CHAT },
+    );
+
+    // Nada de lo que decía: sólo el hecho de que ya no está.
+    expect(dto.respondeA).toEqual({
+      id: citado.id,
+      usuarioId: OTRO,
+      contenido: '',
+      adjunto: null,
+      eliminado: true,
+    });
+  });
+
+  it('la cita de una foto dice qué era y trae la miniatura firmada', async () => {
+    vi.mocked(repo.crearMensaje).mockResolvedValue({
+      ...respuesta,
+      mensajeRespondido: { ...citado, contenido: '', imagenes: [URL_FOTO, URL_FOTO] },
+    } as never);
+
+    const dto = await service.enviarMensaje(
+      { contenido: 'Qué linda', respondeAId: citado.id },
+      { usuarioId: USUARIO, chatId: CHAT },
+    );
+
+    expect(dto.respondeA?.adjunto).toMatchObject({ tipo: 'IMAGEN', cantidad: 2 });
+    expect(dto.respondeA?.adjunto?.miniaturaUrl?.startsWith(`${URL_FOTO}?exp=`)).toBe(true);
+  });
+
+  it('la cita de un video no tiene miniatura: el servidor no genera fotogramas', async () => {
+    vi.mocked(repo.crearMensaje).mockResolvedValue({
+      ...respuesta,
+      mensajeRespondido: { ...citado, contenido: '', imagenes: [URL_VIDEO] },
+    } as never);
+
+    const dto = await service.enviarMensaje(
+      { contenido: 'Jaja', respondeAId: citado.id },
+      { usuarioId: USUARIO, chatId: CHAT },
+    );
+
+    expect(dto.respondeA?.adjunto).toEqual({ tipo: 'VIDEO', cantidad: 1, miniaturaUrl: null });
+  });
+});
+
+describe('eliminarMensaje', () => {
+  const PROPIO = { id: 30, usuarioId: USUARIO, tipo: 'TEXTO' as const, fechaBaja: null };
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue(PROPIO);
+    vi.mocked(repo.darDeBajaMensaje).mockResolvedValue({ id: PROPIO.id } as never);
+  });
+
+  it('da de baja el mensaje propio y responde con su id', async () => {
+    await expect(service.eliminarMensaje(USUARIO, CHAT, PROPIO.id)).resolves.toEqual({
+      chatId: CHAT,
+      mensajeId: PROPIO.id,
+    });
+
+    expect(repo.darDeBajaMensaje).toHaveBeenCalledWith(PROPIO.id, USUARIO);
+  });
+
+  it('avisa a TODOS los participantes, incluido el autor', async () => {
+    await service.eliminarMensaje(USUARIO, CHAT, PROPIO.id);
+
+    expect(emisor.emitirMensajeEliminado).toHaveBeenCalledWith(
+      { chatId: CHAT, mensajeId: PROPIO.id },
+      // El autor va incluido: sus otros dispositivos también cambian la burbuja.
+      expect.arrayContaining([USUARIO, OTRO]),
+    );
+  });
+
+  it('un mensaje ajeno no se elimina: se reporta', async () => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue({ ...PROPIO, usuarioId: OTRO });
+
+    await expect(service.eliminarMensaje(USUARIO, CHAT, PROPIO.id)).rejects.toMatchObject({
+      codigo: 'MENSAJE_AJENO',
+      httpStatus: 403,
+    });
+
+    expect(repo.darDeBajaMensaje).not.toHaveBeenCalled();
+    expect(emisor.emitirMensajeEliminado).not.toHaveBeenCalled();
+  });
+
+  it('una tarjeta de sistema tampoco', async () => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue({
+      ...PROPIO,
+      usuarioId: USUARIO_SISTEMA_ID,
+      tipo: 'SOLICITUD',
+    });
+
+    await expect(service.eliminarMensaje(USUARIO, CHAT, PROPIO.id)).rejects.toMatchObject({
+      codigo: 'MENSAJE_AJENO',
+    });
+  });
+
+  it('un mensaje de otra sala no existe en ésta: 404', async () => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue(null);
+
+    await expect(service.eliminarMensaje(USUARIO, CHAT, 999)).rejects.toMatchObject({
+      codigo: 'MENSAJE_NO_ENCONTRADO',
+      httpStatus: 404,
+    });
+  });
+
+  it('eliminar algo ya eliminado no vuelve a escribir ni a avisar', async () => {
+    vi.mocked(repo.buscarMensajeDeChat).mockResolvedValue({ ...PROPIO, fechaBaja: FECHA });
+
+    await expect(service.eliminarMensaje(USUARIO, CHAT, PROPIO.id)).resolves.toEqual({
+      chatId: CHAT,
+      mensajeId: PROPIO.id,
+    });
+
+    expect(repo.darDeBajaMensaje).not.toHaveBeenCalled();
+    expect(emisor.emitirMensajeEliminado).not.toHaveBeenCalled();
+  });
+
+  it('exige ser participante antes de tocar nada', async () => {
+    vi.mocked(repo.buscarSalaConContacto).mockResolvedValue(null);
+
+    await expect(service.eliminarMensaje(USUARIO, CHAT, PROPIO.id)).rejects.toMatchObject({
+      codigo: 'SIN_ACCESO_AL_CHAT',
+    });
+
+    expect(repo.darDeBajaMensaje).not.toHaveBeenCalled();
+  });
+
+  it('se puede eliminar aunque el contacto se haya dado de baja: no es escribirle', async () => {
+    vi.mocked(repo.buscarSalaConContacto).mockResolvedValue(
+      sala({ contactoDeBaja: true }) as never,
+    );
+
+    await service.eliminarMensaje(USUARIO, CHAT, PROPIO.id);
+
+    expect(repo.darDeBajaMensaje).toHaveBeenCalled();
+  });
+});
+
+describe('listarHistorial — mensajes eliminados', () => {
+  it('un eliminado sigue en el historial pero viaja vacío: sin texto, adjuntos ni cita', async () => {
+    vi.mocked(repo.listarMensajes).mockResolvedValue([
+      {
+        ...mensaje({ id: 3, contenido: 'Me equivoqué de chat' }),
+        imagenUrl: URL_FOTO,
+        imagenes: [URL_FOTO],
+        fechaBaja: FECHA,
+        mensajeRespondido: {
+          id: 2,
+          usuarioId: USUARIO,
+          contenido: 'Hola',
+          imagenes: [],
+          tipo: 'TEXTO',
+          fechaBaja: null,
+        },
+      },
+    ] as never);
+
+    const { mensajes } = await service.listarHistorial(USUARIO, CHAT, { limite: 30 });
+
+    expect(mensajes[0]).toMatchObject({
+      id: 3,
+      eliminado: true,
+      contenido: '',
+      imagenUrl: null,
+      imagenes: [],
+      adjuntos: [],
+      respondeA: null,
+    });
+  });
+
+  it('uno vigente viaja con eliminado en false y sin cita si no responde a nada', async () => {
+    vi.mocked(repo.listarMensajes).mockResolvedValue([mensaje({ id: 3 })] as never);
+
+    const { mensajes } = await service.listarHistorial(USUARIO, CHAT, { limite: 30 });
+
+    expect(mensajes[0]).toMatchObject({ eliminado: false, respondeA: null, contenido: 'Hola' });
+  });
+});
+
 describe('marcarLeidos', () => {
   it('devuelve el contador en cero para que HU-5.1 actualice el badge sin refetch', async () => {
     vi.mocked(repo.acusarHasta).mockResolvedValue(3);

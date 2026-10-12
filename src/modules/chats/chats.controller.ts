@@ -17,6 +17,17 @@ function exigirChatId(req: Request): number {
   return chatId;
 }
 
+/** El `:mensajeId` de la URL, con el mismo criterio que `exigirChatId`. */
+function exigirMensajeId(req: Request): number {
+  const mensajeId = Number(req.params.mensajeId);
+
+  if (!Number.isInteger(mensajeId) || mensajeId <= 0) {
+    throw new AppError('MENSAJE_NO_ENCONTRADO', 'El mensaje no existe', 404);
+  }
+
+  return mensajeId;
+}
+
 /**
  * HU-5.1. Devuelve el total además del listado, para el badge de la pestaña Chat.
  *
@@ -109,6 +120,24 @@ export async function enviarMensaje(
     });
 
     res.status(201).json(mensaje);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Eliminar un mensaje propio. 200 con `{ chatId, mensajeId }`, lo mismo que viaja en
+ * `chat:mensaje-eliminado`: el cliente cambia la burbuja por el aviso sin pedir nada más.
+ */
+export async function eliminarMensaje(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    const mensajeId = exigirMensajeId(req);
+    res.json(await service.eliminarMensaje(req.usuario!.usuarioId, chatId, mensajeId));
   } catch (err) {
     next(err);
   }

@@ -45,7 +45,7 @@ Dos frontends distintos consumiendo **una única API REST** de este backend. El 
 
 ## Reglas transversales (aplican a backend Y frontend)
 
-1. **Auditoría obligatoria en todas las entidades**: `usuario_alta`, `fecha_alta`, `usuario_modificacion`, `fecha_modificacion`, `usuario_baja`, `fecha_baja`. Bajas siempre lógicas, nunca DELETE físico (excepciones: `Mensaje` solo tiene alta; `Historia_Clinica` nunca se actualiza).
+1. **Auditoría obligatoria en todas las entidades**: `usuario_alta`, `fecha_alta`, `usuario_modificacion`, `fecha_modificacion`, `usuario_baja`, `fecha_baja`. Bajas siempre lógicas, nunca DELETE físico (excepciones: `Mensaje` tiene alta y baja lógica —la del autor al eliminarlo— pero nunca modificación; `Historia_Clinica` nunca se actualiza).
 2. **RBAC** vía middleware. Roles: administrador global, refugio (validado/no validado), adoptante.
 3. **Sesión stateless con JWT**, sin sesiones server-side.
 4. **Compresión asíncrona de imágenes** en middleware antes de persistir cualquier archivo multimedia.

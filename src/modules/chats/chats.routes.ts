@@ -52,6 +52,10 @@ chatsRouter.post(
   controller.enviarMensaje,
 );
 
+// Eliminar un mensaje propio (baja lógica): en la sala queda el aviso "Se eliminó este
+// mensaje". Que sea del autor lo verifica el service; el ámbito, como en el resto de la sala.
+chatsRouter.delete('/:chatId/mensajes/:mensajeId', delAmbito, controller.eliminarMensaje);
+
 // HU-5.2: marcar la conversación como leída. Es POST y no PATCH porque no se edita un
 // recurso identificado: se ejecuta la acción "leí esta sala" sobre un conjunto de mensajes.
 chatsRouter.post('/:chatId/leidos', delAmbito, controller.marcarLeidos);

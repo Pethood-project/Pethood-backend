@@ -72,6 +72,7 @@ function ultimoMensaje(opciones: {
   usuarioId?: number;
   contenido?: string;
   imagenUrl?: string | null;
+  fechaBaja?: Date | null;
 }) {
   const {
     chatId,
@@ -79,9 +80,10 @@ function ultimoMensaje(opciones: {
     usuarioId = OTRO,
     contenido = 'Dale, te espero el sábado a las 10',
     imagenUrl = null,
+    fechaBaja = null,
   } = opciones;
 
-  return { chatId, contenido, usuarioId, imagenUrl, tipo: 'TEXTO' as const, fechaAlta };
+  return { chatId, contenido, usuarioId, imagenUrl, tipo: 'TEXTO' as const, fechaAlta, fechaBaja };
 }
 
 /** Fila de `contarNoLeidosPorChat`: el conteo ya resuelto contra la marca del participante. */
@@ -217,6 +219,7 @@ describe('listarConversaciones — vista previa del último mensaje', () => {
       esMio: false,
       tieneImagen: false,
       tieneVideo: false,
+      eliminado: false,
     });
   });
 
@@ -249,6 +252,30 @@ describe('listarConversaciones — vista previa del último mensaje', () => {
     const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
 
     expect(chats[0]!.ultimoMensaje).toMatchObject({ contenido: '', tieneImagen: true });
+  });
+
+  it('un último mensaje eliminado no muestra nada de lo que decía', async () => {
+    vi.mocked(repo.listarChatsActivosDeUsuario).mockResolvedValue([
+      membresia({ chatId: 1 }),
+    ] as never);
+    vi.mocked(repo.ultimoMensajePorChat).mockResolvedValue([
+      ultimoMensaje({
+        chatId: 1,
+        fechaAlta: RECIENTE,
+        contenido: 'Me equivoqué de chat',
+        imagenUrl: '/api/v1/archivos/chats/foto.jpg',
+        fechaBaja: RECIENTE,
+      }),
+    ] as never);
+
+    const { chats } = await service.listarConversaciones(USUARIO, 'PERSONAL');
+
+    expect(chats[0]!.ultimoMensaje).toMatchObject({
+      eliminado: true,
+      contenido: '',
+      tieneImagen: false,
+      tieneVideo: false,
+    });
   });
 });
 

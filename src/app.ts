@@ -4,7 +4,7 @@ import { apiRouter } from './routes';
 import { errorHandler } from './middlewares/errorHandler';
 import { env } from './config/env';
 import { DIRECTORIO_UPLOADS, RUTA_PUBLICA_ARCHIVOS } from './shared/storage';
-import { esRutaPrivada, verificarFirma } from './shared/urlFirmada';
+import { esRutaPrivada, normalizarRutaArchivo, verificarFirma } from './shared/urlFirmada';
 
 export const app = express();
 
@@ -21,12 +21,14 @@ app.use(express.json());
 // porque se muestra en el feed de adopción. La autorización va en la URL y no en un header
 // porque el `<Image>` de React Native no manda `Authorization` — ver `shared/urlFirmada.ts`.
 app.use(RUTA_PUBLICA_ARCHIVOS, (req, res, next) => {
-  if (!esRutaPrivada(req.path)) {
+  const ruta = normalizarRutaArchivo(req.path);
+
+  if (ruta !== null && !esRutaPrivada(ruta)) {
     next();
     return;
   }
 
-  if (verificarFirma(req.path, req.query.exp, req.query.sig)) {
+  if (ruta !== null && verificarFirma(ruta, req.query.exp, req.query.sig)) {
     next();
     return;
   }

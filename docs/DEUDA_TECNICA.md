@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-10-01**
+> Última revisión: **2026-10-12**
 
 ## Cómo se usa
 
@@ -57,7 +57,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 27 | Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado | Baja | backend |
 | ~~28~~ | ~~El dueño de un aviso de mascota perdida no puede retirarlo~~ | ✅ cerrada | — |
 | 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
-| 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
+| 30 | El admin no puede ocultar un mensaje reportado (el autor sí puede eliminarlo) y ve una ventana fija de contexto | Baja | backend |
 | 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
 | 32 | En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy | Media | backend |
 | 33 | `chat` tiene dos FK de origen y nada en base impide llenar las dos | Baja | backend |
@@ -68,6 +68,8 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 38 | Las donaciones desde otro banco o billetera no se confirman solas | Media | ambos |
 | 39 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
 | 40 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
+| 41 | Documentos de identidad: archivos huérfanos al reemplazar y expuestos si se activa R2 | Media | backend |
+| 42 | `LogAuditoria` es un archivo efímero y ahora respalda el rollback de documentos | Media | backend |
 
 ---
 
@@ -641,17 +643,20 @@ sus validaciones en `shared/validation/`), estado de confirmación en `Donacion`
 con notificación al refugio. Después, sumar `alias` y `cbu` a la `vista` de `CAMPANIA` y que
 `montoActual` cuente solo las confirmadas. Toca `docs/MODELO_DATOS.md`.
 
-## 30. Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto — Baja
+## 30. El admin no puede ocultar un mensaje reportado y ve una ventana fija de contexto — Baja
 
-**Qué pasa.** `Mensaje` solo tiene alta (sin baja lógica), así que un reporte de mensaje se
-resuelve pero el mensaje sigue visible para quien lo recibió: la única acción posible es
-suspender al autor (`PATCH /admin/usuarios/:id/suspender`). Además el admin ve los 10 mensajes
-anteriores y los 10 posteriores (`VENTANA_CONTEXTO_MENSAJES`), sin forma de pedir más.
+**Qué pasa.** Desde el 2026-10-12 `Mensaje` tiene baja lógica, pero sólo la usa **su autor** al
+eliminarlo (ver `api-chat-sala.md`, «Responder y eliminar»). El admin todavía no: un reporte de
+mensaje se resuelve y el mensaje sigue visible para quien lo recibió, así que la única acción
+posible es suspender al autor (`PATCH /admin/usuarios/:id/suspender`). Además el admin ve los 10
+mensajes anteriores y los 10 posteriores (`VENTANA_CONTEXTO_MENSAJES`), sin forma de pedir más.
 
-**Cómo se arregla.** Si hace falta ocultar un mensaje, agregar una baja lógica solo para
-moderación (y que el chat lo filtre); es un cambio de modelo y de contrato del chat, no solo de
-moderación. Para el contexto, un parámetro de ampliación en `GET /admin/reportes/:id` si en la
-práctica falta información.
+**Cómo se arregla.** La mitad difícil ya está: el modelo tiene `mensaje_fecha_baja`, el chat
+muestra un mensaje dado de baja como "Se eliminó este mensaje" sin su contenido, y existe el
+evento `chat:mensaje-eliminado` para que la sala se actualice en vivo. Falta una acción de admin
+que dé de baja el mensaje reportado (con `mensaje_usuario_baja` = el admin, y probablemente otro
+texto en la sala, "Un moderador eliminó este mensaje"). Para el contexto, un parámetro de
+ampliación en `GET /admin/reportes/:id` si en la práctica falta información.
 
 ## 31. El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra — Baja
 
@@ -793,3 +798,30 @@ plan gratis de Neon agotándose el doble de rápido).
 
 **Cómo se arregla.** Cambiar el import de `usuarios.repository.ts` a `shared/prisma.ts` y
 borrar `config/prisma.ts` si ningún otro archivo lo usa.
+
+## 41. Documentos de identidad: archivos huérfanos al reemplazar y expuestos si se activa R2 — Media
+
+**Qué pasa.** Spec 002.1 guarda DNI y selfie en `documentos-identidad/` (namespace privado, URL
+firmada). Dos huecos conocidos: (1) al reemplazar un documento el archivo viejo queda huérfano
+en storage, no se borra; (2) vale lo del ítem 14: con R2 activado las URLs absolutas no se firman,
+y el DNI de la gente quedaría accesible con solo tener el link.
+
+**Cómo se arregla.** Borrar el archivo anterior con `borrarImagen` al reemplazar (o cron de
+limpieza), y resolver el ítem 14 **antes** de activar R2 en producción: esto sube la urgencia, ya
+no son fotos de mascotas. Con R2 hay que servir `documentos-identidad/` desde un bucket
+**privado** y firmar con `getSignedUrl` al leer; `R2_PUBLIC_BASE_URL` es público y permanente.
+
+## 42. `LogAuditoria` es un archivo efímero y ahora respalda el rollback de documentos — Media
+
+**Qué pasa.** La spec 002.1 deja en `LogAuditoria` las rutas del DNI/selfie de cada subida,
+revocación y acceso de un admin, para poder revisar un documento viejo (los archivos no se borran
+del storage). Pero `logs/auditoria.log` vive en el disco del contenedor, que en Render se pierde en
+cada deploy; en producción solo sobrevive el stdout, en el panel de logs de la plataforma, con la
+retención del plan. Sin esas rutas, el archivo viejo queda en el bucket sin forma de saber de
+quién era.
+
+**Cómo se arregla.** Pasar `LogAuditoria` a una tabla append-only (o retener el stdout fuera de la
+plataforma) antes de depender de esto en producción. Alternativa chica: no pisar la columna al
+reemplazar/revocar, sino guardar el historial de documentos en una tabla propia (`usuario_id`,
+`tipo`, `url`, `fecha_baja`), que además cumple la regla de bajas lógicas del proyecto.
+

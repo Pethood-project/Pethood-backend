@@ -5,6 +5,7 @@ import * as notificaciones from '../notificaciones/notificaciones.service';
 import { ESTADO_USUARIO, ROL_API, ROL_DB, rolApiADb, rolesDbAApi } from '../../shared/roles';
 import { listarDeRefugio, listarDeUsuario } from '../resenas/resenas.service';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
+import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import type {
   AltaRefugioBody,
   FiltrosRefugios,
@@ -86,14 +87,29 @@ export async function listarUsuarios(filtros: FiltrosUsuarios) {
   };
 }
 
-export async function obtenerDetalleUsuario(id: number) {
+export async function obtenerDetalleUsuario(adminId: number, id: number) {
   const usuario = await buscarUsuarioOFallar(id);
+
+  // Acceso a datos sensibles: queda quién los vio y qué archivos eran (rutas, sin firma).
+  if (usuario.dniImagenUrl || usuario.selfieUrl) {
+    await registrarAuditoria({
+      usuarioId: adminId,
+      accion: 'VER_DOCUMENTOS_USUARIO',
+      entidad: 'Usuario',
+      entidadId: id,
+      detalle: `dni=${usuario.dniImagenUrl ?? '-'} selfie=${usuario.selfieUrl ?? '-'}`,
+    });
+  }
   const [resumen, resenas] = await Promise.all([repo.resumenUsuario(id), listarDeUsuario(id)]);
 
   return {
     usuario: {
       ...aUsuarioDto(usuario),
       imagenUrl: usuario.imagenUrl,
+      documentos: {
+        dniImagenUrl: firmarUrlArchivo(usuario.dniImagenUrl),
+        selfieUrl: firmarUrlArchivo(usuario.selfieUrl),
+      },
       fechaNacimiento: usuario.fechaNacimiento,
       fechaAlta: usuario.fechaAlta,
       ubicacion: etiquetaUbicacion(usuario),
@@ -126,6 +142,14 @@ export async function verificarUsuario(adminId: number, usuarioId: number) {
     );
   }
 
+  if (!usuario.dniImagenUrl || !usuario.selfieUrl) {
+    throw new AppError(
+      'FALTA_DOCUMENTACION',
+      'El usuario todavía no subió la foto del DNI y la selfie: no se puede verificar.',
+      409,
+    );
+  }
+
   const estadoActivo = await repo.buscarEstadoUsuarioPorNombre(ESTADO_USUARIO.ACTIVO);
   const actualizado = await repo.verificarUsuario(usuarioId, adminId, estadoActivo.id);
 
@@ -134,12 +158,73 @@ export async function verificarUsuario(adminId: number, usuarioId: number) {
     accion: 'VERIFICAR_USUARIO',
     entidad: 'Usuario',
     entidadId: usuarioId,
+    detalle: 'con documentacion (dni+selfie)',
   });
 
   await notificaciones.notificar({
     usuarioId,
     tipo: 'USUARIO_VALIDADO',
     mensaje: 'Ya podés solicitar adopciones: validamos tu cuenta.',
+    entidadTipo: 'PERFIL',
+    entidadId: usuarioId,
+    canal: { push: true },
+    usuarioAlta: adminId,
+  });
+
+  return aUsuarioDto(actualizado);
+}
+
+/**
+ * Baja lógica de los documentos de un usuario verificado: queda no verificado y vuelve a
+ * Pendiente_Verificacion para subir DNI y selfie de nuevo (spec 002.1).
+ */
+export async function revocarVerificacion(adminId: number, usuarioId: number, motivo: string) {
+  const usuario = await buscarUsuarioOFallar(usuarioId);
+
+  if (esAdmin(usuario)) {
+    throw new AppError(
+      'NO_SE_PUEDE_REVOCAR_ADMIN',
+      'No se puede revocar la verificación de un administrador.',
+      403,
+    );
+  }
+
+  if (!usuario.verificado) {
+    throw new AppError('USUARIO_NO_VERIFICADO', 'Este usuario no está verificado.', 409);
+  }
+
+  if (usuario.estado.nombre !== ESTADO_USUARIO.ACTIVO) {
+    throw new AppError(
+      'ESTADO_INVALIDO',
+      'Solo se puede revocar la verificación de un usuario activo.',
+      409,
+    );
+  }
+
+  const estadoPendiente = await repo.buscarEstadoUsuarioPorNombre(ESTADO_USUARIO.PENDIENTE);
+  const actualizado = await repo.revocarVerificacion(usuarioId, adminId, estadoPendiente.id);
+  if (!actualizado) {
+    throw new AppError(
+      'ESTADO_INVALIDO',
+      'El usuario cambió de estado mientras lo revisabas. Actualizá y probá de nuevo.',
+      409,
+    );
+  }
+
+  await registrarAuditoria({
+    usuarioId: adminId,
+    accion: 'REVOCAR_VERIFICACION',
+    entidad: 'Usuario',
+    entidadId: usuarioId,
+    // Las rutas quedan en el log: los archivos siguen en storage (baja lógica), así hay
+    // con qué reconstruir qué se había aprobado.
+    detalle: `${motivo} | dni=${usuario.dniImagenUrl ?? '-'} selfie=${usuario.selfieUrl ?? '-'}`,
+  });
+
+  await notificaciones.notificar({
+    usuarioId,
+    tipo: 'VERIFICACION_REVOCADA',
+    mensaje: `Revocamos la verificación de tu cuenta: ${motivo}. Volvé a subir tu DNI y tu selfie.`,
     entidadTipo: 'PERFIL',
     entidadId: usuarioId,
     canal: { push: true },
