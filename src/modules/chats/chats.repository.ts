@@ -354,6 +354,7 @@ export function crearMensaje(datos: {
   tipo?: TipoMensaje;
   solicitudId?: number | null;
   animalPerdidoId?: number | null;
+  mascotaId?: number | null;
   mensajeRespondidoId?: number | null;
 }) {
   return prisma.mensaje.create({
@@ -366,6 +367,7 @@ export function crearMensaje(datos: {
       tipo: datos.tipo ?? 'TEXTO',
       solicitudId: datos.solicitudId ?? null,
       animalPerdidoId: datos.animalPerdidoId ?? null,
+      mascotaId: datos.mascotaId ?? null,
       mensajeRespondidoId: datos.mensajeRespondidoId ?? null,
       ...datosAlta(datos.usuarioId),
     },
@@ -702,5 +704,139 @@ export function buscarUltimoAvisoDelChat(chatId: number) {
     where: { chatId, tipo: 'ANIMAL_PERDIDO', animalPerdidoId: { not: null } },
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
     select: { animalPerdidoId: true, fechaAlta: true },
+  });
+}
+
+// ─────────────── Tarjetas que manda una persona: mascota y ubicación del refugio ───────────────
+
+/** De quién tiene que ser una mascota para poder compartirla en la sala. */
+export type Contraparte = { refugioId: number } | { usuarioId: number };
+
+/**
+ * Las mascotas "de la contraparte": las de su refugio, o las PERSONALES de esa persona. Una
+ * mascota que alguien publicó a nombre de su refugio no es suya en una charla personal: es del
+ * refugio, igual que en `shared/ambito.ts`.
+ */
+function deLaContraparte(contraparte: Contraparte) {
+  return 'refugioId' in contraparte
+    ? { refugioId: contraparte.refugioId }
+    : { usuarioId: contraparte.usuarioId, refugioId: null };
+}
+
+/**
+ * Lo que pinta la tarjeta de una mascota compartida y la fila de la lista para elegirla: los
+ * datos principales, el estado vigente y la publicación activa (que es a donde lleva "Ver
+ * mascota").
+ */
+const MASCOTA_PARA_CHAT = {
+  id: true,
+  nombre: true,
+  fechaNacimiento: true,
+  genero: true,
+  tamanio: true,
+  imagenUrl: true,
+  raza: { select: { nombre: true, especie: { select: { nombre: true } } } },
+  historicoEstados: {
+    where: { fechaBaja: null },
+    orderBy: { fechaAlta: 'desc' },
+    take: 1,
+    select: { estadoMascota: { select: { nombre: true } } },
+  },
+  publicaciones: {
+    where: { fechaBaja: null },
+    orderBy: { fechaAlta: 'desc' },
+    take: 1,
+    select: { id: true, imagenUrl: true },
+  },
+} as const;
+
+/**
+ * Las mascotas que el usuario puede compartir en esta sala: las que tiene en favoritos y son
+ * de la contraparte, de la guardada más reciente a la más vieja (el orden de Favoritos).
+ *
+ * Los mismos filtros que el listado de favoritos: favorito activo y mascota no eliminada.
+ */
+export function listarMascotasCompartibles(usuarioId: number, contraparte: Contraparte) {
+  return prisma.favorito.findMany({
+    where: {
+      usuarioId,
+      fechaBaja: null,
+      mascota: { fechaBaja: null, ...deLaContraparte(contraparte) },
+    },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { mascota: { select: MASCOTA_PARA_CHAT } },
+  });
+}
+
+/** ¿Esta mascota está en los favoritos del usuario y es de la contraparte? */
+export function buscarFavoritoCompartible(
+  usuarioId: number,
+  mascotaId: number,
+  contraparte: Contraparte,
+) {
+  return prisma.favorito.findFirst({
+    where: {
+      usuarioId,
+      mascotaId,
+      fechaBaja: null,
+      mascota: { fechaBaja: null, ...deLaContraparte(contraparte) },
+    },
+    select: { id: true },
+  });
+}
+
+/**
+ * Una mascota del refugio, no eliminada y con una publicación activa. Sólo las publicadas
+ * porque la tarjeta lleva a la publicación: una sin publicar no tendría a dónde llevar.
+ */
+function publicadaDelRefugio(refugioId: number) {
+  return { refugioId, fechaBaja: null, publicaciones: { some: { fechaBaja: null } } };
+}
+
+/**
+ * Las mascotas que el REFUGIO puede compartir en una charla con un adoptante: las suyas que
+ * están publicadas, de la más nueva a la más vieja.
+ */
+export function listarMascotasPublicadasDeRefugio(refugioId: number) {
+  return prisma.mascota.findMany({
+    where: publicadaDelRefugio(refugioId),
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: MASCOTA_PARA_CHAT,
+  });
+}
+
+/** ¿Esta mascota es del refugio y está publicada? */
+export function buscarMascotaPublicadaDeRefugio(refugioId: number, mascotaId: number) {
+  return prisma.mascota.findFirst({
+    where: { id: mascotaId, ...publicadaDelRefugio(refugioId) },
+    select: { id: true },
+  });
+}
+
+/**
+ * La mascota de una tarjeta, resuelta en el momento del pedido: si la adoptaron o se despublicó
+ * después de compartirla, la tarjeta lo muestra. Trae también las eliminadas —la tarjeta queda
+ * en la conversación, como la de un aviso eliminado—.
+ */
+export function buscarMascotaParaChat(mascotaId: number) {
+  return prisma.mascota.findUnique({
+    where: { id: mascotaId },
+    select: { ...MASCOTA_PARA_CHAT, fechaBaja: true },
+  });
+}
+
+/** Lo que pinta la tarjeta de la ubicación: sale del perfil del refugio, en cada pedido. */
+export function buscarRefugioParaUbicacion(refugioId: number) {
+  return prisma.refugio.findUnique({
+    where: { id: refugioId },
+    select: {
+      id: true,
+      nombre: true,
+      imagenUrl: true,
+      calleAltura: true,
+      localidad: true,
+      provincia: true,
+      mapaUrl: true,
+    },
   });
 }
