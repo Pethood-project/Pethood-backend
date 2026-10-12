@@ -307,6 +307,9 @@ model Usuario {
   googleId        String?   @unique @map("usuario_google_id")
   verificado      Boolean   @default(false) @map("usuario_verificado")
   imagenUrl       String?   @map("usuario_imagen_url")
+  // Documentación de identidad (spec 002.1): foto del DNI y selfie. Privadas (URL firmada).
+  dniImagenUrl    String?   @map("usuario_dni_imagen_url")
+  selfieUrl       String?   @map("usuario_selfie_url")
   // Dirección estructurada del perfil, para geocodificar (node-geocoder). El texto que se
   // muestra es la concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
   provincia       String?   @map("usuario_provincia")
