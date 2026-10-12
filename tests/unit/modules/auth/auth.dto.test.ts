@@ -16,6 +16,21 @@ function primerError(datos: object): string | undefined {
   return resultado.success ? undefined : resultado.error.issues[0]?.message;
 }
 
+describe('registroBodySchema: contraseña', () => {
+  it('es obligatoria', () => {
+    const { password: _password, ...sinPassword } = VALIDO;
+    expect(primerError(sinPassword)).toBe('La contraseña es obligatoria.');
+  });
+
+  it('exige mayúscula, minúscula, número, símbolo y 8 caracteres', () => {
+    const mensaje =
+      'La contraseña debe tener al menos 8 caracteres, con una mayúscula, una minúscula, un número y un símbolo.';
+    expect(primerError({ ...VALIDO, password: 'secreta123' })).toBe(mensaje);
+    expect(primerError({ ...VALIDO, password: 'Ab1!' })).toBe(mensaje);
+    expect(primerError(VALIDO)).toBeUndefined();
+  });
+});
+
 describe('registroBodySchema: DNI (HU-1.1, spec 027)', () => {
   it('es obligatorio', () => {
     const { dni: _dni, ...sinDni } = VALIDO;
