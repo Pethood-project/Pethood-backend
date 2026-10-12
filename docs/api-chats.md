@@ -116,7 +116,7 @@ Authorization: Bearer <token>
 | `ultimoMensaje.esMio` | `true` si lo mandó el usuario autenticado → prefijo "Vos: ..." |
 | `ultimoMensaje.tieneImagen` | `true` si el mensaje trae foto **o video**. Con `contenido: ""` significa mensaje de solo adjunto → mostrar "📷 Foto" |
 | `ultimoMensaje.tieneVideo` | `true` si ese adjunto es un video → mostrar "🎥 Video" en vez de "📷 Foto". Viaja aparte para que un cliente viejo, que no lo conoce, siga mostrando "Foto" y no una línea vacía |
-| `ultimoMensaje.tipo` | `"TEXTO"`, `"SOLICITUD"` o `"ANIMAL_PERDIDO"`. En los dos últimos el `contenido` va vacío: es una tarjeta → mostrar "📄 Solicitud" o "🐾 Mascota perdida", con el mismo criterio que la foto |
+| `ultimoMensaje.tipo` | `"TEXTO"`, `"SOLICITUD"`, `"ANIMAL_PERDIDO"`, `"MASCOTA"` o `"UBICACION_REFUGIO"`. Salvo `TEXTO`, el `contenido` va vacío: es una tarjeta → mostrar "Solicitud", "Mascota perdida", "Mascota compartida" o "Ubicación del refugio" con su ícono, con el mismo criterio que la foto |
 | `ultimoMensaje.eliminado` | `true` si su autor lo eliminó. Viene con `contenido: ""` y `tieneImagen`/`tieneVideo` en `false` → mostrar "Se eliminó este mensaje" (o "Eliminaste este mensaje" si `esMio`). Ver [`api-chat-sala.md`](./api-chat-sala.md) |
 | `noLeidos` | Mensajes **del otro** que el usuario todavía no leyó. Número absoluto, no un delta. Sale de comparar la fecha de cada mensaje contra `usuario_chat_ultima_lectura` — ver la nota de abajo |
 | `fechaUltimaActividad` | **Clave de orden, nunca `null`.** Fecha del último mensaje o, si la sala está vacía, fecha de creación del chat |
