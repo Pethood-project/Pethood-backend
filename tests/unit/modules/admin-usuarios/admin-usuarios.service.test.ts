@@ -11,6 +11,7 @@ vi.mock('../../../../src/modules/admin-usuarios/admin-usuarios.repository', () =
   contarUsuariosActivosConRol: vi.fn(),
   cambiarEstadoUsuario: vi.fn(),
   verificarUsuario: vi.fn(),
+  revocarVerificacion: vi.fn(),
   darDeBajaUsuario: vi.fn(),
   buscarVinculoRolActivo: vi.fn(),
   agregarRol: vi.fn(),
@@ -164,6 +165,60 @@ describe('verificarUsuario', () => {
 
     expect(resultado.verificado).toBe(true);
     expect(mockedRepo.verificarUsuario).toHaveBeenCalledWith(5, 1, 2);
+  });
+});
+
+describe('revocarVerificacion (baja lógica de documentos, spec 002.1)', () => {
+  it('rechaza a un administrador', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ verificado: true, roles: [vinculoRol(ROL_DB.ADMIN)] }),
+    );
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'NO_SE_PUEDE_REVOCAR_ADMIN',
+    } satisfies Partial<AppError>);
+  });
+
+  it('rechaza con USUARIO_NO_VERIFICADO si no estaba verificado', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: false }));
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'USUARIO_NO_VERIFICADO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('rechaza con ESTADO_INVALIDO si no está Activo', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ verificado: true, estado: estadoPendiente }),
+    );
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'ESTADO_INVALIDO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('da 409 si el estado cambió entre el chequeo y la escritura', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));
+    mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 5 } as never);
+    mockedRepo.revocarVerificacion.mockResolvedValue(null);
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'ESTADO_INVALIDO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('revoca: vuelve a Pendiente_Verificacion con el id del estado pendiente', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));
+    mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 7 } as never);
+    mockedRepo.revocarVerificacion.mockResolvedValue(
+      usuarioFake({ verificado: false, dniImagenUrl: null, selfieUrl: null }),
+    );
+
+    const resultado = await service.revocarVerificacion(1, 5, 'DNI vencido');
+
+    expect(resultado.verificado).toBe(false);
+    expect(mockedRepo.buscarEstadoUsuarioPorNombre).toHaveBeenCalledWith(ESTADO_USUARIO.PENDIENTE);
+    expect(mockedRepo.revocarVerificacion).toHaveBeenCalledWith(5, 1, 7);
   });
 });
 

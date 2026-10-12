@@ -58,6 +58,24 @@ export async function verificarUsuario(
   }
 }
 
+export async function revocarVerificacion(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { motivo } = req.body as MotivoBody;
+    const usuario = await service.revocarVerificacion(
+      req.usuario!.usuarioId,
+      idDeParametro(req),
+      motivo,
+    );
+    res.json({ mensaje: 'Verificación revocada.', usuario });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function suspenderUsuario(
   req: Request,
   res: Response,

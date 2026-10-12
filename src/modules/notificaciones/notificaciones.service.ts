@@ -39,6 +39,7 @@ const TITULOS_PUSH: Record<string, string> = {
   FAVORITO_NO_DISPONIBLE: 'Favorito no disponible',
   MENSAJE_CHAT: 'Nuevo mensaje',
   USUARIO_VALIDADO: 'Cuenta validada',
+  VERIFICACION_REVOCADA: 'Verificación revocada',
   CUENTA_SUSPENDIDA: 'Cuenta suspendida',
   REFUGIO_APROBADO: 'Refugio validado',
   REFUGIO_SUSPENDIDO: 'Refugio suspendido',
