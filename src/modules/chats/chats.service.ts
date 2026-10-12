@@ -993,6 +993,30 @@ export async function asegurarChatDeSolicitud(solicitudId: number): Promise<numb
  * `nueva` es `true` sólo cuando hubo que abrir la conversación: con `false` el cliente está
  * entrando a una que ya tenía.
  */
+/** Best-effort: la sala y la tarjeta ya existen, un aviso que falla no las deshace. */
+async function avisarReclamo(
+  reclamanteId: number,
+  reportanteId: number,
+  chatId: number,
+): Promise<void> {
+  try {
+    const reclamante = await repo.buscarNombreUsuario(reclamanteId);
+    const nombre = reclamante ? `${reclamante.nombre} ${reclamante.apellido}` : 'Alguien';
+
+    await notificaciones.notificar({
+      usuarioId: reportanteId,
+      tipo: 'ANIMAL_PERDIDO_RECLAMADO',
+      mensaje: `${nombre} se contactó por tu aviso de mascota perdida o encontrada.`,
+      entidadTipo: 'CHAT',
+      entidadId: chatId,
+      canal: { push: true },
+      usuarioAlta: reclamanteId,
+    });
+  } catch (err) {
+    console.error('No se pudo avisar el reclamo del aviso', chatId, err);
+  }
+}
+
 export async function asegurarChatDeReclamo(
   animalPerdidoId: number,
   reclamanteId: number,
@@ -1036,6 +1060,8 @@ export async function asegurarChatDeReclamo(
     aMensajeDto(mensaje, [], null, aviso === null ? null : aAvisoEnChat(aviso)),
     [reclamanteId, reportanteId],
   );
+
+  await avisarReclamo(reclamanteId, reportanteId, chatId);
 
   return { chatId, nueva: existente === null };
 }

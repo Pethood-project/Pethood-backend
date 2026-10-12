@@ -259,6 +259,29 @@ async function cargarObjeto(
 
 const noEncontrado = () => new AppError('NO_ENCONTRADO', 'Lo que querés reportar no existe', 404);
 
+/** Best-effort: el reporte ya se guardó, un aviso que falla no lo revierte. */
+async function avisarReporteNuevo(reporteId: number, reportanteId: number): Promise<void> {
+  try {
+    const admins = await repo.listarIdsAdmins();
+
+    await Promise.all(
+      admins.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'REPORTE_NUEVO',
+          mensaje: 'Hay un nuevo reporte para revisar.',
+          entidadTipo: 'REPORTE',
+          entidadId: reporteId,
+          canal: { push: true },
+          usuarioAlta: reportanteId,
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar a los admins del reporte', reporteId, err);
+  }
+}
+
 /** HU-3.1, 3.2 y 3.3. */
 export async function crearReporte(usuarioId: number, datos: CrearReporteBody) {
   const actor = await repo.buscarUsuario(usuarioId);
@@ -293,6 +316,7 @@ export async function crearReporte(usuarioId: number, datos: CrearReporteBody) {
 
   try {
     const reporte = await repo.crear({ usuarioId: actor.id, ...datos });
+    await avisarReporteNuevo(reporte.id, actor.id);
     return {
       id: reporte.id,
       tipo: reporte.tipo,

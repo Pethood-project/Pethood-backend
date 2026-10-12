@@ -465,7 +465,11 @@ export async function cambiarEstadoPublicacion(
   }
 
   if (accion === 'REACTIVAR') {
-    await avisarFavoritosDisponibles(publicacion.mascota.id, publicacion.mascota.nombre);
+    await avisarFavoritosDisponibles(
+      publicacion.mascota.id,
+      publicacion.id,
+      publicacion.mascota.nombre,
+    );
   }
 
   return obtenerPublicacion(publicacion.id, usuarioId, ambito);
@@ -513,7 +517,7 @@ async function avisarFavoritosNoDisponibles(
           usuarioId,
           tipo: 'FAVORITO_NO_DISPONIBLE',
           mensaje: `${mascota}, que tenías en favoritos, ya no está disponible. Te avisaremos si vuelve.`,
-          entidadTipo: 'MASCOTA',
+          entidadTipo: 'FAVORITOS',
           entidadId: mascotaId,
           canal: { push: true },
         }),
@@ -527,6 +531,7 @@ async function avisarFavoritosNoDisponibles(
 /** Cumple lo que promete `avisarFavoritosNoDisponibles`: la mascota volvió a estar disponible. */
 async function avisarFavoritosDisponibles(
   mascotaId: number,
+  publicacionId: number,
   nombreMascota: string | null,
 ): Promise<void> {
   try {
@@ -539,8 +544,8 @@ async function avisarFavoritosDisponibles(
           usuarioId,
           tipo: 'FAVORITO_DISPONIBLE',
           mensaje: `${mascota}, que tenías en favoritos, volvió a estar disponible.`,
-          entidadTipo: 'MASCOTA',
-          entidadId: mascotaId,
+          entidadTipo: 'PUBLICACION',
+          entidadId: publicacionId,
           canal: { push: true },
         }),
       ),

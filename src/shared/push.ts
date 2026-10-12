@@ -18,6 +18,8 @@ export interface PushAEnviar {
   datos?: Record<string, unknown>;
   /** Regla 7: avisos no urgentes no suenan de noche — se entregan igual, sin sonido. */
   silencioso?: boolean;
+  /** Número que se muestra en el ícono de la app (no leídas). */
+  badge?: number;
 }
 
 export interface ResultadoEnvioPush {
@@ -44,6 +46,7 @@ export async function enviarPush(pedido: PushAEnviar): Promise<ResultadoEnvioPus
       body: pedido.cuerpo,
       data: pedido.datos,
       sound: pedido.silencioso ? undefined : 'default',
+      badge: pedido.badge,
       priority: 'default',
     }));
 

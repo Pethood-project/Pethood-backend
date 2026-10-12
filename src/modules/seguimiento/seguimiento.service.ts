@@ -25,6 +25,7 @@ import {
   pedidosExigiblesA,
   plazoDeRespuesta,
   preguntasNoRepetibles,
+  programaDeSeguimiento,
   proximoAviso,
   type TipoFlujo,
 } from './seguimiento.secuencia';
@@ -152,8 +153,50 @@ async function sincronizarSolicitud(
 
   await avisarRecordatorio24h(solicitud, seguimientos, ahora);
   await avisarVencidos(solicitud, seguimientos, ahora);
+  await avisarSeguimientoTerminado(solicitud, seguimientos, flujo, aprobacion, ahora);
 
   return seguimientos;
+}
+
+/**
+ * Cierre de la secuencia: ya se pidieron todas las actualizaciones que prevé el programa y no
+ * queda ninguna abierta. Una sola vez por solicitud (`notificarUnaVez`), al adoptante y a quien
+ * publicó.
+ */
+async function avisarSeguimientoTerminado(
+  solicitud: SolicitudEnSeguimiento,
+  seguimientos: SeguimientoConPregunta[],
+  flujo: TipoFlujo,
+  aprobacion: Date,
+  ahora: Date,
+): Promise<void> {
+  const previstos = programaDeSeguimiento(aprobacion, flujo).length;
+  if (previstos === 0) return;
+
+  const automaticos = seguimientos.filter((seguimiento) => !seguimiento.esManual).length;
+  const hayAbiertos = seguimientos.some((seguimiento) => estadoDe(seguimiento, ahora) === 'PENDIENTE');
+  if (automaticos < previstos || hayAbiertos) return;
+
+  const mascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
+
+  await Promise.all([
+    notificaciones.notificarUnaVez({
+      usuarioId: solicitud.usuarioId,
+      tipo: 'SEGUIMIENTO_TERMINADO',
+      mensaje: `Terminó el seguimiento de ${mascota}. ¡Gracias por cuidarla!`,
+      entidadTipo: 'SOLICITUD',
+      entidadId: solicitud.id,
+      canal: { push: true },
+    }),
+    notificaciones.notificarUnaVez({
+      usuarioId: solicitud.publicacion.usuarioId,
+      tipo: 'SEGUIMIENTO_TERMINADO',
+      mensaje: `Terminó el seguimiento de ${mascota}.`,
+      entidadTipo: 'SOLICITUD',
+      entidadId: solicitud.id,
+      canal: { push: true },
+    }),
+  ]);
 }
 
 const HORAS_RECORDATORIO = 24;

@@ -60,6 +60,9 @@ const TITULOS_PUSH: Record<string, string> = {
   CAMPANIA_FINALIZADA: 'Campaña finalizada',
   REPORTE_RESUELTO: 'Reporte resuelto',
   MODERACION_BAJA: 'Publicación dada de baja',
+  ANIMAL_PERDIDO_RECLAMADO: 'Alguien se contactó',
+  SEGUIMIENTO_TERMINADO: 'Seguimiento terminado',
+  REPORTE_NUEVO: 'Nuevo reporte',
   MODERACION_BAJA_MASCOTA: 'Mascota dada de baja',
 };
 
@@ -94,6 +97,7 @@ async function encolarPushParaUsuario(
   if (dispositivos.length === 0) return;
 
   await encolarEnvioPush({
+    badge: await repo.contarNoLeidas(usuarioId),
     tokens: dispositivos.map((d) => d.expoPushToken),
     titulo: tituloPropio ?? TITULOS_PUSH[tipo] ?? TITULO_PUSH,
     cuerpo,

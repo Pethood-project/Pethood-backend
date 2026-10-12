@@ -696,7 +696,7 @@ async function avisarAdopcionAprobada(
             usuarioId,
             tipo: 'FAVORITO_ADOPTADO',
             mensaje: `${nombreMascota}, que tenías en favoritos, ya fue adoptada.`,
-            entidadTipo: 'MASCOTA',
+            entidadTipo: 'FAVORITOS',
             entidadId: mascota.id,
             canal: { push: true },
           }),

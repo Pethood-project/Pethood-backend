@@ -21,6 +21,8 @@ export interface JobEnviarPush {
   cuerpo: string;
   datos?: Record<string, unknown>;
   silencioso?: boolean;
+  /** Cantidad de no leídas, para el número en el ícono de la app. */
+  badge?: number;
 }
 
 export interface JobEnviarMail {

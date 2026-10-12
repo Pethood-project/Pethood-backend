@@ -275,7 +275,7 @@ async function avisarCampaniaFinalizada(
           mensaje: metaAlcanzada
             ? `¡La campaña "${campania.titulo}" alcanzó su meta!`
             : `La campaña "${campania.titulo}" finalizó.`,
-          entidadTipo: 'CAMPANIA',
+          entidadTipo: 'CAMPANIA_REFUGIO',
           entidadId: campania.id,
           canal: { push: true },
         }),
@@ -552,7 +552,7 @@ export async function obtenerCampania(id: number): Promise<CampaniaDto> {
 async function avisarDonacionPorConfirmar(
   refugioId: number,
   tituloCampania: string,
-  donacionId: number,
+  campaniaId: number,
   monto: number,
 ): Promise<void> {
   try {
@@ -564,14 +564,14 @@ async function avisarDonacionPorConfirmar(
           usuarioId,
           tipo: 'DONACION_NUEVA',
           mensaje: `Tenés una donación de $${monto} para confirmar en "${tituloCampania}".`,
-          entidadTipo: 'DONACION',
-          entidadId: donacionId,
+          entidadTipo: 'CAMPANIA_REFUGIO',
+          entidadId: campaniaId,
           canal: { push: true },
         }),
       ),
     );
   } catch (err) {
-    console.error('No se pudo avisar la donación por confirmar', donacionId, err);
+    console.error('No se pudo avisar la donación por confirmar', campaniaId, err);
   }
 }
 
@@ -646,7 +646,7 @@ export async function donar(
   // retoma el cron.
   // Desde otro banco Mercado Pago no informa quién transfirió: la confirma el refugio (spec 027).
   if (datos.origen === 'OTRO_BANCO') {
-    await avisarDonacionPorConfirmar(campania.refugioId, campania.titulo, donacion.id, datos.monto);
+    await avisarDonacionPorConfirmar(campania.refugioId, campania.titulo, campania.id, datos.monto);
     return aDtoDonacion(donacion);
   }
 
@@ -740,6 +740,14 @@ export async function conciliarGrupo(
         entidad: 'Donacion',
         entidadId: par.donacionId,
         detalle: `pago=${par.pagoId}`,
+      });
+      await notificaciones.notificar({
+        usuarioId: grupo.usuarioId,
+        tipo: 'DONACION_CONFIRMADA',
+        mensaje: `Confirmamos tu donación de $${grupo.monto}. ¡Gracias por ayudar!`,
+        entidadTipo: 'CAMPANIA',
+        entidadId: pendiente.campaniaId,
+        canal: { push: true },
       });
       await cerrarSiCompleta(pendiente.campaniaId);
     }
