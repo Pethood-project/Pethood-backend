@@ -464,6 +464,10 @@ export async function cambiarEstadoPublicacion(
     await avisarFavoritosNoDisponibles(publicacion.mascota.id, publicacion.mascota.nombre);
   }
 
+  if (accion === 'REACTIVAR') {
+    await avisarFavoritosDisponibles(publicacion.mascota.id, publicacion.mascota.nombre);
+  }
+
   return obtenerPublicacion(publicacion.id, usuarioId, ambito);
 }
 
@@ -508,7 +512,7 @@ async function avisarFavoritosNoDisponibles(
         notificaciones.notificar({
           usuarioId,
           tipo: 'FAVORITO_NO_DISPONIBLE',
-          mensaje: `${mascota}, que tenías en favoritos, dejó de estar disponible`,
+          mensaje: `${mascota}, que tenías en favoritos, ya no está disponible. Te avisaremos si vuelve.`,
           entidadTipo: 'MASCOTA',
           entidadId: mascotaId,
           canal: { push: true },
@@ -517,6 +521,32 @@ async function avisarFavoritosNoDisponibles(
     );
   } catch (err) {
     console.error('No se pudo avisar los favoritos no disponibles de la mascota', mascotaId, err);
+  }
+}
+
+/** Cumple lo que promete `avisarFavoritosNoDisponibles`: la mascota volvió a estar disponible. */
+async function avisarFavoritosDisponibles(
+  mascotaId: number,
+  nombreMascota: string | null,
+): Promise<void> {
+  try {
+    const usuarioIds = await favoritos.listarUsuariosConFavorito(mascotaId);
+    const mascota = nombreMascota ?? 'la mascota';
+
+    await Promise.all(
+      usuarioIds.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'FAVORITO_DISPONIBLE',
+          mensaje: `${mascota}, que tenías en favoritos, volvió a estar disponible.`,
+          entidadTipo: 'MASCOTA',
+          entidadId: mascotaId,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar los favoritos disponibles de la mascota', mascotaId, err);
   }
 }
 

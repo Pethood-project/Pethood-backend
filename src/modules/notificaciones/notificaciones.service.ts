@@ -20,8 +20,48 @@ import type {
 } from './notificaciones.dto';
 import * as repo from './notificaciones.repository';
 
-/** Nombre fijo del título de push: el cuerpo (`mensaje`) ya trae el contenido real. */
+/** Título de respaldo: el cuerpo (`mensaje`) ya trae el contenido real. */
 const TITULO_PUSH = 'PetHood';
+
+/**
+ * Título del push según el tipo. Android ya muestra "PetHood" arriba (nombre de la app), así
+ * que acá va el asunto corto de la notificación. Un tipo sin entrada usa `TITULO_PUSH`.
+ */
+const TITULOS_PUSH: Record<string, string> = {
+  CONTRASENA_CAMBIADA: 'Contraseña cambiada',
+  PERFIL_INCOMPLETO: 'Completá tu perfil',
+  SOLICITUD_NUEVA: 'Nueva solicitud',
+  SOLICITUD_ACEPTADA: 'Solicitud aceptada',
+  SOLICITUD_RECHAZADA: 'Solicitud rechazada',
+  ADOPCION_COMPLETADA: 'Adopción completada',
+  SOLICITUD_MASCOTA_ADOPTADA_POR_OTRO: 'Mascota adoptada',
+  PUBLICACION_PAUSADA_CON_SOLICITUD: 'Publicación no disponible',
+  FAVORITO_NO_DISPONIBLE: 'Favorito no disponible',
+  MENSAJE_CHAT: 'Nuevo mensaje',
+  USUARIO_VALIDADO: 'Cuenta validada',
+  CUENTA_SUSPENDIDA: 'Cuenta suspendida',
+  REFUGIO_APROBADO: 'Refugio validado',
+  REFUGIO_SUSPENDIDO: 'Refugio suspendido',
+  TRANSITO_POR_COMENZAR: 'Tránsito por comenzar',
+  TRANSITO_POR_VENCER: 'Tránsito por terminar',
+  SEGUIMIENTO_NUEVO: 'Seguimiento nuevo',
+  SEGUIMIENTO_RECORDATORIO_24H: 'Seguimiento por vencer',
+  SEGUIMIENTO_VENCIDO: 'Seguimiento vencido',
+  SEGUIMIENTO_DESCUIDO: 'Seguimiento sin enviar',
+  SEGUIMIENTO_PREGUNTA_REFUGIO: 'Pregunta del refugio',
+  SEGUIMIENTO_RESPONDIDO: 'Seguimiento recibido',
+  FAVORITO_DISPONIBLE: 'Favorito disponible',
+  FAVORITO_ADOPTADO: 'Mascota adoptada',
+  RESENA_RECIBIDA: 'Nueva reseña',
+  DONACION_NUEVA: 'Donación por confirmar',
+  DONACION_CONFIRMADA: 'Donación confirmada',
+  DONACION_RECHAZADA: 'Donación no confirmada',
+  CAMPANIA_META_ALCANZADA: 'Campaña completa',
+  CAMPANIA_FINALIZADA: 'Campaña finalizada',
+  REPORTE_RESUELTO: 'Reporte resuelto',
+  MODERACION_BAJA: 'Publicación dada de baja',
+  MODERACION_BAJA_MASCOTA: 'Mascota dada de baja',
+};
 
 type NotificacionFila = Awaited<ReturnType<typeof repo.crear>>;
 
@@ -44,16 +84,18 @@ async function avisarEnVivo(usuarioId: number, item: NotificacionItemDto): Promi
 
 async function encolarPushParaUsuario(
   usuarioId: number,
+  tipo: string,
   cuerpo: string,
   datos: { entidadTipo: string | null; entidadId: number | null },
   silencioso?: boolean,
+  tituloPropio?: string,
 ): Promise<void> {
   const dispositivos = await repo.listarDispositivosActivos(usuarioId);
   if (dispositivos.length === 0) return;
 
   await encolarEnvioPush({
     tokens: dispositivos.map((d) => d.expoPushToken),
-    titulo: TITULO_PUSH,
+    titulo: tituloPropio ?? TITULOS_PUSH[tipo] ?? TITULO_PUSH,
     cuerpo,
     datos,
     silencioso,
@@ -107,6 +149,7 @@ export async function notificar(input: NotificarInput): Promise<void> {
     if (canal.push && !estaEnLinea(input.usuarioId)) {
       await encolarPushParaUsuario(
         input.usuarioId,
+        input.tipo,
         input.mensaje,
         { entidadTipo: item.entidadTipo, entidadId: item.entidadId },
         input.silenciosoDeNoche,
@@ -171,11 +214,37 @@ export async function enviarMailDirecto(mail: {
   }
 }
 
+/**
+ * Solo el push, para los avisos cuya fila de bandeja ya escribió otro repository (reporte
+ * resuelto, baja por moderación). Mismo criterio que `notificar`: sin push si la app está
+ * abierta, y nunca tira.
+ */
+export async function notificarSoloPush(input: {
+  usuarioId: number;
+  tipo: string;
+  mensaje: string;
+  entidadTipo?: string;
+  entidadId?: number;
+}): Promise<void> {
+  try {
+    if (estaEnLinea(input.usuarioId)) return;
+
+    await encolarPushParaUsuario(input.usuarioId, input.tipo, input.mensaje, {
+      entidadTipo: input.entidadTipo ?? null,
+      entidadId: input.entidadId ?? null,
+    });
+  } catch (err) {
+    console.error(`No se pudo mandar el push (tipo=${input.tipo}, usuarioId=${input.usuarioId}):`, err);
+  }
+}
+
 export interface NotificarMensajeChatInput {
   destinatarioId: number;
   chatId: number;
   /** Ya armado por `chats.service.ts` ("Tenés 3 mensajes nuevos de X") — ver regla 4. */
   mensaje: string;
+  /** Lo que muestra el push: nombre de quien escribe y su mensaje (ya recortado). */
+  push?: { titulo: string; cuerpo: string };
 }
 
 /**
@@ -202,10 +271,14 @@ export async function notificarMensajeChat(input: NotificarMensajeChatInput): Pr
     await avisarEnVivo(input.destinatarioId, item);
 
     if (!estaEnLinea(input.destinatarioId)) {
-      await encolarPushParaUsuario(input.destinatarioId, input.mensaje, {
-        entidadTipo: item.entidadTipo,
-        entidadId: item.entidadId,
-      });
+      await encolarPushParaUsuario(
+        input.destinatarioId,
+        'MENSAJE_CHAT',
+        input.push?.cuerpo ?? input.mensaje,
+        { entidadTipo: item.entidadTipo, entidadId: item.entidadId },
+        undefined,
+        input.push?.titulo,
+      );
     }
   } catch (err) {
     console.error(`No se pudo notificar el mensaje de chat ${input.chatId}:`, err);

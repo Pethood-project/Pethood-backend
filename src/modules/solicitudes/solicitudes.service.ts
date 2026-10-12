@@ -17,6 +17,7 @@
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
 import * as chats from '../chats/chats.service';
+import * as favoritos from '../favoritos/favoritos.service';
 import * as notificaciones from '../notificaciones/notificaciones.service';
 import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
@@ -455,7 +456,7 @@ async function avisarSolicitudNueva(solicitud: SolicitudConDetalle): Promise<voi
           usuarioId,
           tipo: 'SOLICITUD_NUEVA',
           mensaje: `${nombreAdoptante} quiere adoptar a ${nombreMascota}`,
-          asuntoMail: `Nueva solicitud de adopción — ${nombreMascota}`,
+          asuntoMail: `Nueva solicitud de adopción: ${nombreMascota}`,
           entidadTipo: 'SOLICITUD',
           entidadId: solicitud.id,
           canal: { mail: true, push: true },
@@ -656,7 +657,7 @@ async function avisarAdopcionAprobada(
         notificaciones.notificar({
           usuarioId: destId,
           tipo: 'ADOPCION_COMPLETADA',
-          mensaje: `Adopción de ${nombreMascota} completada — ya arrancó el seguimiento`,
+          mensaje: `La adopción de ${nombreMascota} se completó, ya empezó el seguimiento`,
           entidadTipo: 'SOLICITUD',
           entidadId: solicitud.id,
           canal: { push: true },
@@ -676,6 +677,30 @@ async function avisarAdopcionAprobada(
           canal: { push: true },
         }),
       ),
+    );
+
+    // Quienes la tenían en favoritos y no la habían solicitado: no se les avisó arriba. Una
+    // adopción es definitiva, así que el texto no promete que vuelva.
+    const yaAvisados = new Set([
+      solicitud.usuarioId,
+      ...destinatarios,
+      ...rechazados.map((otra) => otra.usuarioId),
+    ]);
+    const conFavorito = await favoritos.listarUsuariosConFavorito(mascota.id);
+
+    await Promise.all(
+      conFavorito
+        .filter((usuarioId) => !yaAvisados.has(usuarioId))
+        .map((usuarioId) =>
+          notificaciones.notificar({
+            usuarioId,
+            tipo: 'FAVORITO_ADOPTADO',
+            mensaje: `${nombreMascota}, que tenías en favoritos, ya fue adoptada.`,
+            entidadTipo: 'MASCOTA',
+            entidadId: mascota.id,
+            canal: { push: true },
+          }),
+        ),
     );
   } catch (err) {
     console.error('No se pudo avisar la adopción aprobada', solicitud.id, err);
@@ -706,7 +731,7 @@ export async function avisarPendientesHaceMucho(ahora: Date = new Date()): Promi
           usuarioId,
           tipo: 'SOLICITUD_PENDIENTE_HACE_MUCHO',
           mensaje: `Tenés una solicitud por ${nombreMascota} sin responder hace varios días`,
-          asuntoMail: `Solicitud pendiente — ${nombreMascota}`,
+          asuntoMail: `Solicitud pendiente: ${nombreMascota}`,
           entidadTipo: 'SOLICITUD',
           entidadId: solicitud.id,
           canal: { mail: true },

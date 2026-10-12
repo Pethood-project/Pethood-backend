@@ -275,8 +275,9 @@ export function buscarDonacion(id: number) {
     select: {
       id: true,
       campaniaId: true,
+      usuarioId: true,
       estadoDonacion: { select: { nombre: true } },
-      campania: { select: { refugioId: true } },
+      campania: { select: { refugioId: true, titulo: true } },
     },
   });
 }

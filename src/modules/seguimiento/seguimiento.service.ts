@@ -183,7 +183,7 @@ async function avisarRecordatorio24h(
       notificaciones.notificarUnaVez({
         usuarioId: solicitud.usuarioId,
         tipo: 'SEGUIMIENTO_RECORDATORIO_24H',
-        mensaje: `Todavía podés contarnos cómo está ${mascota} — se te vence pronto`,
+        mensaje: `Todavía podés contarnos cómo está ${mascota}. Te queda poco tiempo para responder.`,
         entidadTipo: 'SEGUIMIENTO',
         entidadId: seguimiento.id,
         canal: { push: true },
@@ -299,7 +299,7 @@ async function avisarPedidosNuevos(
       notificaciones.notificarUnaVez({
         usuarioId: solicitud.usuarioId,
         tipo: 'SEGUIMIENTO_NUEVO',
-        mensaje: `Toca contarnos cómo está ${mascota}. Tenés 48 h para responder.`,
+        mensaje: `Es momento de contarnos cómo está ${mascota}. Tenés 48 h para responder.`,
         entidadTipo: 'SEGUIMIENTO',
         entidadId: seguimiento.id,
         canal: { push: true },
@@ -337,7 +337,7 @@ async function avisarVencidos(
       notificaciones.notificar({
         usuarioId: solicitud.publicacion.usuarioId,
         tipo: TIPO_NOTIFICACION_VENCIDO,
-        mensaje: `${MENSAJE_NO_ENVIADO} — ${mascota}`,
+        mensaje: `${MENSAJE_NO_ENVIADO} (${mascota})`,
         entidadTipo: 'SEGUIMIENTO',
         entidadId: seguimiento.id,
         canal: { mail: true, push: true },
@@ -379,7 +379,7 @@ async function avisarDescuido(
   await notificaciones.notificarUnaVez({
     usuarioId: solicitud.publicacion.usuarioId,
     tipo: 'SEGUIMIENTO_DESCUIDO',
-    mensaje: `Van ${totalVencidos} actualizaciones de seguimiento sin enviar — ${mascota}`,
+    mensaje: `${mascota} lleva ${totalVencidos} actualizaciones de seguimiento sin enviar. Conviene ponerse en contacto.`,
     entidadTipo: 'SOLICITUD',
     entidadId: solicitud.id,
     canal: { mail: true, push: true },
@@ -662,7 +662,7 @@ export async function enviarPregunta(
     await notificaciones.notificar({
       usuarioId: solicitud.usuarioId,
       tipo: TIPO_NOTIFICACION_PREGUNTA_REFUGIO,
-      mensaje: `${MENSAJE_PREGUNTA_REFUGIO} — ${mascota}`,
+      mensaje: `${MENSAJE_PREGUNTA_REFUGIO} (${mascota})`,
       entidadTipo: 'SEGUIMIENTO',
       entidadId: creado.id,
       canal: { push: true },
@@ -858,6 +858,15 @@ export async function subirActualizacion(
     entidad: 'Seguimiento',
     entidadId: seguimientoId,
     detalle: `solicitud=${solicitud.id}`,
+  });
+
+  await notificaciones.notificar({
+    usuarioId: solicitud.publicacion.usuarioId,
+    tipo: 'SEGUIMIENTO_RESPONDIDO',
+    mensaje: `Llegó una nueva actualización de seguimiento de ${solicitud.publicacion.mascota.nombre ?? 'la mascota'}.`,
+    entidadTipo: 'SEGUIMIENTO',
+    entidadId: seguimientoId,
+    canal: { push: true },
   });
 
   // El número de pedido es su posición dentro de la secuencia de esa solicitud.

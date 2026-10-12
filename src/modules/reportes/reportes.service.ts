@@ -14,6 +14,7 @@ import { registrarAuditoria } from '../../shared/logAuditoria';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import { firmarUrlsArchivo } from '../../shared/urlFirmada';
 import type { CrearReporteBody, FiltrosReportes, ResolverReporteBody } from './reportes.dto';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import * as repo from './reportes.repository';
 
 /** Máximo de reportes pendientes por usuario (regla 7 transversal: anti-spam). */
@@ -411,6 +412,11 @@ export async function resolver(adminId: number, id: number, body: ResolverReport
     respuesta: body.respuesta,
     reportanteId: reporte.usuarioAlta,
     mensajeAviso: `Un administrador resolvió tu reporte. Respuesta: ${body.respuesta}`,
+  });
+  await notificaciones.notificarSoloPush({
+    usuarioId: reporte.usuarioAlta,
+    tipo: 'REPORTE_RESUELTO',
+    mensaje: 'Un administrador resolvió tu reporte. Mirá la respuesta en tus notificaciones.',
   });
   await registrarAuditoria({
     usuarioId: adminId,

@@ -131,20 +131,33 @@ export function listarDispositivosActivos(usuarioId: number) {
   });
 }
 
-/** Upsert por `(usuarioId, expoPushToken)`: reloguearse en el mismo dispositivo no duplica. */
+/**
+ * Upsert por `(usuarioId, expoPushToken)`: reloguearse en el mismo dispositivo no duplica.
+ *
+ * Un token es de UN celular, y en un celular hay una sola sesión: al registrarlo para este
+ * usuario se da de baja para cualquier otro. Sin esto, si alguien cerró sesión sin que el
+ * logout llegara a dar de baja el token (sin conexión, app cerrada a la fuerza), el celular
+ * seguía recibiendo los push de la cuenta anterior.
+ */
 export function registrarDispositivo(usuarioId: number, expoPushToken: string, plataforma: string) {
-  return prisma.dispositivoPush.upsert({
-    where: { usuarioId_expoPushToken: { usuarioId, expoPushToken } },
-    create: { usuarioId, expoPushToken, plataforma, ...datosAlta(usuarioId) },
-    // Reactiva un dispositivo que se había dado de baja (logout previo) al volver a loguearse.
-    update: {
-      plataforma,
-      fechaBaja: null,
-      usuarioBaja: null,
-      usuarioModificacion: usuarioId,
-      fechaModificacion: new Date(),
-    },
-  });
+  return prisma.$transaction([
+    prisma.dispositivoPush.updateMany({
+      where: { expoPushToken, usuarioId: { not: usuarioId }, fechaBaja: null },
+      data: datosBaja(usuarioId),
+    }),
+    prisma.dispositivoPush.upsert({
+      where: { usuarioId_expoPushToken: { usuarioId, expoPushToken } },
+      create: { usuarioId, expoPushToken, plataforma, ...datosAlta(usuarioId) },
+      // Reactiva un dispositivo que se había dado de baja (logout previo) al volver a loguearse.
+      update: {
+        plataforma,
+        fechaBaja: null,
+        usuarioBaja: null,
+        usuarioModificacion: usuarioId,
+        fechaModificacion: new Date(),
+      },
+    }),
+  ]);
 }
 
 export function darDeBajaDispositivo(usuarioId: number, expoPushToken: string) {

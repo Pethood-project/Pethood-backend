@@ -45,6 +45,8 @@ import {
 import * as repo from './campanias.repository';
 import { buscarPagos, TokenMercadoPagoInvalido } from '../mercadopago/mercadopago.cliente';
 import * as mpService from '../mercadopago/mercadopago.service';
+import * as notificaciones from '../notificaciones/notificaciones.service';
+import { destinatariosPublicador } from '../solicitudes/solicitudes.service';
 import { emparejar, VENTANA_ANTES_MS, VENTANA_DESPUES_MS } from './campanias.conciliacion';
 import { programarReintentos } from './campanias.reintentos';
 
@@ -250,7 +252,38 @@ async function aplicarReglaAutomatica(
     detalle: `${desde} -> ${hacia} (automático)`,
   });
 
+  if (hacia === ESTADO_CAMPANIA.FINALIZADA) {
+    await avisarCampaniaFinalizada(campania, recaudado >= Number(campania.objetivo));
+  }
+
   return repo.buscarPorId(campania.id);
+}
+
+/** Al refugio: la campaña cerró, por meta alcanzada o por fecha. Best-effort. */
+async function avisarCampaniaFinalizada(
+  campania: repo.CampaniaConRelaciones,
+  metaAlcanzada: boolean,
+): Promise<void> {
+  try {
+    const destinatarios = await destinatariosPublicador({ refugioId: campania.refugioId }, 0);
+
+    await Promise.all(
+      destinatarios.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: metaAlcanzada ? 'CAMPANIA_META_ALCANZADA' : 'CAMPANIA_FINALIZADA',
+          mensaje: metaAlcanzada
+            ? `¡La campaña "${campania.titulo}" alcanzó su meta!`
+            : `La campaña "${campania.titulo}" finalizó.`,
+          entidadTipo: 'CAMPANIA',
+          entidadId: campania.id,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar el cierre de la campaña', campania.id, err);
+  }
 }
 
 // ─────────────── REFUGIO ───────────────
@@ -462,6 +495,19 @@ export async function resolverDonacion(
     ...(motivo ? { detalle: `motivo=${motivo}` } : {}),
   });
 
+  await notificaciones.notificar({
+    usuarioId: donacion.usuarioId,
+    tipo: datos.estado === ESTADO_DONACION.REALIZADA ? 'DONACION_CONFIRMADA' : 'DONACION_RECHAZADA',
+    mensaje:
+      datos.estado === ESTADO_DONACION.REALIZADA
+        ? `Confirmamos tu donación a "${donacion.campania.titulo}". ¡Gracias por ayudar!`
+        : `No pudimos confirmar tu donación a "${donacion.campania.titulo}". Revisá los datos de la transferencia.`,
+    entidadTipo: 'CAMPANIA',
+    entidadId: donacion.campaniaId,
+    canal: { push: true },
+    usuarioAlta: usuarioId,
+  });
+
   if (datos.estado === ESTADO_DONACION.REALIZADA) await cerrarSiCompleta(donacion.campaniaId);
 
   const actualizada = await repo.buscarDonacionCompleta(donacion.id);
@@ -500,6 +546,33 @@ export async function obtenerCampania(id: number): Promise<CampaniaDto> {
   }
 
   return aDto(campania, await resumenDe(id));
+}
+
+/** Al refugio: hay una transferencia que tiene que revisar y confirmar a mano. Best-effort. */
+async function avisarDonacionPorConfirmar(
+  refugioId: number,
+  tituloCampania: string,
+  donacionId: number,
+  monto: number,
+): Promise<void> {
+  try {
+    const destinatarios = await destinatariosPublicador({ refugioId }, 0);
+
+    await Promise.all(
+      destinatarios.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'DONACION_NUEVA',
+          mensaje: `Tenés una donación de $${monto} para confirmar en "${tituloCampania}".`,
+          entidadTipo: 'DONACION',
+          entidadId: donacionId,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar la donación por confirmar', donacionId, err);
+  }
 }
 
 /** HU-12.3: «Terminar donación». Nace Pendiente y NO suma al progreso. */
@@ -572,7 +645,10 @@ export async function donar(
   // transferencia suele acreditarse antes de «Terminar donación». Si todavía no aparece, lo
   // retoma el cron.
   // Desde otro banco Mercado Pago no informa quién transfirió: la confirma el refugio (spec 027).
-  if (datos.origen === 'OTRO_BANCO') return aDtoDonacion(donacion);
+  if (datos.origen === 'OTRO_BANCO') {
+    await avisarDonacionPorConfirmar(campania.refugioId, campania.titulo, donacion.id, datos.monto);
+    return aDtoDonacion(donacion);
+  }
 
   const grupo = { refugioId: campania.refugioId, usuarioId, monto: datos.monto };
   const confirmadas = await conciliarGrupo(grupo);

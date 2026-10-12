@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { env } from '../../config/env';
 import { AppError } from '../../middlewares/errorHandler';
 import type { Ambito } from '../../shared/ambito';
 import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocoding';
@@ -270,15 +271,12 @@ export async function darDeBajaCuenta(usuarioId: number): Promise<void> {
     entidadId: usuarioId,
   });
 
-  await notificaciones.notificar({
-    usuarioId,
-    tipo: 'CUENTA_BAJA',
-    mensaje: 'Tu cuenta de PetHood fue dada de baja.',
-    asuntoMail: 'Tu cuenta de PetHood fue dada de baja',
-    entidadTipo: 'PERFIL',
-    entidadId: usuarioId,
-    canal: { mail: true },
-    usuarioAlta: usuarioId,
+  // Solo mail: con la cuenta dada de baja ya no puede entrar, así que una fila de bandeja
+  // nunca se vería.
+  await notificaciones.enviarMailDirecto({
+    to: usuario.email,
+    asunto: 'Tu cuenta de PetHood fue dada de baja',
+    texto: `Tu cuenta de PetHood fue dada de baja.\n\nSi no fuiste vos, escribinos a ${env.MAIL_SOPORTE}.`,
   });
 }
 

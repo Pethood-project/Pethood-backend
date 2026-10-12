@@ -333,7 +333,7 @@ describe('aviso al publicador por seguimiento vencido (HU-9.1)', () => {
     expect(notificaciones.notificar).toHaveBeenCalledWith(
       expect.objectContaining({
         tipo: 'SEGUIMIENTO_VENCIDO',
-        mensaje: 'Actualización de seguimiento no enviado — Rex',
+        mensaje: 'Actualización de seguimiento no enviado (Rex)',
         usuarioId: PUBLICADOR.id,
       }),
     );

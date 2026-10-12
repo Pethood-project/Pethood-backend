@@ -1,6 +1,7 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { aFechaISO } from '../../shared/validation/dates';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import type { FiltrosMascotas } from './admin-mascotas.dto';
 import * as repo from './admin-mascotas.repository';
 import type { MascotaAdmin } from './admin-mascotas.repository';
@@ -87,6 +88,11 @@ export async function darDeBaja(adminId: number, id: number, motivo: string) {
     usuarioId: m.usuarioId,
     adminId,
     mensaje: `Un administrador dio de baja a tu mascota «${m.nombre ?? 'sin nombre'}». Motivo: ${motivo}`,
+  });
+  await notificaciones.notificarSoloPush({
+    usuarioId: m.usuarioId,
+    tipo: 'MODERACION_BAJA_MASCOTA',
+    mensaje: `Un administrador dio de baja a tu mascota «${m.nombre ?? 'sin nombre'}». Mirá el motivo en tus notificaciones.`,
   });
   await registrarAuditoria({
     usuarioId: adminId,

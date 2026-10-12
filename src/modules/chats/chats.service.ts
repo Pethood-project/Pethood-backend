@@ -713,7 +713,10 @@ export async function enviarMensaje(
 
   emisor.emitirMensajeNuevo(dto, participantes);
 
-  await avisarDestinatarios(contexto.usuarioId, contexto.chatId, participantes);
+  await avisarDestinatarios(contexto.usuarioId, contexto.chatId, participantes, {
+    texto: datos.contenido ?? '',
+    cantidadImagenes: imagenes.length,
+  });
 
   return dto;
 }
@@ -725,10 +728,26 @@ export async function enviarMensaje(
  * `notificaciones.notificarMensajeChat` con un upsert; acá solo se arma el texto y se decide
  * a quién le toca.
  */
+const LARGO_MAXIMO_VISTA_PREVIA = 90;
+
+/** Lo que se ve en el push: el texto recortado, o un aviso si el mensaje es solo imágenes. */
+function vistaPreviaDelMensaje(mensaje: { texto: string; cantidadImagenes: number }): string {
+  const texto = mensaje.texto.replace(/\s+/g, ' ').trim();
+
+  if (texto === '') {
+    return mensaje.cantidadImagenes > 1 ? 'Te envió fotos' : 'Te envió una foto';
+  }
+
+  return texto.length > LARGO_MAXIMO_VISTA_PREVIA
+    ? `${texto.slice(0, LARGO_MAXIMO_VISTA_PREVIA - 1).trimEnd()}…`
+    : texto;
+}
+
 async function avisarDestinatarios(
   remitenteId: number,
   chatId: number,
   participantesIds: number[],
+  contenido: { texto: string; cantidadImagenes: number },
 ): Promise<void> {
   const destinatarios = participantesIds.filter((id) => id !== remitenteId);
   if (destinatarios.length === 0) return;
@@ -736,8 +755,15 @@ async function avisarDestinatarios(
   // Best-effort, mismo criterio que `asegurarChatDeSolicitud`: el mensaje ya se guardó y se
   // emitió por socket; que la bandeja/push falle no puede convertir el envío en un error.
   try {
-    const remitente = await repo.buscarNombreUsuario(remitenteId);
-    const nombreRemitente = remitente ? `${remitente.nombre} ${remitente.apellido}` : 'alguien';
+    // Si la sala es con un refugio y escribe alguien de ese refugio, habla el refugio: el
+    // destinatario ve su nombre y no el de la persona que atendió.
+    const { usuario: remitente, refugio } = await repo.buscarRemitenteDeAviso(remitenteId, chatId);
+    const habloComoRefugio = refugio !== null && remitente?.refugioId === refugio.id;
+    const nombreRemitente = habloComoRefugio
+      ? refugio.nombre
+      : remitente
+        ? `${remitente.nombre} ${remitente.apellido}`
+        : 'alguien';
 
     await Promise.all(
       destinatarios.map(async (destinatarioId) => {
@@ -752,7 +778,18 @@ async function avisarDestinatarios(
             ? `Nuevo mensaje de ${nombreRemitente}`
             : `Tenés ${noLeidos} mensajes nuevos de ${nombreRemitente}`;
 
-        await notificaciones.notificarMensajeChat({ destinatarioId, chatId, mensaje });
+        await notificaciones.notificarMensajeChat({
+          destinatarioId,
+          chatId,
+          mensaje,
+          push: {
+            titulo:
+              noLeidos <= 1
+                ? nombreRemitente
+                : `${nombreRemitente} (${noLeidos} mensajes nuevos)`,
+            cuerpo: vistaPreviaDelMensaje(contenido),
+          },
+        });
       }),
     );
   } catch (err) {

@@ -44,10 +44,15 @@ const envSchema = z.object({
   // docker-compose; en producción, a Upstash (`rediss://...`).
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
-  // Resend (mail transaccional). Sin key, el envío de mail queda deshabilitado y solo se
-  // loguea — igual que R2, no debe tirar abajo el server en un ambiente sin configurar.
-  RESEND_API_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
-  MAIL_FROM: z.string().default('PetHood <onboarding@resend.dev>'),
+  // SMTP (mail transaccional). Sin usuario/contraseña, el envío de mail queda deshabilitado y
+  // solo se loguea — igual que R2, no debe tirar abajo el server en un ambiente sin configurar.
+  SMTP_HOST: z.string().default('smtp.gmail.com'),
+  SMTP_PORT: z.coerce.number().int().default(465),
+  SMTP_USER: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  SMTP_PASS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  // Mail al que se indica escribir en los avisos de cuenta (suspensión, baja).
+  MAIL_SOPORTE: z.string().email().default('pethood.mdz@gmail.com'),
 
   // Expo Push. El "access token" solo hace falta si se activa Enhanced Security en el
   // dashboard de Expo; sin él, el envío funciona igual.

@@ -424,7 +424,7 @@ export async function solicitarRecuperacion(body: RecuperarBody): Promise<Respue
   await notificaciones.enviarMailDirecto({
     to: usuario.email,
     asunto: 'Tu código para restablecer la contraseña',
-    texto: `Tu código es ${codigo}. Vence en poco tiempo — si no lo pediste vos, ignorá este mensaje.`,
+    texto: `Tu código es ${codigo}. Vence en poco tiempo. Si no lo pediste vos, ignorá este mensaje.`,
   });
 
   if (env.NODE_ENV !== 'production') {

@@ -1,6 +1,7 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { aFechaISO } from '../../shared/validation/dates';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import { TRANSICIONES } from '../publicaciones/publicaciones.service';
 import { deObjeto } from '../reportes/reportes.service';
 import type { EstadoBody, FiltrosPublicaciones } from './admin-publicaciones.dto';
@@ -130,6 +131,11 @@ export async function darDeBaja(adminId: number, id: number, motivo: string) {
     usuarioId: pub.usuarioId,
     adminId,
     mensaje: `Un administrador dio de baja tu publicación «${pub.titulo}». Motivo: ${motivo}`,
+  });
+  await notificaciones.notificarSoloPush({
+    usuarioId: pub.usuarioId,
+    tipo: 'MODERACION_BAJA',
+    mensaje: `Un administrador dio de baja tu publicación «${pub.titulo}». Mirá el motivo en tus notificaciones.`,
   });
   await registrarAuditoria({
     usuarioId: adminId,

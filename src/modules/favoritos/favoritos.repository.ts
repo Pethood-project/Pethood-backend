@@ -50,10 +50,22 @@ export function listarVisiblesDeUsuario(usuarioId: number) {
             where: { fechaBaja: null },
             select: {
               id: true,
+              // Todas las solicitudes del usuario sobre la publicación (no solo la abierta):
+              // la aprobada es la que dice que la adoptó él y no otra persona.
               solicitudes: {
-                where: { usuarioId, fechaBaja: null, fechaRespuesta: null },
-                select: { id: true },
-                take: 1,
+                where: { usuarioId, fechaBaja: null },
+                select: {
+                  id: true,
+                  fechaRespuesta: true,
+                  tipoSolicitud: { select: { nombre: true } },
+                  historicoEstados: {
+                    where: { fechaBaja: null },
+                    select: { estadoSolicitud: { select: { nombre: true } } },
+                    orderBy: { fechaAlta: 'desc' },
+                    take: 1,
+                  },
+                },
+                orderBy: { id: 'desc' },
               },
             },
             take: 1,

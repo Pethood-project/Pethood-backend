@@ -1,3 +1,4 @@
+import { env } from '../../config/env';
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import * as notificaciones from '../notificaciones/notificaciones.service';
@@ -178,15 +179,11 @@ export async function suspenderUsuario(adminId: number, usuarioId: number, motiv
     detalle: motivo,
   });
 
-  await notificaciones.notificar({
-    usuarioId,
-    tipo: 'CUENTA_SUSPENDIDA',
-    mensaje: `Tu cuenta fue suspendida: ${motivo}`,
-    asuntoMail: 'Tu cuenta de PetHood fue suspendida',
-    entidadTipo: 'PERFIL',
-    entidadId: usuarioId,
-    canal: { mail: true, push: true },
-    usuarioAlta: adminId,
+  // Solo mail: con la cuenta suspendida ya no puede entrar, así que no hay bandeja que ver.
+  await notificaciones.enviarMailDirecto({
+    to: actualizado.email,
+    asunto: 'Tu cuenta de PetHood fue suspendida',
+    texto: `Tu cuenta de PetHood fue suspendida: ${motivo}\n\nSi creés que es un error, escribinos a ${env.MAIL_SOPORTE}.`,
   });
 
   return aUsuarioDto(actualizado);
@@ -238,15 +235,12 @@ export async function bajaUsuario(adminId: number, usuarioId: number, motivo: st
     detalle: motivo,
   });
 
-  await notificaciones.notificar({
-    usuarioId,
-    tipo: 'CUENTA_BAJA',
-    mensaje: `Tu cuenta de PetHood fue dada de baja: ${motivo}`,
-    asuntoMail: 'Tu cuenta de PetHood fue dada de baja',
-    entidadTipo: 'PERFIL',
-    entidadId: usuarioId,
-    canal: { mail: true },
-    usuarioAlta: adminId,
+  // Solo mail: con la cuenta dada de baja ya no puede entrar, así que una fila de bandeja
+  // nunca se vería.
+  await notificaciones.enviarMailDirecto({
+    to: actualizado.email,
+    asunto: 'Tu cuenta de PetHood fue dada de baja',
+    texto: `Tu cuenta de PetHood fue dada de baja: ${motivo}\n\nSi creés que es un error, escribinos a ${env.MAIL_SOPORTE}.`,
   });
 
   return aUsuarioDto(actualizado);
@@ -403,7 +397,7 @@ export async function altaRefugio(adminId: number, body: AltaRefugioBody) {
           usuarioId,
           tipo: 'REFUGIO_NUEVO_PENDIENTE',
           mensaje: `${refugio.nombre} está esperando validación`,
-          asuntoMail: `Nuevo refugio pendiente de validación — ${refugio.nombre}`,
+          asuntoMail: `Nuevo refugio pendiente de validación: ${refugio.nombre}`,
           entidadTipo: 'REFUGIO',
           entidadId: refugio.id,
           canal: { mail: true },
