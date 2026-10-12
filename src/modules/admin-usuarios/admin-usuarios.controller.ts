@@ -39,7 +39,7 @@ export async function obtenerUsuario(
   next: NextFunction,
 ): Promise<void> {
   try {
-    res.json(await service.obtenerDetalleUsuario(idDeParametro(req)));
+    res.json(await service.obtenerDetalleUsuario(req.usuario!.usuarioId, idDeParametro(req)));
   } catch (err) {
     next(err);
   }

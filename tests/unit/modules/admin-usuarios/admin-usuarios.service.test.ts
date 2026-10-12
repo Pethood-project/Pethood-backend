@@ -34,6 +34,7 @@ vi.mock('../../../../src/shared/logAuditoria', () => ({
 }));
 
 import * as repo from '../../../../src/modules/admin-usuarios/admin-usuarios.repository';
+import { registrarAuditoria } from '../../../../src/shared/logAuditoria';
 import * as service from '../../../../src/modules/admin-usuarios/admin-usuarios.service';
 
 const mockedRepo = vi.mocked(repo);
@@ -314,17 +315,44 @@ describe('obtenerDetalleUsuario', () => {
     mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake());
     mockedRepo.resumenUsuario.mockResolvedValue({ mascotas: 1, solicitudes: 2, donaciones: 0 });
 
-    const r = await service.obtenerDetalleUsuario(5);
+    const r = await service.obtenerDetalleUsuario(1, 5);
 
     expect(r.usuario).toMatchObject({ id: 5, refugio: null });
     expect(r.resumen).toEqual({ mascotas: 1, solicitudes: 2, donaciones: 0 });
     expect(r.resenas.cantidad).toBe(0);
   });
 
+  it('audita el acceso a los documentos con las rutas de los archivos', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake());
+    mockedRepo.resumenUsuario.mockResolvedValue({ mascotas: 0, solicitudes: 0, donaciones: 0 });
+
+    await service.obtenerDetalleUsuario(1, 5);
+
+    expect(registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usuarioId: 1,
+        accion: 'VER_DOCUMENTOS_USUARIO',
+        entidadId: 5,
+        detalle: expect.stringContaining('documentos-identidad/dni.jpg'),
+      }),
+    );
+  });
+
+  it('no audita si el usuario no tiene documentos', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ dniImagenUrl: null, selfieUrl: null }),
+    );
+    mockedRepo.resumenUsuario.mockResolvedValue({ mascotas: 0, solicitudes: 0, donaciones: 0 });
+
+    await service.obtenerDetalleUsuario(1, 5);
+
+    expect(registrarAuditoria).not.toHaveBeenCalled();
+  });
+
   it('usuario inexistente lanza USUARIO_NO_ENCONTRADO', async () => {
     mockedRepo.buscarUsuario.mockResolvedValue(null);
 
-    await expect(service.obtenerDetalleUsuario(9)).rejects.toMatchObject({
+    await expect(service.obtenerDetalleUsuario(1, 9)).rejects.toMatchObject({
       codigo: 'USUARIO_NO_ENCONTRADO',
     });
   });

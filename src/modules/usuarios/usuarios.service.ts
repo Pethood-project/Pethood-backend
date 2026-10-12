@@ -209,7 +209,14 @@ export async function subirDocumentos(usuarioId: number, archivos: ArchivosDocum
     accion: 'SUBIR_DOCUMENTOS',
     entidad: 'Usuario',
     entidadId: usuarioId,
-    detalle: [dni ? 'dni' : null, selfie ? 'selfie' : null].filter(Boolean).join('+'),
+    // Las rutas reemplazadas quedan acá: el archivo viejo sigue en storage (no se borra) y
+    // sin esto no habría forma de volver a encontrarlo.
+    detalle: [
+      dni ? `dni=${dniImagenUrl} (antes=${actual.dniImagenUrl ?? '-'})` : null,
+      selfie ? `selfie=${selfieUrl} (antes=${actual.selfieUrl ?? '-'})` : null,
+    ]
+      .filter(Boolean)
+      .join(' '),
   });
 
   return {

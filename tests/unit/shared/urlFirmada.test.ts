@@ -174,3 +174,19 @@ describe('normalizarRutaArchivo (esquive de la firma con `..`)', () => {
     expect(esRutaPrivada('/DOCUMENTOS-IDENTIDAD/abc.jpg')).toBe(true);
   });
 });
+
+describe('ventana de los documentos de identidad', () => {
+  it('vence en 10 minutos como mucho, no en horas', () => {
+    const url = firmarUrlArchivo('/api/v1/archivos/documentos-identidad/dni.jpg')!;
+    const { exp } = partes(url);
+    const restante = Number(exp) - Date.now();
+
+    expect(restante).toBeGreaterThan(0);
+    expect(restante).toBeLessThanOrEqual(10 * 60 * 1000);
+  });
+
+  it('el resto de las privadas conserva su ventana larga', () => {
+    const { exp } = partes(firmarUrlArchivo(CHAT)!);
+    expect(Number(exp) - Date.now()).toBeGreaterThan(60 * 60 * 1000);
+  });
+});

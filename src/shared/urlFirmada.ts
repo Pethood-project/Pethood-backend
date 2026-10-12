@@ -57,6 +57,15 @@ const NAMESPACES_PRIVADOS = new Set([
 /** Cuánto dura una firma, y cada cuánto cambia. */
 const VENTANA_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Ventana más corta para lo que es documentación de identidad: un link filtrado de un DNI no
+ * puede seguir sirviendo medio día. La URL vale entre 1 y 2 ventanas (5–10 min); quien tenga
+ * la pantalla abierta más tiempo tiene que volver a pedir el detalle. El caché del cliente
+ * no importa acá: son dos imágenes que se miran una vez.
+ */
+const VENTANA_DOCUMENTOS_MS = 5 * 60 * 1000;
+const NAMESPACE_DOCUMENTOS = 'documentos-identidad';
+
 /** Longitud de la firma en hex. 32 caracteres son 128 bits: de sobra, y no infla la URL. */
 const LARGO_FIRMA = 32;
 
@@ -66,8 +75,8 @@ const LARGO_FIRMA = 32;
  * Se suman dos ventanas y no una para que una URL emitida justo antes del corte no nazca
  * venciendo en dos segundos.
  */
-function vencimiento(ahora: number): number {
-  return (Math.floor(ahora / VENTANA_MS) + 2) * VENTANA_MS;
+function vencimiento(ahora: number, ventanaMs: number = VENTANA_MS): number {
+  return (Math.floor(ahora / ventanaMs) + 2) * ventanaMs;
 }
 
 function calcularFirma(rutaRelativa: string, exp: number): string {
@@ -123,7 +132,9 @@ export function firmarUrlArchivo(url: string | null | undefined): string | null 
 
   if (!esRutaPrivada(rutaRelativa)) return url;
 
-  const exp = vencimiento(Date.now());
+  const primerTramo = rutaRelativa.replace(/^\/+/, '').split('/')[0]?.toLowerCase();
+  const ventana = primerTramo === NAMESPACE_DOCUMENTOS ? VENTANA_DOCUMENTOS_MS : VENTANA_MS;
+  const exp = vencimiento(Date.now(), ventana);
   return `${url}?exp=${exp}&sig=${calcularFirma(rutaRelativa, exp)}`;
 }
 

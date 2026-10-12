@@ -87,8 +87,19 @@ export async function listarUsuarios(filtros: FiltrosUsuarios) {
   };
 }
 
-export async function obtenerDetalleUsuario(id: number) {
+export async function obtenerDetalleUsuario(adminId: number, id: number) {
   const usuario = await buscarUsuarioOFallar(id);
+
+  // Acceso a datos sensibles: queda quién los vio y qué archivos eran (rutas, sin firma).
+  if (usuario.dniImagenUrl || usuario.selfieUrl) {
+    await registrarAuditoria({
+      usuarioId: adminId,
+      accion: 'VER_DOCUMENTOS_USUARIO',
+      entidad: 'Usuario',
+      entidadId: id,
+      detalle: `dni=${usuario.dniImagenUrl ?? '-'} selfie=${usuario.selfieUrl ?? '-'}`,
+    });
+  }
   const [resumen, resenas] = await Promise.all([repo.resumenUsuario(id), listarDeUsuario(id)]);
 
   return {
