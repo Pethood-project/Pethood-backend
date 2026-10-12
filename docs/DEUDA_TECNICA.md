@@ -68,6 +68,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 38 | Las donaciones desde otro banco o billetera no se confirman solas | Media | ambos |
 | 39 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
 | 40 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
+| 41 | Documentos de identidad: archivos huérfanos al reemplazar y expuestos si se activa R2 | Media | backend |
 
 ---
 
@@ -793,3 +794,14 @@ plan gratis de Neon agotándose el doble de rápido).
 
 **Cómo se arregla.** Cambiar el import de `usuarios.repository.ts` a `shared/prisma.ts` y
 borrar `config/prisma.ts` si ningún otro archivo lo usa.
+
+## 41. Documentos de identidad: archivos huérfanos al reemplazar y expuestos si se activa R2 — Media
+
+**Qué pasa.** Spec 002.1 guarda DNI y selfie en `documentos-identidad/` (namespace privado, URL
+firmada). Dos huecos conocidos: (1) al reemplazar un documento el archivo viejo queda huérfano
+en storage, no se borra; (2) vale lo del ítem 14: con R2 activado las URLs absolutas no se firman,
+y el DNI de la gente quedaría accesible con solo tener el link.
+
+**Cómo se arregla.** Borrar el archivo anterior con `borrarImagen` al reemplazar (o cron de
+limpieza), y resolver el ítem 14 **antes** de activar R2 en producción: esto sube la urgencia, ya
+no son fotos de mascotas.
