@@ -4,9 +4,9 @@
  * El listado resuelve el último mensaje y el conteo de no leídos de TODOS los chats con dos
  * queries fijas, no una por chat: ver `ultimoMensajePorChat` y `contarNoLeidosPorChat`.
  *
- * Lo que se escribe es el alta de un mensaje, las marcas de lectura y entrega del
- * participante y el alta de una sala; nunca hay baja ni modificación de `Mensaje`:
- * MODELO_DATOS.md lo declara excepción de auditoría (solo alta).
+ * Lo que se escribe es el alta de un mensaje, su baja lógica (el autor lo eliminó), las marcas
+ * de lectura y entrega del participante y el alta de una sala. Nunca hay modificación de
+ * `Mensaje`, y la baja no borra la fila: ver `darDeBajaMensaje`.
  *
  * **Leído y entregado viven en `UsuarioChat`, no en `Mensaje`.** Cada participante guarda
  * hasta qué momento tiene la sala leída y recibida, así que el estado de un mensaje es una
@@ -15,7 +15,25 @@
  */
 import { Prisma, type TipoMensaje } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta, datosModificacion } from '../../shared/auditoria';
+import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
+
+/**
+ * Lo que hace falta del mensaje citado para pintar la cita dentro de la burbuja que responde:
+ * quién lo escribió, el texto, si llevaba fotos o video y si ya se eliminó.
+ *
+ * Viaja como `include` de cada mensaje —un JOIN en la misma query del historial— y no en una
+ * segunda pasada por ids: la relación es 1 a 1 y la página tiene como mucho 50 filas.
+ */
+const CITA_MENSAJE = {
+  select: {
+    id: true,
+    usuarioId: true,
+    contenido: true,
+    imagenes: true,
+    tipo: true,
+    fechaBaja: true,
+  },
+} as const;
 
 /**
  * Salas donde el usuario es participante ACTIVO, con el refugio y el otro participante.
@@ -110,6 +128,8 @@ export interface UltimoMensajeFila {
   imagenUrl: string | null;
   tipo: TipoMensaje;
   fechaAlta: Date;
+  /** El autor lo eliminó: el preview dice "Se eliminó este mensaje". */
+  fechaBaja: Date | null;
 }
 
 /**
@@ -137,7 +157,8 @@ export function ultimoMensajePorChat(chatIds: number[]): Promise<UltimoMensajeFi
            m."usuario_id"         AS "usuarioId",
            m."mensaje_imagen_url" AS "imagenUrl",
            m."mensaje_tipo"       AS "tipo",
-           m."mensaje_fecha_alta" AS "fechaAlta"
+           m."mensaje_fecha_alta" AS "fechaAlta",
+           m."mensaje_fecha_baja" AS "fechaBaja"
       FROM "mensaje" m
      WHERE m."chat_id" IN (${Prisma.join(chatIds)})
      ORDER BY m."chat_id", m."mensaje_fecha_alta" DESC, m."mensaje_id" DESC
@@ -290,6 +311,9 @@ export function buscarSalaConContacto(usuarioId: number, chatId: number) {
  * fila de la sala. Cae sobre `mensaje_chat_fecha_alta_idx`, que ya existe desde HU-5.1.
  *
  * `skip: 1` sobre el cursor porque `antesDe` es un mensaje que el cliente YA tiene.
+ *
+ * Los mensajes eliminados vienen igual —la sala los pinta como el aviso "Se eliminó este
+ * mensaje"—: vaciarles el contenido es trabajo del service, que arma el DTO.
  */
 export function listarMensajes(chatId: number, limite: number, antesDe?: number) {
   return prisma.mensaje.findMany({
@@ -297,19 +321,24 @@ export function listarMensajes(chatId: number, limite: number, antesDe?: number)
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
     take: limite + 1,
     ...(antesDe === undefined ? {} : { cursor: { id: antesDe }, skip: 1 }),
-  });
-}
-
-/** ¿El mensaje del cursor pertenece a esta sala? Evita paginar con un id de otro chat. */
-export function buscarMensajeDeChat(chatId: number, mensajeId: number) {
-  return prisma.mensaje.findFirst({
-    where: { id: mensajeId, chatId },
-    select: { id: true },
+    include: { mensajeRespondido: CITA_MENSAJE },
   });
 }
 
 /**
- * Alta de mensaje. Nunca se edita ni se borra.
+ * ¿El mensaje pertenece a esta sala? Es el guard del cursor del historial (un id de otro chat
+ * paginaría desde cualquier lado), del mensaje que se cita al responder y del que se elimina:
+ * en los tres casos, un id de otra sala no puede tocar ésta.
+ */
+export function buscarMensajeDeChat(chatId: number, mensajeId: number) {
+  return prisma.mensaje.findFirst({
+    where: { id: mensajeId, chatId },
+    select: { id: true, usuarioId: true, tipo: true, fechaBaja: true },
+  });
+}
+
+/**
+ * Alta de mensaje. Nunca se edita; lo único que puede pasarle después es su baja lógica.
  *
  * `imagenUrl` guarda la PRIMERA de `imagenes`, desnormalizada, para que el preview del
  * listado no tenga que mirar el array — mismo par que en `Publicacion`.
@@ -325,6 +354,7 @@ export function crearMensaje(datos: {
   tipo?: TipoMensaje;
   solicitudId?: number | null;
   animalPerdidoId?: number | null;
+  mensajeRespondidoId?: number | null;
 }) {
   return prisma.mensaje.create({
     data: {
@@ -336,8 +366,27 @@ export function crearMensaje(datos: {
       tipo: datos.tipo ?? 'TEXTO',
       solicitudId: datos.solicitudId ?? null,
       animalPerdidoId: datos.animalPerdidoId ?? null,
+      mensajeRespondidoId: datos.mensajeRespondidoId ?? null,
       ...datosAlta(datos.usuarioId),
     },
+    // La misma forma que el historial: el DTO del envío lleva la cita ya resuelta.
+    include: { mensajeRespondido: CITA_MENSAJE },
+  });
+}
+
+/**
+ * Baja lógica de un mensaje: el autor lo eliminó.
+ *
+ * **La fila no se borra, ni sus adjuntos.** La sala la sigue listando como el aviso "Se
+ * eliminó este mensaje" —y las respuestas que lo citaban siguen apuntando a algo—, y si alguien
+ * lo había reportado el administrador lo sigue viendo entero en el contexto del reporte. Lo
+ * que deja de salir hacia los participantes es el contenido, y eso lo resuelve el DTO.
+ */
+export function darDeBajaMensaje(mensajeId: number, usuarioId: number) {
+  return prisma.mensaje.update({
+    where: { id: mensajeId },
+    data: datosBaja(usuarioId),
+    select: { id: true },
   });
 }
 

@@ -22,7 +22,7 @@ npx prisma generate   # si el cliente no se regeneró solo
 Reglas del schema:
 
 - Toda entidad nueva lleva auditoría completa: `usuario_alta`, `fecha_alta`, `usuario_modificacion`, `fecha_modificacion`, `usuario_baja`, `fecha_baja`. Bajas lógicas, nunca DELETE físico.
-- Excepciones conocidas: `Mensaje` solo tiene alta; `Historia_Clinica` nunca se actualiza (baja + alta de uno nuevo).
+- Excepciones conocidas: `Mensaje` tiene alta y baja lógica pero nunca modificación (desde 2026-10-12, ver MODELO_DATOS.md); `Historia_Clinica` nunca se actualiza (baja + alta de uno nuevo).
 - Nombres de campo según MODELO_DATOS.md (convención snake_case física).
 
 ## Paso 2 — Sincronizar limits.ts (si cambiaron longitudes/rangos)

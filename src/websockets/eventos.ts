@@ -13,6 +13,8 @@ export const EVENTOS = {
   SALIR: 'chat:salir',
   /** server → cliente. Un mensaje nuevo, con la misma forma que el del historial. */
   MENSAJE_NUEVO: 'chat:mensaje-nuevo',
+  /** server → cliente. El autor eliminó un mensaje: la burbuja pasa a ser el aviso. */
+  MENSAJE_ELIMINADO: 'chat:mensaje-eliminado',
   /** server → sala. Alguien leyó la conversación: habilita el doble check del emisor. */
   LEIDO: 'chat:leido',
   /** server → sala. A alguien le LLEGARON los mensajes, aunque no los haya abierto. */

@@ -11,7 +11,7 @@
  * cliente que no recibió el evento se entera igual al refetchear.
  */
 import type { Server } from 'socket.io';
-import type { MensajeDto } from '../modules/chats/chats.dto';
+import type { MensajeDto, MensajeEliminadoDto } from '../modules/chats/chats.dto';
 import type { NotificacionItemDto } from '../modules/notificaciones/notificaciones.dto';
 import { EVENTOS, salaChat, salaUsuario } from './eventos';
 import { socketsDe } from './presencia';
@@ -48,6 +48,25 @@ export function emitirMensajeNuevo(mensaje: MensajeDto, participantesIds: number
   );
 
   destino.emit(EVENTOS.MENSAJE_NUEVO, mensaje);
+}
+
+/**
+ * Avisa que el autor eliminó un mensaje, a las salas PERSONALES de todos los participantes por
+ * lo mismo que el mensaje nuevo: si era el último de la conversación, el listado tiene que
+ * cambiar el preview aunque nadie tenga la sala abierta.
+ */
+export function emitirMensajeEliminado(
+  evento: MensajeEliminadoDto,
+  participantesIds: number[],
+): void {
+  if (!io || participantesIds.length === 0) return;
+
+  const destino = participantesIds.reduce(
+    (canal, usuarioId) => canal.to(salaUsuario(usuarioId)),
+    io.to(salaUsuario(participantesIds[0]!)),
+  );
+
+  destino.emit(EVENTOS.MENSAJE_ELIMINADO, evento);
 }
 
 /**
