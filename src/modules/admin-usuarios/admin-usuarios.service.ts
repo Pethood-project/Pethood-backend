@@ -1,5 +1,7 @@
+import { env } from '../../config/env';
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import { ESTADO_USUARIO, ROL_API, ROL_DB, rolApiADb, rolesDbAApi } from '../../shared/roles';
 import { listarDeRefugio, listarDeUsuario } from '../resenas/resenas.service';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
@@ -134,6 +136,16 @@ export async function verificarUsuario(adminId: number, usuarioId: number) {
     entidadId: usuarioId,
   });
 
+  await notificaciones.notificar({
+    usuarioId,
+    tipo: 'USUARIO_VALIDADO',
+    mensaje: 'Ya podés solicitar adopciones: validamos tu cuenta.',
+    entidadTipo: 'PERFIL',
+    entidadId: usuarioId,
+    canal: { push: true },
+    usuarioAlta: adminId,
+  });
+
   return aUsuarioDto(actualizado);
 }
 
@@ -165,6 +177,13 @@ export async function suspenderUsuario(adminId: number, usuarioId: number, motiv
     entidad: 'Usuario',
     entidadId: usuarioId,
     detalle: motivo,
+  });
+
+  // Solo mail: con la cuenta suspendida ya no puede entrar, así que no hay bandeja que ver.
+  await notificaciones.enviarMailDirecto({
+    to: actualizado.email,
+    asunto: 'Tu cuenta de PetHood fue suspendida',
+    texto: `Tu cuenta de PetHood fue suspendida: ${motivo}\n\nSi creés que es un error, escribinos a ${env.MAIL_SOPORTE}.`,
   });
 
   return aUsuarioDto(actualizado);
@@ -216,6 +235,14 @@ export async function bajaUsuario(adminId: number, usuarioId: number, motivo: st
     detalle: motivo,
   });
 
+  // Solo mail: con la cuenta dada de baja ya no puede entrar, así que una fila de bandeja
+  // nunca se vería.
+  await notificaciones.enviarMailDirecto({
+    to: actualizado.email,
+    asunto: 'Tu cuenta de PetHood fue dada de baja',
+    texto: `Tu cuenta de PetHood fue dada de baja: ${motivo}\n\nSi creés que es un error, escribinos a ${env.MAIL_SOPORTE}.`,
+  });
+
   return aUsuarioDto(actualizado);
 }
 
@@ -241,9 +268,10 @@ export async function gestionarRoles(adminId: number, usuarioId: number, body: R
     );
   }
 
-  if (body.agregar.includes(ROL_API.MIEMBRO_REFUGIO) && body.refugioId !== undefined) {
-    await buscarRefugioOFallar(body.refugioId);
-  }
+  const refugioDestino =
+    body.agregar.includes(ROL_API.MIEMBRO_REFUGIO) && body.refugioId !== undefined
+      ? await buscarRefugioOFallar(body.refugioId)
+      : null;
 
   for (const rolApi of body.agregar) {
     const rol = await repo.buscarRolPorNombre(rolApiADb(rolApi));
@@ -277,8 +305,21 @@ export async function gestionarRoles(adminId: number, usuarioId: number, body: R
     await repo.desasignarRefugio(usuarioId, adminId);
   }
 
-  if (body.agregar.includes(ROL_API.MIEMBRO_REFUGIO) && body.refugioId !== undefined) {
-    await repo.asignarRefugio(usuarioId, body.refugioId, adminId);
+  if (refugioDestino) {
+    await repo.asignarRefugio(usuarioId, refugioDestino.id, adminId);
+
+    if (refugioDestino.estado.nombre === 'Pendiente_Verificacion') {
+      await notificaciones.notificar({
+        usuarioId,
+        tipo: 'REFUGIO_REGISTRADO_PENDIENTE',
+        mensaje: `${refugioDestino.nombre} quedó registrado y a la espera de validación`,
+        asuntoMail: 'Tu refugio quedó a la espera de validación',
+        entidadTipo: 'REFUGIO',
+        entidadId: refugioDestino.id,
+        canal: { mail: true },
+        usuarioAlta: adminId,
+      });
+    }
   }
 
   await registrarAuditoria({
@@ -346,6 +387,28 @@ export async function altaRefugio(adminId: number, body: AltaRefugioBody) {
     entidadId: refugio.id,
   });
 
+  // "Nuevo refugio esperando validación", a todos los administradores. Best-effort: el
+  // refugio ya está creado, que el aviso falle no puede convertir eso en un 500.
+  try {
+    const admins = await repo.listarIdsAdmins();
+    await Promise.all(
+      admins.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'REFUGIO_NUEVO_PENDIENTE',
+          mensaje: `${refugio.nombre} está esperando validación`,
+          asuntoMail: `Nuevo refugio pendiente de validación: ${refugio.nombre}`,
+          entidadTipo: 'REFUGIO',
+          entidadId: refugio.id,
+          canal: { mail: true },
+          usuarioAlta: adminId,
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar a los admins del refugio nuevo', refugio.id, err);
+  }
+
   return aRefugioDto(refugio);
 }
 
@@ -373,7 +436,42 @@ export async function verificarRefugio(adminId: number, refugioId: number) {
     entidadId: refugioId,
   });
 
+  await avisarMiembrosRefugio(refugioId, {
+    tipo: 'REFUGIO_APROBADO',
+    mensaje: `¡${actualizado.nombre} fue validado! Ya podés publicar mascotas en adopción.`,
+    asuntoMail: `${actualizado.nombre} fue aprobado en PetHood`,
+    adminId,
+  });
+
   return aRefugioDto(actualizado);
+}
+
+/** A todos los miembros activos de un refugio (spec 004: aprobado/rechazado, suspendido).
+ * Best-effort: el cambio de estado del refugio ya se escribió antes de llamar acá. */
+async function avisarMiembrosRefugio(
+  refugioId: number,
+  datos: { tipo: string; mensaje: string; asuntoMail: string; adminId: number },
+): Promise<void> {
+  try {
+    const miembros = await repo.listarIdsMiembrosDeRefugio(refugioId);
+
+    await Promise.all(
+      miembros.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: datos.tipo,
+          mensaje: datos.mensaje,
+          asuntoMail: datos.asuntoMail,
+          entidadTipo: 'REFUGIO',
+          entidadId: refugioId,
+          canal: { mail: true, push: true },
+          usuarioAlta: datos.adminId,
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar a los miembros del refugio', refugioId, err);
+  }
 }
 
 export async function suspenderRefugio(adminId: number, refugioId: number, motivo: string) {
@@ -396,6 +494,13 @@ export async function suspenderRefugio(adminId: number, refugioId: number, motiv
     entidad: 'Refugio',
     entidadId: refugioId,
     detalle: motivo,
+  });
+
+  await avisarMiembrosRefugio(refugioId, {
+    tipo: 'REFUGIO_SUSPENDIDO',
+    mensaje: `${actualizado.nombre} fue suspendido: ${motivo}`,
+    asuntoMail: `${actualizado.nombre} fue suspendido en PetHood`,
+    adminId,
   });
 
   return aRefugioDto(actualizado);

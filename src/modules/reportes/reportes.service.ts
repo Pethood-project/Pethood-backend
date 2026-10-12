@@ -14,6 +14,7 @@ import { registrarAuditoria } from '../../shared/logAuditoria';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import { firmarUrlsArchivo } from '../../shared/urlFirmada';
 import type { CrearReporteBody, FiltrosReportes, ResolverReporteBody } from './reportes.dto';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import * as repo from './reportes.repository';
 
 /** Máximo de reportes pendientes por usuario (regla 7 transversal: anti-spam). */
@@ -258,6 +259,29 @@ async function cargarObjeto(
 
 const noEncontrado = () => new AppError('NO_ENCONTRADO', 'Lo que querés reportar no existe', 404);
 
+/** Best-effort: el reporte ya se guardó, un aviso que falla no lo revierte. */
+async function avisarReporteNuevo(reporteId: number, reportanteId: number): Promise<void> {
+  try {
+    const admins = await repo.listarIdsAdmins();
+
+    await Promise.all(
+      admins.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'REPORTE_NUEVO',
+          mensaje: 'Hay un nuevo reporte para revisar.',
+          entidadTipo: 'REPORTE',
+          entidadId: reporteId,
+          canal: { push: true },
+          usuarioAlta: reportanteId,
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar a los admins del reporte', reporteId, err);
+  }
+}
+
 /** HU-3.1, 3.2 y 3.3. */
 export async function crearReporte(usuarioId: number, datos: CrearReporteBody) {
   const actor = await repo.buscarUsuario(usuarioId);
@@ -292,6 +316,7 @@ export async function crearReporte(usuarioId: number, datos: CrearReporteBody) {
 
   try {
     const reporte = await repo.crear({ usuarioId: actor.id, ...datos });
+    await avisarReporteNuevo(reporte.id, actor.id);
     return {
       id: reporte.id,
       tipo: reporte.tipo,
@@ -411,6 +436,11 @@ export async function resolver(adminId: number, id: number, body: ResolverReport
     respuesta: body.respuesta,
     reportanteId: reporte.usuarioAlta,
     mensajeAviso: `Un administrador resolvió tu reporte. Respuesta: ${body.respuesta}`,
+  });
+  await notificaciones.notificarSoloPush({
+    usuarioId: reporte.usuarioAlta,
+    tipo: 'REPORTE_RESUELTO',
+    mensaje: 'Un administrador resolvió tu reporte. Mirá la respuesta en tus notificaciones.',
   });
   await registrarAuditoria({
     usuarioId: adminId,

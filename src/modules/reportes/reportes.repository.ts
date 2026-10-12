@@ -1,8 +1,18 @@
 import { Prisma, type TipoReporte } from '@prisma/client';
 import { datosAlta, datosModificacion } from '../../shared/auditoria';
 import { prisma } from '../../shared/prisma';
+import { ROL_DB } from '../../shared/roles';
 
 const PERSONA = { id: true, nombre: true, apellido: true } as const;
+
+/** Administradores activos: a quienes les llega el aviso de un reporte nuevo. */
+export async function listarIdsAdmins(): Promise<number[]> {
+  const filas = await prisma.rolUsuario.findMany({
+    where: { fechaBaja: null, rol: { nombre: ROL_DB.ADMIN }, usuario: { fechaBaja: null } },
+    select: { usuarioId: true },
+  });
+  return filas.map((fila) => fila.usuarioId);
+}
 
 export function buscarUsuario(usuarioId: number) {
   return prisma.usuario.findFirst({

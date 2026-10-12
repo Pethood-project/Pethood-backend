@@ -225,9 +225,23 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 
 ### Notificacion
 
-`notificacion_id PK`, `notificacion_tipo`, `notificacion_mensaje`, `notificacion_leido`, FK `usuario_id FK` (destinatario).
+`notificacion_id PK`, `notificacion_tipo`, `notificacion_mensaje`, `notificacion_leido`, `notificacion_entidad_tipo` (nullable), `notificacion_entidad_id` (nullable), FK `usuario_id FK` (destinatario).
 
-Disparada por eventos de: Solicitud (aceptada/rechazada/nueva), Chat/Mensaje (mensaje nuevo), Seguimiento (post-adopción, revisión).
+Es la bandeja (spec 004) — fuente de verdad de toda notificación, se envíe o no además por mail/push. `notificacion_tipo` es un código corto (`SOLICITUD_ACEPTADA`, `SEGUIMIENTO_VENCIDO`, etc.) y `notificacion_mensaje` el texto ya armado en voseo, listo para mostrar.
+
+`notificacion_entidad_tipo` / `notificacion_entidad_id` son **polimórficos a propósito** (no una FK real): le dicen al frontend a qué pantalla navegar al tocarla (`SOLICITUD`, `CHAT`, `SEGUIMIENTO`, `PUBLICACION`, `REFUGIO`, según el escenario). Si la entidad referenciada ya no existe, el cliente lo trata como "ya no disponible", no como un error.
+
+La baja lógica existente cumple doble función: "eliminar" una notificación de la bandeja (acción del usuario) y la retención de 30 días (job de sistema, `usuario_baja = SISTEMA`).
+
+Disparada por eventos de: Cuenta (alta, verificación, recuperación, cambio de contraseña, perfil incompleto), Solicitud (nueva, aceptada/rechazada, vencida, mascota adoptada por otro, etc.), Chat/Mensaje (mensaje nuevo, agrupado), Seguimiento (post-adopción, recordatorios, vencimiento, revisión), Refugios/Administración (validación, suspensión, baja). El resto de los escenarios del documento de notificaciones (Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica, Soporte) quedan pausados — ver `DEUDA_TECNICA.md`.
+
+### Dispositivo_Push
+
+`dispositivo_push_id PK`, `dispositivo_push_expo_push_token`, `dispositivo_push_plataforma` (`ios` | `android`), FK `usuario_id FK`.
+
+Un dispositivo físico puede tener push registrado para varios usuarios a la vez (ej. un dispositivo familiar compartido en distintos momentos): la unicidad es `(usuario_id, dispositivo_push_expo_push_token)`, no el token solo. Volver a loguearse con el mismo usuario en el mismo dispositivo actualiza la fila existente en vez de duplicarla.
+
+Baja lógica al cerrar sesión en ese dispositivo (regla 10 del documento de notificaciones) y también cuando Expo devuelve `DeviceNotRegistered` al intentar enviarle un push. El envío filtra siempre `dispositivo_push_fecha_baja IS NULL`.
 
 ### Hogar
 
@@ -410,6 +424,10 @@ Ver catálogos.
 
 - Notificacion
   -> Usuario (destinatario)
+  -> (entidad_tipo/entidad_id: referencia polimórfica de navegación, sin FK)
+
+- Dispositivo_Push
+  -> Usuario
 
 - Hogar
   -> Usuario

@@ -23,6 +23,8 @@ import type {
   ResumenResenasDto,
   TransaccionElegibleDto,
 } from './resenas.dto';
+import * as notificaciones from '../notificaciones/notificaciones.service';
+import { destinatariosPublicador } from '../solicitudes/solicitudes.service';
 import * as repo from './resenas.repository';
 
 type ResenaConAutor = Awaited<ReturnType<typeof repo.listarDeUsuario>>[number];
@@ -98,6 +100,42 @@ function resumir(resenas: ResenaConAutor[]): ResumenResenasDto {
   };
 }
 
+/** Best-effort: la reseña ya se guardó, un aviso que falla no la revierte. */
+async function avisarResenaRecibida(datos: {
+  puntuacion: number;
+  resenaId: number;
+  usuarioReportadoId: number | null;
+  refugioReportadoId: number | null;
+  publicadorUsuarioId: number;
+}): Promise<void> {
+  try {
+    const destinatarios =
+      datos.usuarioReportadoId !== null
+        ? [datos.usuarioReportadoId]
+        : await destinatariosPublicador(
+            { refugioId: datos.refugioReportadoId },
+            datos.publicadorUsuarioId,
+          );
+
+    const estrellas = datos.puntuacion === 1 ? '1 estrella' : `${datos.puntuacion} estrellas`;
+
+    await Promise.all(
+      destinatarios.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'RESENA_RECIBIDA',
+          mensaje: `Recibiste una nueva reseña de ${estrellas}.`,
+          entidadTipo: 'RESENA',
+          entidadId: datos.resenaId,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar la reseña recibida', datos.resenaId, err);
+  }
+}
+
 /** HU-10.1. Registra la reseña, validando que la transacción exista, esté concretada y que
  * el autor sea una de sus partes. */
 export async function crearResena(datos: CrearResenaDto, usuarioId: number): Promise<ResenaDto> {
@@ -169,6 +207,14 @@ export async function crearResena(datos: CrearResenaDto, usuarioId: number): Pro
     entidad: 'Resena',
     entidadId: creada.id,
     detalle: `solicitud ${datos.solicitudId} · ${datos.puntuacion}★`,
+  });
+
+  await avisarResenaRecibida({
+    puntuacion: datos.puntuacion,
+    resenaId: creada.id,
+    usuarioReportadoId,
+    refugioReportadoId,
+    publicadorUsuarioId: solicitud.publicacion.usuarioId,
   });
 
   return aResenaDto(creada);

@@ -235,6 +235,12 @@ export const LIMITES = {
     pagina: { porDefecto: 20, maximo: 50 },
   },
 
+  /** Bandeja de notificaciones (spec 004). */
+  notificacion: {
+    /** Tamaño de página de la bandeja y su techo (paginación por cursor). */
+    pagina: { porDefecto: 20, maximo: 50 },
+  },
+
   /** Campaña de donación (spec 026, HU-12.1). */
   campania: {
     /** La HU no lo fija: el equipo lo acotó a lo que entra en la tarjeta (spec 026 §6.1). */

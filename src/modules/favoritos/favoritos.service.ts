@@ -18,6 +18,8 @@ import { aFechaISO } from '../../shared/validation/dates';
 import type { FavoritoAgregadoDto, ListaFavoritosDto, MascotaFavoritaDto } from './favoritos.dto';
 import * as repo from './favoritos.repository';
 
+const TIPO_SOLICITUD_ADOPCION = 'Adopcion';
+
 type FavoritoConMascota = Awaited<ReturnType<typeof repo.listarVisiblesDeUsuario>>[number];
 type Favorito = Awaited<ReturnType<typeof repo.crear>>;
 
@@ -41,6 +43,15 @@ function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
   // Una mascota tiene una sola publicación viva a la vez; el `take: 1` del repository ya
   // la acota, acá solo se desarma el arreglo.
   const publicacion = mascota.publicaciones[0];
+  const solicitudes = publicacion?.solicitudes ?? [];
+
+  // Con la mascota en "Adoptado" el estado es el mismo para todos: lo que distingue "la
+  // adopté yo" de "la adoptó otra persona" es tener una solicitud de adopción aprobada.
+  const adoptadaPorMi = solicitudes.some(
+    (solicitud) =>
+      solicitud.tipoSolicitud?.nombre === TIPO_SOLICITUD_ADOPCION &&
+      solicitud.historicoEstados?.[0]?.estadoSolicitud.nombre === 'Aprobada',
+  );
 
   return {
     id: mascota.id,
@@ -52,7 +63,8 @@ function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
     estado: { id: estado.id, nombre: estado.nombre },
     refugio: mascota.refugio ? { id: mascota.refugio.id, nombre: mascota.refugio.nombre } : null,
     publicacionId: publicacion?.id ?? null,
-    solicitudAbiertaId: publicacion?.solicitudes[0]?.id ?? null,
+    solicitudAbiertaId: solicitudes.find((solicitud) => !solicitud.fechaRespuesta)?.id ?? null,
+    adoptadaPorMi,
     fechaAgregado: favorito.fechaAlta.toISOString(),
   };
 }
@@ -119,6 +131,11 @@ export async function quitarFavorito(mascotaId: number, usuarioId: number): Prom
   if (!favorito) return;
 
   await repo.darDeBaja(favorito.id, usuarioId);
+}
+
+/** Para `publicaciones.service.ts` (spec 004): a quién avisarle si una mascota que guardó deja de estar disponible. */
+export function listarUsuariosConFavorito(mascotaId: number): Promise<number[]> {
+  return repo.listarUsuariosConFavorito(mascotaId);
 }
 
 export async function listarFavoritos(usuarioId: number): Promise<ListaFavoritosDto> {

@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { env } from '../../config/env';
 import { AppError } from '../../middlewares/errorHandler';
 import type { Ambito } from '../../shared/ambito';
 import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocoding';
@@ -8,6 +9,7 @@ import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
 import type { ArchivoSubida } from '../../shared/r2';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
   PerfilPublicoUsuarioDto,
   ActualizarPerfilBody,
@@ -215,6 +217,17 @@ export async function cambiarPassword(usuarioId: number, body: CambiarPasswordBo
     entidad: 'Usuario',
     entidadId: usuarioId,
   });
+
+  await notificaciones.notificar({
+    usuarioId,
+    tipo: 'CONTRASENA_CAMBIADA',
+    mensaje: 'Tu contraseña se cambió. Si no fuiste vos, contactate con nosotros ya mismo.',
+    asuntoMail: 'Tu contraseña de PetHood cambió',
+    entidadTipo: 'PERFIL',
+    entidadId: usuarioId,
+    canal: { mail: true, push: true },
+    usuarioAlta: usuarioId,
+  });
 }
 
 /**
@@ -257,6 +270,38 @@ export async function darDeBajaCuenta(usuarioId: number): Promise<void> {
     entidad: 'Usuario',
     entidadId: usuarioId,
   });
+
+  // Solo mail: con la cuenta dada de baja ya no puede entrar, así que una fila de bandeja
+  // nunca se vería.
+  await notificaciones.enviarMailDirecto({
+    to: usuario.email,
+    asunto: 'Tu cuenta de PetHood fue dada de baja',
+    texto: `Tu cuenta de PetHood fue dada de baja.\n\nSi no fuiste vos, escribinos a ${env.MAIL_SOPORTE}.`,
+  });
+}
+
+const DIAS_PERFIL_INCOMPLETO = 2;
+const MS_POR_DIA = 24 * 60 * 60 * 1000;
+
+/** Job programado (spec 004): perfil incompleto a los 2-3 días de registrarse. Se avisa una
+ * sola vez por cuenta — `notificarUnaVez` evita repetirlo en cada corrida diaria. */
+export async function avisarPerfilesIncompletos(ahora: Date = new Date()): Promise<void> {
+  const desde = new Date(ahora.getTime() - DIAS_PERFIL_INCOMPLETO * MS_POR_DIA);
+  const usuarios = await repo.listarPerfilesIncompletos(desde);
+
+  await Promise.all(
+    usuarios.map((usuario) =>
+      notificaciones.notificarUnaVez({
+        usuarioId: usuario.id,
+        tipo: 'PERFIL_INCOMPLETO',
+        mensaje: `${usuario.nombre}, completá tu perfil para aprovechar PetHood al máximo`,
+        entidadTipo: 'PERFIL',
+        entidadId: usuario.id,
+        canal: { push: true },
+        silenciosoDeNoche: true,
+      }),
+    ),
+  );
 }
 
 /** Email del usuario SISTEMA (prisma/seed): una cuenta interna que no es un perfil. */

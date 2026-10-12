@@ -66,6 +66,8 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 36 | «Hoy» depende de la zona horaria del proceso Node, que no está fijada | Media | backend |
 | 37 | Sin webhook de Mercado Pago: una transferencia que llega después de «Terminar donación» tarda hasta 5 minutos en confirmarse | Baja | backend |
 | 38 | Las donaciones desde otro banco o billetera no se confirman solas | Media | ambos |
+| 39 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
+| 40 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
 
 ---
 
@@ -594,9 +596,17 @@ Tampoco existe un endpoint para que el reportante vea el estado y la respuesta d
 correo además del aviso en la app. El relevamiento de todos los puntos donde iría un
 correo está en [`MAIL.md`](MAIL.md).
 
-**Cómo se arregla.** Cuando se haga el Módulo 4: endpoints para listar y marcar como leídas
-las `Notificacion`, y enganchar `suspenderUsuario` y `suspenderRefugio` de `admin-usuarios` al
-mismo `crearNotificacion`. Mismo trabajo que la parte pendiente de la #25.
+**Parcialmente resuelto por la spec 004 (Módulo 4, 2026-09-29).** Ya existe la bandeja completa
+(`GET /notificaciones`, marcar leída/todas, eliminar) y `suspenderUsuario`/`suspenderRefugio`
+de `admin-usuarios` ya llaman a `notificaciones.notificar(...)` con mail + push. Lo que sigue
+sin resolver es específico de Moderación (Fase 2, pausada — ver #34): el reportante no tiene
+cómo ver el estado/respuesta de SU reporte, y "resolver un reporte" todavía no dispara ningún
+aviso (ni al reportante ni al reportado) porque el módulo de Moderación en sí no está hecho.
+
+**Cómo se termina de arreglar.** Cuando se implemente Moderación: enganchar la resolución de un
+reporte a `notificaciones.notificar(...)` (ya no hace falta tocar nada de bajo nivel, el
+servicio central ya existe) y, si se decide que el reportante necesita ver el detalle, un
+endpoint de "mis reportes". Mismo trabajo que la parte pendiente de la #25.
 
 ## 28. El dueño de un aviso de mascota perdida no puede retirarlo — ✅ **CERRADA**
 
@@ -754,3 +764,32 @@ refugio a mano.
 donante un monto exacto con centavos que ninguna otra donación pendiente de ese refugio esté
 usando (por ejemplo, $2.000,37), y un ingreso por ese monto exacto confirma la donación sin
 necesitar el DNI. Cambia el flujo de «Donar» (el monto se reserva antes de transferir).
+
+## 39. Notificaciones de Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica y Soporte — pausado a propósito
+
+**Qué pasa.** La spec 004 (Notificaciones) implementa el servicio central `notificar(...)`,
+la bandeja y los escenarios de "Fase 1" del documento fuente del módulo (Cuenta, Solicitudes,
+Chat, Seguimiento, Refugios/Administración). Los escenarios de "Fase 2" y "Fase 3" —
+Campañas, Mascotas Perdidas/Encontradas, Reputación, Moderación (salvo "cuenta suspendida",
+que sí está), Historia Clínica y Soporte— quedaron sin implementar, no por olvido: dependen de
+módulos que hoy no existen (Campañas, Reputación como endpoints propios) o que el equipo
+prefirió no tocar todavía (Mascotas Perdidas ya tiene módulo, pero sus notificaciones quedaron
+para cuando el resto de la app esté más completo). Decisión del usuario, 2026-09-29.
+
+**Cómo se retoma.** El servicio central ya existe (`modules/notificaciones/notificaciones.service.ts`,
+función `notificar(...)`): agregar estos escenarios es, en cada módulo nuevo, la misma llamada
+de 3-6 líneas que ya se usa en `solicitudes`/`seguimiento`/`chats` — no hace falta rediseñar
+nada, solo enganchar el módulo dueño cuando exista.
+
+## 40. `usuarios.repository.ts` usa un `PrismaClient` distinto al del resto del proyecto — Media
+
+**Qué pasa.** `src/modules/usuarios/usuarios.repository.ts` importa `prisma` desde
+`config/prisma.ts`, un `PrismaClient` propio, en vez de la instancia única de
+`shared/prisma.ts` que importan todos los demás `repository.ts`. Son dos pools de conexión
+distintos a la misma base — no rompe nada hoy (Postgres soporta varias conexiones sin
+problema), pero es la clase de divergencia silenciosa que un día explica un comportamiento
+raro (una transacción que no ve lo que la otra acaba de escribir, el límite de conexiones del
+plan gratis de Neon agotándose el doble de rápido).
+
+**Cómo se arregla.** Cambiar el import de `usuarios.repository.ts` a `shared/prisma.ts` y
+borrar `config/prisma.ts` si ningún otro archivo lo usa.

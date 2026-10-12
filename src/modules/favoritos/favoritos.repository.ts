@@ -50,10 +50,22 @@ export function listarVisiblesDeUsuario(usuarioId: number) {
             where: { fechaBaja: null },
             select: {
               id: true,
+              // Todas las solicitudes del usuario sobre la publicación (no solo la abierta):
+              // la aprobada es la que dice que la adoptó él y no otra persona.
               solicitudes: {
-                where: { usuarioId, fechaBaja: null, fechaRespuesta: null },
-                select: { id: true },
-                take: 1,
+                where: { usuarioId, fechaBaja: null },
+                select: {
+                  id: true,
+                  fechaRespuesta: true,
+                  tipoSolicitud: { select: { nombre: true } },
+                  historicoEstados: {
+                    where: { fechaBaja: null },
+                    select: { estadoSolicitud: { select: { nombre: true } } },
+                    orderBy: { fechaAlta: 'desc' },
+                    take: 1,
+                  },
+                },
+                orderBy: { id: 'desc' },
               },
             },
             take: 1,
@@ -68,6 +80,15 @@ export function listarVisiblesDeUsuario(usuarioId: number) {
 /** Favorito activo de este usuario sobre esta mascota, si lo hay. */
 export function buscarActivo(usuarioId: number, mascotaId: number) {
   return prisma.favorito.findFirst({ where: { usuarioId, mascotaId, fechaBaja: null } });
+}
+
+/** Quiénes tienen esta mascota en favoritos (spec 004: avisarles si deja de estar disponible). */
+export async function listarUsuariosConFavorito(mascotaId: number): Promise<number[]> {
+  const filas = await prisma.favorito.findMany({
+    where: { mascotaId, fechaBaja: null },
+    select: { usuarioId: true },
+  });
+  return filas.map((f) => f.usuarioId);
 }
 
 /**

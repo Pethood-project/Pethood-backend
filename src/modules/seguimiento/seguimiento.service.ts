@@ -4,6 +4,7 @@ import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
 import { firmarUrlArchivo } from '../../shared/urlFirmada';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
   ActualizacionCargadaDto,
   ActualizacionSeguimientoDto,
@@ -24,6 +25,7 @@ import {
   pedidosExigiblesA,
   plazoDeRespuesta,
   preguntasNoRepetibles,
+  programaDeSeguimiento,
   proximoAviso,
   type TipoFlujo,
 } from './seguimiento.secuencia';
@@ -120,9 +122,10 @@ function estadoDe(seguimiento: SeguimientoConPregunta, ahora: Date): EstadoSegui
  * avisa al publicador de los que vencieron sin respuesta.
  *
  * Es idempotente — correrla dos veces no duplica pedidos ni repite notificaciones — y por eso
- * puede llamarse desde la lectura. Ver spec 011 §9: el proyecto todavía no tiene scheduler,
- * así que si esto no corriera al leer, ningún pedido aparecería nunca. El día que exista el
- * job basta con llamar a esta misma función desde ahí.
+ * puede llamarse tanto desde la lectura (spec 011 §9, para que el pedido aparezca aunque el
+ * job programado todavía no haya corrido) como desde el job de la spec 004
+ * (`sincronizarTodasLasActivas`, más abajo), que la corre cada 1h para que los avisos salgan
+ * aunque nadie abra la app.
  */
 async function sincronizarSolicitud(
   solicitud: SolicitudEnSeguimiento,
@@ -148,9 +151,103 @@ async function sincronizarSolicitud(
     (a, b) => a.fechaAlta.getTime() - b.fechaAlta.getTime() || a.id - b.id,
   );
 
+  await avisarRecordatorio24h(solicitud, seguimientos, ahora);
   await avisarVencidos(solicitud, seguimientos, ahora);
+  await avisarSeguimientoTerminado(solicitud, seguimientos, flujo, aprobacion, ahora);
 
   return seguimientos;
+}
+
+/**
+ * Cierre de la secuencia: ya se pidieron todas las actualizaciones que prevé el programa y no
+ * queda ninguna abierta. Una sola vez por solicitud (`notificarUnaVez`), al adoptante y a quien
+ * publicó.
+ */
+async function avisarSeguimientoTerminado(
+  solicitud: SolicitudEnSeguimiento,
+  seguimientos: SeguimientoConPregunta[],
+  flujo: TipoFlujo,
+  aprobacion: Date,
+  ahora: Date,
+): Promise<void> {
+  const previstos = programaDeSeguimiento(aprobacion, flujo).length;
+  if (previstos === 0) return;
+
+  const automaticos = seguimientos.filter((seguimiento) => !seguimiento.esManual).length;
+  const hayAbiertos = seguimientos.some(
+    (seguimiento) => estadoDe(seguimiento, ahora) === 'PENDIENTE',
+  );
+  if (automaticos < previstos || hayAbiertos) return;
+
+  const mascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
+
+  await Promise.all([
+    notificaciones.notificarUnaVez({
+      usuarioId: solicitud.usuarioId,
+      tipo: 'SEGUIMIENTO_TERMINADO',
+      mensaje: `Terminó el seguimiento de ${mascota}. ¡Gracias por cuidarla!`,
+      entidadTipo: 'SOLICITUD',
+      entidadId: solicitud.id,
+      canal: { push: true },
+    }),
+    notificaciones.notificarUnaVez({
+      usuarioId: solicitud.publicacion.usuarioId,
+      tipo: 'SEGUIMIENTO_TERMINADO',
+      mensaje: `Terminó el seguimiento de ${mascota}.`,
+      entidadTipo: 'SOLICITUD',
+      entidadId: solicitud.id,
+      canal: { push: true },
+    }),
+  ]);
+}
+
+const HORAS_RECORDATORIO = 24;
+
+/**
+ * Recordatorio a las 24h de un pedido pendiente (spec 004, Fase 1). `notificarUnaVez` es lo
+ * que evita repetirlo en cada corrida del job: no hay una marca propia en `Seguimiento` para
+ * esto (a diferencia de `avisarVencidos`, que ya tenía `fechaModificacion`), así que la
+ * bandeja misma hace de registro de "ya avisé".
+ */
+async function avisarRecordatorio24h(
+  solicitud: SolicitudEnSeguimiento,
+  seguimientos: SeguimientoConPregunta[],
+  ahora: Date,
+): Promise<void> {
+  const limite = HORAS_RECORDATORIO * 60 * 60 * 1000;
+  const mascota = solicitud.publicacion.mascota.nombre ?? 'tu mascota';
+
+  const aRecordar = seguimientos.filter(
+    (seguimiento) =>
+      estadoDe(seguimiento, ahora) === 'PENDIENTE' &&
+      seguimiento.fechaAlta.getTime() + limite <= ahora.getTime(),
+  );
+
+  await Promise.all(
+    aRecordar.map((seguimiento) =>
+      notificaciones.notificarUnaVez({
+        usuarioId: solicitud.usuarioId,
+        tipo: 'SEGUIMIENTO_RECORDATORIO_24H',
+        mensaje: `Todavía podés contarnos cómo está ${mascota}. Te queda poco tiempo para responder.`,
+        entidadTipo: 'SEGUIMIENTO',
+        entidadId: seguimiento.id,
+        canal: { push: true },
+      }),
+    ),
+  );
+}
+
+/**
+ * Entrypoint del job programado (spec 004, entregable 4): recorre TODAS las solicitudes
+ * aprobadas del sistema (no las de un usuario puntual) y las deja al día, generando los
+ * pedidos y avisos que correspondan. Se llama desde `jobs/notificaciones.scheduler.ts`.
+ */
+export async function sincronizarTodasLasActivas(ahora: Date = new Date()): Promise<void> {
+  const solicitudes = await repo.listarTodasAprobadas();
+
+  for (const solicitud of solicitudes) {
+    await sincronizarSolicitud(solicitud, ahora);
+  }
 }
 
 /**
@@ -228,7 +325,32 @@ async function crearPedidosFaltantes(
   // Se refleja en memoria: la programada ya la usó un pedido, deja de estar esperando.
   if (programada === null) solicitud.preguntasSeguimiento = [];
 
+  await avisarPedidosNuevos(solicitud, creados);
+
   return creados;
+}
+
+/** "Seguimiento nuevo disponible": al adoptante, uno por cada pedido recién creado. */
+async function avisarPedidosNuevos(
+  solicitud: SolicitudEnSeguimiento,
+  creados: SeguimientoConPregunta[],
+): Promise<void> {
+  if (creados.length === 0) return;
+
+  const mascota = solicitud.publicacion.mascota.nombre ?? 'tu mascota';
+
+  await Promise.all(
+    creados.map((seguimiento) =>
+      notificaciones.notificarUnaVez({
+        usuarioId: solicitud.usuarioId,
+        tipo: 'SEGUIMIENTO_NUEVO',
+        mensaje: `Es momento de contarnos cómo está ${mascota}. Tenés 48 h para responder.`,
+        entidadTipo: 'SEGUIMIENTO',
+        entidadId: seguimiento.id,
+        canal: { push: true },
+      }),
+    ),
+  );
 }
 
 /**
@@ -253,13 +375,17 @@ async function avisarVencidos(
   const mascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
 
   // Una notificación por pedido vencido: cada uno es un aviso que el adoptante se salteó.
+  // La idempotencia la da `fechaModificacion === null` de arriba, no `notificarUnaVez`: ya
+  // existía antes de la spec 004 y sigue siendo la fuente de verdad de "ya avisé".
   await Promise.all(
-    aAvisar.map(() =>
-      repo.crearNotificacion({
-        tipo: TIPO_NOTIFICACION_VENCIDO,
-        mensaje: `${MENSAJE_NO_ENVIADO} — ${mascota}`,
+    aAvisar.map((seguimiento) =>
+      notificaciones.notificar({
         usuarioId: solicitud.publicacion.usuarioId,
-        usuarioAlta: USUARIO_SISTEMA_ID,
+        tipo: TIPO_NOTIFICACION_VENCIDO,
+        mensaje: `${MENSAJE_NO_ENVIADO} (${mascota})`,
+        entidadTipo: 'SEGUIMIENTO',
+        entidadId: seguimiento.id,
+        canal: { mail: true, push: true },
       }),
     ),
   );
@@ -274,6 +400,35 @@ async function avisarVencidos(
     seguimiento.fechaModificacion = ahora;
     seguimiento.usuarioModificacion = USUARIO_SISTEMA_ID;
   }
+
+  await avisarDescuido(solicitud, seguimientos, ahora, mascota);
+}
+
+/**
+ * "Varios seguidos sin completar: señal de posible descuido" — se dispara UNA sola vez por
+ * solicitud, la primera vez que se acumulan 3 o más pedidos vencidos (no es un recordatorio
+ * que se repite en cada corrida, es una alerta temprana puntual).
+ */
+async function avisarDescuido(
+  solicitud: SolicitudEnSeguimiento,
+  seguimientos: SeguimientoConPregunta[],
+  ahora: Date,
+  mascota: string,
+): Promise<void> {
+  const totalVencidos = seguimientos.filter(
+    (seguimiento) => estadoDe(seguimiento, ahora) === 'VENCIDO',
+  ).length;
+
+  if (totalVencidos < 3) return;
+
+  await notificaciones.notificarUnaVez({
+    usuarioId: solicitud.publicacion.usuarioId,
+    tipo: 'SEGUIMIENTO_DESCUIDO',
+    mensaje: `${mascota} lleva ${totalVencidos} actualizaciones de seguimiento sin enviar. Conviene ponerse en contacto.`,
+    entidadTipo: 'SOLICITUD',
+    entidadId: solicitud.id,
+    canal: { mail: true, push: true },
+  });
 }
 
 // ─────────────── Mapeo a DTO ───────────────
@@ -549,10 +704,13 @@ export async function enviarPregunta(
 
     // Llega fuera de la secuencia: sin aviso, el adoptante no tiene cómo enterarse.
     const mascota = solicitud.publicacion.mascota.nombre ?? 'tu mascota';
-    await repo.crearNotificacion({
-      tipo: TIPO_NOTIFICACION_PREGUNTA_REFUGIO,
-      mensaje: `${MENSAJE_PREGUNTA_REFUGIO} — ${mascota}`,
+    await notificaciones.notificar({
       usuarioId: solicitud.usuarioId,
+      tipo: TIPO_NOTIFICACION_PREGUNTA_REFUGIO,
+      mensaje: `${MENSAJE_PREGUNTA_REFUGIO} (${mascota})`,
+      entidadTipo: 'SEGUIMIENTO',
+      entidadId: creado.id,
+      canal: { push: true },
       usuarioAlta: contexto.usuarioId,
     });
   }
@@ -745,6 +903,15 @@ export async function subirActualizacion(
     entidad: 'Seguimiento',
     entidadId: seguimientoId,
     detalle: `solicitud=${solicitud.id}`,
+  });
+
+  await notificaciones.notificar({
+    usuarioId: solicitud.publicacion.usuarioId,
+    tipo: 'SEGUIMIENTO_RESPONDIDO',
+    mensaje: `Llegó una nueva actualización de seguimiento de ${solicitud.publicacion.mascota.nombre ?? 'la mascota'}.`,
+    entidadTipo: 'SEGUIMIENTO',
+    entidadId: seguimientoId,
+    canal: { push: true },
   });
 
   // El número de pedido es su posición dentro de la secuencia de esa solicitud.

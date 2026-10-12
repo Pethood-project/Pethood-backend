@@ -78,6 +78,14 @@ export function listarSolicitudesDeUsuario(
   });
 }
 
+/** Todas las solicitudes aprobadas del sistema, sin filtrar por usuario — para el job de la spec 004. */
+export function listarTodasAprobadas() {
+  return prisma.solicitud.findMany({
+    where: { fechaBaja: null, ...APROBADA_VIGENTE },
+    include: INCLUDE_SOLICITUD,
+  });
+}
+
 export function buscarSolicitud(solicitudId: number) {
   return prisma.solicitud.findFirst({
     where: { id: solicitudId, fechaBaja: null },
@@ -236,22 +244,6 @@ export function marcarVencidosNotificados(seguimientoIds: number[], usuarioId: n
   return prisma.seguimiento.updateMany({
     where: { id: { in: seguimientoIds } },
     data: datosModificacion(usuarioId),
-  });
-}
-
-export function crearNotificacion(datos: {
-  tipo: string;
-  mensaje: string;
-  usuarioId: number;
-  usuarioAlta: number;
-}) {
-  return prisma.notificacion.create({
-    data: {
-      tipo: datos.tipo,
-      mensaje: datos.mensaje,
-      usuarioId: datos.usuarioId,
-      ...datosAlta(datos.usuarioAlta),
-    },
   });
 }
 

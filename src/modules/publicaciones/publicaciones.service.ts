@@ -2,6 +2,9 @@ import { AppError } from '../../middlewares/errorHandler';
 import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { distanciaKm, resolverCoordenadasDeMapsUrl, type Coordenadas } from '../../shared/geo';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import * as favoritos from '../favoritos/favoritos.service';
+import * as notificaciones from '../notificaciones/notificaciones.service';
+import * as solicitudes from '../solicitudes/solicitudes.service';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { vacunasAplicadas } from '../../shared/vacunas';
 import { aFechaISO } from '../../shared/validation/dates';
@@ -456,7 +459,104 @@ export async function cambiarEstadoPublicacion(
     detalle: `estado=${transicion.hacia} (manual)`,
   });
 
+  if (accion === 'PAUSAR' || accion === 'FINALIZAR') {
+    await avisarSolicitudesAbiertas(publicacion.id, publicacion.mascota.nombre);
+    await avisarFavoritosNoDisponibles(publicacion.mascota.id, publicacion.mascota.nombre);
+  }
+
+  if (accion === 'REACTIVAR') {
+    await avisarFavoritosDisponibles(
+      publicacion.mascota.id,
+      publicacion.id,
+      publicacion.mascota.nombre,
+    );
+  }
+
   return obtenerPublicacion(publicacion.id, usuarioId, ambito);
+}
+
+/** Spec 004: la publicación se pausó o dio de baja con solicitudes pendientes abiertas.
+ * Best-effort: el cambio de estado ya se escribió, un aviso que falla no lo revierte. */
+async function avisarSolicitudesAbiertas(
+  publicacionId: number,
+  nombreMascota: string | null,
+): Promise<void> {
+  try {
+    const pendientes = await solicitudes.listarPendientesDePublicacion(publicacionId);
+    const mascota = nombreMascota ?? 'la mascota';
+
+    await Promise.all(
+      pendientes.map((solicitud) =>
+        notificaciones.notificar({
+          usuarioId: solicitud.usuarioId,
+          tipo: 'PUBLICACION_PAUSADA_CON_SOLICITUD',
+          mensaje: `La publicación de ${mascota} ya no está disponible`,
+          entidadTipo: 'SOLICITUD',
+          entidadId: solicitud.id,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error(
+      'No se pudo avisar las solicitudes abiertas de la publicación',
+      publicacionId,
+      err,
+    );
+  }
+}
+
+/** Spec 004: "una mascota de tus favoritos dejó de estar disponible". Best-effort, ídem arriba. */
+async function avisarFavoritosNoDisponibles(
+  mascotaId: number,
+  nombreMascota: string | null,
+): Promise<void> {
+  try {
+    const usuarioIds = await favoritos.listarUsuariosConFavorito(mascotaId);
+    const mascota = nombreMascota ?? 'la mascota';
+
+    await Promise.all(
+      usuarioIds.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'FAVORITO_NO_DISPONIBLE',
+          mensaje: `${mascota}, que tenías en favoritos, ya no está disponible. Te avisaremos si vuelve.`,
+          entidadTipo: 'FAVORITOS',
+          entidadId: mascotaId,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar los favoritos no disponibles de la mascota', mascotaId, err);
+  }
+}
+
+/** Cumple lo que promete `avisarFavoritosNoDisponibles`: la mascota volvió a estar disponible. */
+async function avisarFavoritosDisponibles(
+  mascotaId: number,
+  publicacionId: number,
+  nombreMascota: string | null,
+): Promise<void> {
+  try {
+    const usuarioIds = await favoritos.listarUsuariosConFavorito(mascotaId);
+    const mascota = nombreMascota ?? 'la mascota';
+
+    await Promise.all(
+      usuarioIds.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: 'FAVORITO_DISPONIBLE',
+          mensaje: `${mascota}, que tenías en favoritos, volvió a estar disponible.`,
+          entidadTipo: 'PUBLICACION',
+          entidadId: publicacionId,
+          canal: { push: true },
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar los favoritos disponibles de la mascota', mascotaId, err);
+  }
 }
 
 /** Estado vigente del aviso. Sin fila vigente el dato es inconsistente: se trata como ausente. */

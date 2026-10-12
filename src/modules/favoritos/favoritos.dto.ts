@@ -45,6 +45,11 @@ export interface MascotaFavoritaDto {
    * muestra "Solicitud enviada" en lugar del botón.
    */
   solicitudAbiertaId: number | null;
+  /**
+   * `true` si este usuario es quien la adoptó (tiene la solicitud de adopción aprobada). Con
+   * el estado "Adoptado" no alcanza para distinguirlo de una mascota que adoptó otra persona.
+   */
+  adoptadaPorMi: boolean;
   /** Momento en que se guardó: define el orden por defecto del listado. */
   fechaAgregado: string;
 }

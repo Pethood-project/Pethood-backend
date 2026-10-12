@@ -19,6 +19,8 @@ vi.mock('../../../../src/modules/usuarios/usuarios.repository', () => ({
   guardarDni: vi.fn(),
 }));
 
+// El servicio real encola en BullMQ y sin Redis (como en el CI) se cuelga.
+vi.mock('../../../../src/modules/notificaciones/notificaciones.service');
 vi.mock('../../../../src/shared/logAuditoria', () => ({
   registrarAuditoria: vi.fn().mockResolvedValue(undefined),
 }));

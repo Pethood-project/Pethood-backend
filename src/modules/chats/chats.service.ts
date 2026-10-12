@@ -33,6 +33,7 @@ import { aFechaISO } from '../../shared/validation/dates';
 import { estaEnLinea } from '../../websockets/presencia';
 import * as emisor from '../../websockets/emisor';
 import { LIMITES } from '../../shared/validation/limits';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
   AvisoEnChatDto,
   CabeceraChatDto,
@@ -712,7 +713,86 @@ export async function enviarMensaje(
 
   emisor.emitirMensajeNuevo(dto, participantes);
 
+  await avisarDestinatarios(contexto.usuarioId, contexto.chatId, participantes, {
+    texto: datos.contenido ?? '',
+    cantidadImagenes: imagenes.length,
+  });
+
   return dto;
+}
+
+/**
+ * Spec 004, regla 4: un mensaje de chat se notifica (bandeja/push) solo si el destinatario
+ * NO tiene esa conversación abierta en este momento, y los mensajes seguidos se agrupan en
+ * una sola fila ("Tenés N mensajes nuevos de X") — lo resuelve
+ * `notificaciones.notificarMensajeChat` con un upsert; acá solo se arma el texto y se decide
+ * a quién le toca.
+ */
+const LARGO_MAXIMO_VISTA_PREVIA = 90;
+
+/** Lo que se ve en el push: el texto recortado, o un aviso si el mensaje es solo imágenes. */
+function vistaPreviaDelMensaje(mensaje: { texto: string; cantidadImagenes: number }): string {
+  const texto = mensaje.texto.replace(/\s+/g, ' ').trim();
+
+  if (texto === '') {
+    return mensaje.cantidadImagenes > 1 ? 'Te envió fotos' : 'Te envió una foto';
+  }
+
+  return texto.length > LARGO_MAXIMO_VISTA_PREVIA
+    ? `${texto.slice(0, LARGO_MAXIMO_VISTA_PREVIA - 1).trimEnd()}…`
+    : texto;
+}
+
+async function avisarDestinatarios(
+  remitenteId: number,
+  chatId: number,
+  participantesIds: number[],
+  contenido: { texto: string; cantidadImagenes: number },
+): Promise<void> {
+  const destinatarios = participantesIds.filter((id) => id !== remitenteId);
+  if (destinatarios.length === 0) return;
+
+  // Best-effort, mismo criterio que `asegurarChatDeSolicitud`: el mensaje ya se guardó y se
+  // emitió por socket; que la bandeja/push falle no puede convertir el envío en un error.
+  try {
+    // Si la sala es con un refugio y escribe alguien de ese refugio, habla el refugio: el
+    // destinatario ve su nombre y no el de la persona que atendió.
+    const { usuario: remitente, refugio } = await repo.buscarRemitenteDeAviso(remitenteId, chatId);
+    const habloComoRefugio = refugio !== null && remitente?.refugioId === refugio.id;
+    const nombreRemitente = habloComoRefugio
+      ? refugio.nombre
+      : remitente
+        ? `${remitente.nombre} ${remitente.apellido}`
+        : 'alguien';
+
+    await Promise.all(
+      destinatarios.map(async (destinatarioId) => {
+        // Ya la está viendo: la recibe en vivo por el socket, no hace falta bandeja ni push.
+        if (emisor.estaEnSalaChat(destinatarioId, chatId)) return;
+
+        const [fila] = (await repo.contarNoLeidosPorChat(destinatarioId, [chatId])) ?? [];
+        const noLeidos = fila?.noLeidos ?? 1;
+
+        const mensaje =
+          noLeidos <= 1
+            ? `Nuevo mensaje de ${nombreRemitente}`
+            : `Tenés ${noLeidos} mensajes nuevos de ${nombreRemitente}`;
+
+        await notificaciones.notificarMensajeChat({
+          destinatarioId,
+          chatId,
+          mensaje,
+          push: {
+            titulo:
+              noLeidos <= 1 ? nombreRemitente : `${nombreRemitente} (${noLeidos} mensajes nuevos)`,
+            cuerpo: vistaPreviaDelMensaje(contenido),
+          },
+        });
+      }),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar el mensaje nuevo del chat', chatId, err);
+  }
 }
 
 /**
@@ -911,6 +991,30 @@ export async function asegurarChatDeSolicitud(solicitudId: number): Promise<numb
  * `nueva` es `true` sólo cuando hubo que abrir la conversación: con `false` el cliente está
  * entrando a una que ya tenía.
  */
+/** Best-effort: la sala y la tarjeta ya existen, un aviso que falla no las deshace. */
+async function avisarReclamo(
+  reclamanteId: number,
+  reportanteId: number,
+  chatId: number,
+): Promise<void> {
+  try {
+    const reclamante = await repo.buscarNombreUsuario(reclamanteId);
+    const nombre = reclamante ? `${reclamante.nombre} ${reclamante.apellido}` : 'Alguien';
+
+    await notificaciones.notificar({
+      usuarioId: reportanteId,
+      tipo: 'ANIMAL_PERDIDO_RECLAMADO',
+      mensaje: `${nombre} se contactó por tu aviso de mascota perdida o encontrada.`,
+      entidadTipo: 'CHAT',
+      entidadId: chatId,
+      canal: { push: true },
+      usuarioAlta: reclamanteId,
+    });
+  } catch (err) {
+    console.error('No se pudo avisar el reclamo del aviso', chatId, err);
+  }
+}
+
 export async function asegurarChatDeReclamo(
   animalPerdidoId: number,
   reclamanteId: number,
@@ -954,6 +1058,8 @@ export async function asegurarChatDeReclamo(
     aMensajeDto(mensaje, [], null, aviso === null ? null : aAvisoEnChat(aviso)),
     [reclamanteId, reportanteId],
   );
+
+  await avisarReclamo(reclamanteId, reportanteId, chatId);
 
   return { chatId, nueva: existente === null };
 }
