@@ -50,6 +50,8 @@ function usuarioFake(overrides: Partial<UsuarioAdmin> = {}): UsuarioAdmin {
     googleId: null,
     verificado: false,
     imagenUrl: null,
+    dniImagenUrl: '/api/v1/archivos/documentos-identidad/dni.jpg',
+    selfieUrl: '/api/v1/archivos/documentos-identidad/selfie.jpg',
     ubicacion: null,
     refugioId: null,
     estadoId: 1,
@@ -134,7 +136,26 @@ describe('verificarUsuario', () => {
     } satisfies Partial<AppError>);
   });
 
-  it('verifica cuando está Pendiente_Verificacion con dni y telefono', async () => {
+  it('rechaza con FALTA_DOCUMENTACION si no subió la foto del DNI o la selfie', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ estado: estadoPendiente, selfieUrl: null }),
+    );
+
+    await expect(service.verificarUsuario(1, 5)).rejects.toMatchObject({
+      codigo: 'FALTA_DOCUMENTACION',
+    } satisfies Partial<AppError>);
+    expect(mockedRepo.verificarUsuario).not.toHaveBeenCalled();
+  });
+
+  it('rechaza con USUARIO_YA_VERIFICADO si ya estaba verificado', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));
+
+    await expect(service.verificarUsuario(1, 5)).rejects.toMatchObject({
+      codigo: 'USUARIO_YA_VERIFICADO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('verifica cuando está Pendiente_Verificacion con dni, telefono y documentación', async () => {
     mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ estado: estadoPendiente }));
     mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 2 } as never);
     mockedRepo.verificarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));

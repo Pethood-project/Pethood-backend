@@ -5,6 +5,7 @@ import * as notificaciones from '../notificaciones/notificaciones.service';
 import { ESTADO_USUARIO, ROL_API, ROL_DB, rolApiADb, rolesDbAApi } from '../../shared/roles';
 import { listarDeRefugio, listarDeUsuario } from '../resenas/resenas.service';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
+import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import type {
   AltaRefugioBody,
   FiltrosRefugios,
@@ -94,6 +95,10 @@ export async function obtenerDetalleUsuario(id: number) {
     usuario: {
       ...aUsuarioDto(usuario),
       imagenUrl: usuario.imagenUrl,
+      documentos: {
+        dniImagenUrl: firmarUrlArchivo(usuario.dniImagenUrl),
+        selfieUrl: firmarUrlArchivo(usuario.selfieUrl),
+      },
       fechaNacimiento: usuario.fechaNacimiento,
       fechaAlta: usuario.fechaAlta,
       ubicacion: etiquetaUbicacion(usuario),
@@ -126,6 +131,14 @@ export async function verificarUsuario(adminId: number, usuarioId: number) {
     );
   }
 
+  if (!usuario.dniImagenUrl || !usuario.selfieUrl) {
+    throw new AppError(
+      'FALTA_DOCUMENTACION',
+      'El usuario todavía no subió la foto del DNI y la selfie: no se puede verificar.',
+      409,
+    );
+  }
+
   const estadoActivo = await repo.buscarEstadoUsuarioPorNombre(ESTADO_USUARIO.ACTIVO);
   const actualizado = await repo.verificarUsuario(usuarioId, adminId, estadoActivo.id);
 
@@ -134,6 +147,7 @@ export async function verificarUsuario(adminId: number, usuarioId: number) {
     accion: 'VERIFICAR_USUARIO',
     entidad: 'Usuario',
     entidadId: usuarioId,
+    detalle: 'con documentacion (dni+selfie)',
   });
 
   await notificaciones.notificar({
