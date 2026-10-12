@@ -141,9 +141,7 @@ describe('listarMascotasCompartibles', () => {
   });
 
   it('cada mascota viene lista para pintar: la foto de la publicación y el día de nacimiento', async () => {
-    vi.mocked(repo.listarMascotasCompartibles).mockResolvedValue([
-      { mascota: mascota() },
-    ] as never);
+    vi.mocked(repo.listarMascotasCompartibles).mockResolvedValue([{ mascota: mascota() }] as never);
 
     const { mascotas } = await service.listarMascotasCompartibles(USUARIO, CHAT);
 

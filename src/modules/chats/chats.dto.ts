@@ -44,7 +44,8 @@ export interface ContactoChatDto {
  * - `SOLICITUD` y `ANIMAL_PERDIDO` las emite el usuario SISTEMA (no son de nadie de la sala).
  * - `MASCOTA` y `UBICACION_REFUGIO` las manda una persona: van de su lado y las puede eliminar.
  */
-export type TipoMensajeDto = 'TEXTO' | 'SOLICITUD' | 'ANIMAL_PERDIDO' | 'MASCOTA' | 'UBICACION_REFUGIO';
+export type TipoMensajeDto =
+  'TEXTO' | 'SOLICITUD' | 'ANIMAL_PERDIDO' | 'MASCOTA' | 'UBICACION_REFUGIO';
 
 /** Vista previa del último mensaje. `null` si la sala todavía no tiene ninguno. */
 export interface UltimoMensajeDto {

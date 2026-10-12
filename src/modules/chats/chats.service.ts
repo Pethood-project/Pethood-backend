@@ -752,8 +752,10 @@ export async function listarHistorial(
   return {
     mensajes: pagina.map((fila) =>
       aMensajeDto(fila, marcas, {
-        solicitud: fila.solicitudId === null ? null : (solicitudPorId.get(fila.solicitudId) ?? null),
-        aviso: fila.animalPerdidoId === null ? null : (avisoPorId.get(fila.animalPerdidoId) ?? null),
+        solicitud:
+          fila.solicitudId === null ? null : (solicitudPorId.get(fila.solicitudId) ?? null),
+        aviso:
+          fila.animalPerdidoId === null ? null : (avisoPorId.get(fila.animalPerdidoId) ?? null),
         mascota: fila.mascotaId === null ? null : (mascotaPorId.get(fila.mascotaId) ?? null),
         ubicacion,
       }),
