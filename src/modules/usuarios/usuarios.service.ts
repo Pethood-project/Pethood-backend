@@ -8,7 +8,7 @@ import { resolverCoordenadasDeMapsUrl } from '../../shared/geo';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
-import { guardarImagen } from '../../shared/storage';
+import { borrarImagenes, guardarImagen } from '../../shared/storage';
 import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import type { ArchivoSubida } from '../../shared/r2';
 import * as notificaciones from '../notificaciones/notificaciones.service';
@@ -158,16 +158,28 @@ export async function subirDocumentos(usuarioId: number, archivos: ArchivosDocum
   const actual = await repo.buscarPerfil(usuarioId);
   if (!actual) throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
 
-  const estado = actual.estado.nombre;
-  if (estado !== ESTADO_USUARIO.PENDIENTE && estado !== ESTADO_USUARIO.ACTIVO) {
-    throw new AppError('CUENTA_NO_ACTIVA', 'Tu cuenta no puede subir documentación.', 403);
-  }
+  const estadosPermitidos: string[] = [ESTADO_USUARIO.PENDIENTE, ESTADO_USUARIO.ACTIVO];
+  const sinPermiso = new AppError(
+    'CUENTA_NO_ACTIVA',
+    'Tu cuenta no puede subir documentación.',
+    403,
+  );
+  if (!estadosPermitidos.includes(actual.estado.nombre)) throw sinPermiso;
 
   const [dniImagenUrl, selfieUrl] = await Promise.all([
     dni ? guardarImagen(dni, SUBCARPETA_DOCUMENTOS) : undefined,
     selfie ? guardarImagen(selfie, SUBCARPETA_DOCUMENTOS) : undefined,
   ]);
-  const actualizado = await repo.actualizarDocumentos(usuarioId, { dniImagenUrl, selfieUrl });
+  const actualizado = await repo.actualizarDocumentos(
+    usuarioId,
+    { dniImagenUrl, selfieUrl },
+    estadosPermitidos,
+  );
+  // La cuenta dejó de calificar entre el chequeo y la escritura: no queda nada referenciado.
+  if (!actualizado) {
+    await borrarImagenes([dniImagenUrl, selfieUrl].filter((u): u is string => Boolean(u)));
+    throw sinPermiso;
+  }
 
   await registrarAuditoria({
     usuarioId,

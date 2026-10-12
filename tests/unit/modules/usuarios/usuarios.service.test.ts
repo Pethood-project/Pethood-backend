@@ -29,6 +29,7 @@ vi.mock('../../../../src/shared/logAuditoria', () => ({
 vi.mock('../../../../src/shared/storage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../src/shared/storage')>()),
   guardarImagen: vi.fn().mockResolvedValue('/api/v1/archivos/documentos-identidad/x.jpg'),
+  borrarImagenes: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../../src/shared/imagenPerfil', () => ({
@@ -346,6 +347,15 @@ describe('subirDocumentos (spec 002.1)', () => {
     } satisfies Partial<AppError>);
   });
 
+  it('rechaza (y no deja archivos) si la cuenta deja de calificar entre el chequeo y la escritura', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+    mockedRepo.actualizarDocumentos.mockResolvedValue(null);
+
+    await expect(subirDocumentos(10, { selfie: [archivo] })).rejects.toMatchObject({
+      codigo: 'CUENTA_NO_ACTIVA',
+    } satisfies Partial<AppError>);
+  });
+
   it('guarda DNI y selfie sin tocar el estado ni `verificado`', async () => {
     mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ verificado: true }));
     mockedRepo.actualizarDocumentos.mockResolvedValue(
@@ -357,10 +367,14 @@ describe('subirDocumentos (spec 002.1)', () => {
 
     const resultado = await subirDocumentos(10, { dni_imagen: [archivo], selfie: [archivo] });
 
-    expect(mockedRepo.actualizarDocumentos).toHaveBeenCalledWith(10, {
-      dniImagenUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
-      selfieUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
-    });
+    expect(mockedRepo.actualizarDocumentos).toHaveBeenCalledWith(
+      10,
+      {
+        dniImagenUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
+        selfieUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
+      },
+      [ESTADO_USUARIO.PENDIENTE, ESTADO_USUARIO.ACTIVO],
+    );
     // Namespace privado: la URL sale firmada.
     expect(resultado.dniImagenUrl).toContain('sig=');
   });
