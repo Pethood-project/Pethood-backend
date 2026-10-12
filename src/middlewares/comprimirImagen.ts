@@ -96,9 +96,13 @@ export async function comprimirImagen(
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
+  // `upload.fields` deja `req.files` como objeto { campo: File[] }, no como array.
+  const archivosPorCampo =
+    req.files && !Array.isArray(req.files) ? Object.values(req.files).flat() : [];
   const archivos = [
     ...(req.file ? [req.file] : []),
     ...(Array.isArray(req.files) ? req.files : []),
+    ...archivosPorCampo,
   ];
 
   const unica = archivos.length === 1 ? archivos[0] : undefined;

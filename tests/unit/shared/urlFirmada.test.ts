@@ -3,6 +3,7 @@ import {
   esRutaPrivada,
   firmarUrlArchivo,
   firmarUrlsArchivo,
+  normalizarRutaArchivo,
   verificarFirma,
 } from '../../../src/shared/urlFirmada';
 
@@ -148,5 +149,44 @@ describe('verificarFirma', () => {
     const { ruta, exp } = partes(firmarUrlArchivo(CHAT)!);
 
     expect(verificarFirma(ruta, exp, 'abc')).toBe(false);
+  });
+});
+
+describe('normalizarRutaArchivo (esquive de la firma con `..`)', () => {
+  it('deja pasar una ruta limpia, firmada o no', () => {
+    expect(normalizarRutaArchivo('/documentos-identidad/abc.jpg')).toBe(
+      '/documentos-identidad/abc.jpg',
+    );
+  });
+
+  it.each([
+    '/perfiles/../documentos-identidad/abc.jpg',
+    '/perfiles/%2e%2e/documentos-identidad/abc.jpg',
+    '/./documentos-identidad/abc.jpg',
+    '//documentos-identidad/abc.jpg',
+    '/perfiles/%00/abc.jpg',
+    '/perfiles/%E0%A4%A',
+  ])('rechaza %s', (ruta) => {
+    expect(normalizarRutaArchivo(ruta)).toBeNull();
+  });
+
+  it('el namespace privado se reconoce sin importar mayúsculas', () => {
+    expect(esRutaPrivada('/DOCUMENTOS-IDENTIDAD/abc.jpg')).toBe(true);
+  });
+});
+
+describe('ventana de los documentos de identidad', () => {
+  it('vence en 10 minutos como mucho, no en horas', () => {
+    const url = firmarUrlArchivo('/api/v1/archivos/documentos-identidad/dni.jpg')!;
+    const { exp } = partes(url);
+    const restante = Number(exp) - Date.now();
+
+    expect(restante).toBeGreaterThan(0);
+    expect(restante).toBeLessThanOrEqual(10 * 60 * 1000);
+  });
+
+  it('el resto de las privadas conserva su ventana larga', () => {
+    const { exp } = partes(firmarUrlArchivo(CHAT)!);
+    expect(Number(exp) - Date.now()).toBeGreaterThan(60 * 60 * 1000);
   });
 });

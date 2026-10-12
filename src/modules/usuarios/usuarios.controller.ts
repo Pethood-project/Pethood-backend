@@ -38,6 +38,23 @@ export async function actualizarMe(req: Request, res: Response, next: NextFuncti
   }
 }
 
+export async function subirDocumentos(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError('NO_AUTENTICADO', 'Falta el token de autenticación', 401);
+    }
+    const archivos = (req.files ?? {}) as service.ArchivosDocumentos;
+    const documentos = await service.subirDocumentos(req.usuario.usuarioId, archivos);
+    res.json({ mensaje: 'Recibimos tu documentación. La revisamos a la brevedad.', documentos });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function actualizarUbicacion(
   req: Request,
   res: Response,

@@ -11,6 +11,7 @@ vi.mock('../../../../src/modules/admin-usuarios/admin-usuarios.repository', () =
   contarUsuariosActivosConRol: vi.fn(),
   cambiarEstadoUsuario: vi.fn(),
   verificarUsuario: vi.fn(),
+  revocarVerificacion: vi.fn(),
   darDeBajaUsuario: vi.fn(),
   buscarVinculoRolActivo: vi.fn(),
   agregarRol: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('../../../../src/shared/logAuditoria', () => ({
 }));
 
 import * as repo from '../../../../src/modules/admin-usuarios/admin-usuarios.repository';
+import { registrarAuditoria } from '../../../../src/shared/logAuditoria';
 import * as service from '../../../../src/modules/admin-usuarios/admin-usuarios.service';
 
 const mockedRepo = vi.mocked(repo);
@@ -50,6 +52,8 @@ function usuarioFake(overrides: Partial<UsuarioAdmin> = {}): UsuarioAdmin {
     googleId: null,
     verificado: false,
     imagenUrl: null,
+    dniImagenUrl: '/api/v1/archivos/documentos-identidad/dni.jpg',
+    selfieUrl: '/api/v1/archivos/documentos-identidad/selfie.jpg',
     ubicacion: null,
     refugioId: null,
     estadoId: 1,
@@ -134,7 +138,26 @@ describe('verificarUsuario', () => {
     } satisfies Partial<AppError>);
   });
 
-  it('verifica cuando está Pendiente_Verificacion con dni y telefono', async () => {
+  it('rechaza con FALTA_DOCUMENTACION si no subió la foto del DNI o la selfie', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ estado: estadoPendiente, selfieUrl: null }),
+    );
+
+    await expect(service.verificarUsuario(1, 5)).rejects.toMatchObject({
+      codigo: 'FALTA_DOCUMENTACION',
+    } satisfies Partial<AppError>);
+    expect(mockedRepo.verificarUsuario).not.toHaveBeenCalled();
+  });
+
+  it('rechaza con USUARIO_YA_VERIFICADO si ya estaba verificado', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));
+
+    await expect(service.verificarUsuario(1, 5)).rejects.toMatchObject({
+      codigo: 'USUARIO_YA_VERIFICADO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('verifica cuando está Pendiente_Verificacion con dni, telefono y documentación', async () => {
     mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ estado: estadoPendiente }));
     mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 2 } as never);
     mockedRepo.verificarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));
@@ -143,6 +166,60 @@ describe('verificarUsuario', () => {
 
     expect(resultado.verificado).toBe(true);
     expect(mockedRepo.verificarUsuario).toHaveBeenCalledWith(5, 1, 2);
+  });
+});
+
+describe('revocarVerificacion (baja lógica de documentos, spec 002.1)', () => {
+  it('rechaza a un administrador', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ verificado: true, roles: [vinculoRol(ROL_DB.ADMIN)] }),
+    );
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'NO_SE_PUEDE_REVOCAR_ADMIN',
+    } satisfies Partial<AppError>);
+  });
+
+  it('rechaza con USUARIO_NO_VERIFICADO si no estaba verificado', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: false }));
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'USUARIO_NO_VERIFICADO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('rechaza con ESTADO_INVALIDO si no está Activo', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ verificado: true, estado: estadoPendiente }),
+    );
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'ESTADO_INVALIDO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('da 409 si el estado cambió entre el chequeo y la escritura', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));
+    mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 5 } as never);
+    mockedRepo.revocarVerificacion.mockResolvedValue(null);
+
+    await expect(service.revocarVerificacion(1, 5, 'motivo')).rejects.toMatchObject({
+      codigo: 'ESTADO_INVALIDO',
+    } satisfies Partial<AppError>);
+  });
+
+  it('revoca: vuelve a Pendiente_Verificacion con el id del estado pendiente', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake({ verificado: true }));
+    mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 7 } as never);
+    mockedRepo.revocarVerificacion.mockResolvedValue(
+      usuarioFake({ verificado: false, dniImagenUrl: null, selfieUrl: null }),
+    );
+
+    const resultado = await service.revocarVerificacion(1, 5, 'DNI vencido');
+
+    expect(resultado.verificado).toBe(false);
+    expect(mockedRepo.buscarEstadoUsuarioPorNombre).toHaveBeenCalledWith(ESTADO_USUARIO.PENDIENTE);
+    expect(mockedRepo.revocarVerificacion).toHaveBeenCalledWith(5, 1, 7);
   });
 });
 
@@ -238,17 +315,44 @@ describe('obtenerDetalleUsuario', () => {
     mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake());
     mockedRepo.resumenUsuario.mockResolvedValue({ mascotas: 1, solicitudes: 2, donaciones: 0 });
 
-    const r = await service.obtenerDetalleUsuario(5);
+    const r = await service.obtenerDetalleUsuario(1, 5);
 
     expect(r.usuario).toMatchObject({ id: 5, refugio: null });
     expect(r.resumen).toEqual({ mascotas: 1, solicitudes: 2, donaciones: 0 });
     expect(r.resenas.cantidad).toBe(0);
   });
 
+  it('audita el acceso a los documentos con las rutas de los archivos', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(usuarioFake());
+    mockedRepo.resumenUsuario.mockResolvedValue({ mascotas: 0, solicitudes: 0, donaciones: 0 });
+
+    await service.obtenerDetalleUsuario(1, 5);
+
+    expect(registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usuarioId: 1,
+        accion: 'VER_DOCUMENTOS_USUARIO',
+        entidadId: 5,
+        detalle: expect.stringContaining('documentos-identidad/dni.jpg'),
+      }),
+    );
+  });
+
+  it('no audita si el usuario no tiene documentos', async () => {
+    mockedRepo.buscarUsuario.mockResolvedValue(
+      usuarioFake({ dniImagenUrl: null, selfieUrl: null }),
+    );
+    mockedRepo.resumenUsuario.mockResolvedValue({ mascotas: 0, solicitudes: 0, donaciones: 0 });
+
+    await service.obtenerDetalleUsuario(1, 5);
+
+    expect(registrarAuditoria).not.toHaveBeenCalled();
+  });
+
   it('usuario inexistente lanza USUARIO_NO_ENCONTRADO', async () => {
     mockedRepo.buscarUsuario.mockResolvedValue(null);
 
-    await expect(service.obtenerDetalleUsuario(9)).rejects.toMatchObject({
+    await expect(service.obtenerDetalleUsuario(1, 9)).rejects.toMatchObject({
       codigo: 'USUARIO_NO_ENCONTRADO',
     });
   });
