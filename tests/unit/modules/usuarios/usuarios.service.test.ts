@@ -337,6 +337,26 @@ describe('subirDocumentos (spec 002.1)', () => {
     expect(mockedRepo.actualizarDocumentos).not.toHaveBeenCalled();
   });
 
+  it('rechaza con USUARIO_YA_VERIFICADO si ya está verificado (no reemplaza documentos)', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ verificado: true }));
+
+    await expect(subirDocumentos(11, { selfie: [archivo] })).rejects.toMatchObject({
+      codigo: 'USUARIO_YA_VERIFICADO',
+    } satisfies Partial<AppError>);
+    expect(mockedRepo.actualizarDocumentos).not.toHaveBeenCalled();
+  });
+
+  it('corta con 429 después de 5 subidas seguidas', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+    mockedRepo.actualizarDocumentos.mockResolvedValue(perfilFake());
+
+    for (let i = 0; i < 5; i++) await subirDocumentos(99, { selfie: [archivo] });
+
+    await expect(subirDocumentos(99, { selfie: [archivo] })).rejects.toMatchObject({
+      codigo: 'DEMASIADOS_INTENTOS',
+    } satisfies Partial<AppError>);
+  });
+
   it('rechaza si la cuenta está suspendida', async () => {
     mockedRepo.buscarPerfil.mockResolvedValue(
       perfilFake({ estado: { ...perfilFake().estado, nombre: ESTADO_USUARIO.SUSPENDIDO } }),
@@ -356,8 +376,8 @@ describe('subirDocumentos (spec 002.1)', () => {
     } satisfies Partial<AppError>);
   });
 
-  it('guarda DNI y selfie sin tocar el estado ni `verificado`', async () => {
-    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ verificado: true }));
+  it('guarda DNI y selfie sin tocar el estado', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
     mockedRepo.actualizarDocumentos.mockResolvedValue(
       perfilFake({
         dniImagenUrl: '/api/v1/archivos/documentos-identidad/x.jpg',

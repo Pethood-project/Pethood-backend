@@ -7,6 +7,7 @@ import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocod
 import { resolverCoordenadasDeMapsUrl } from '../../shared/geo';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import { estaBloqueado, registrarFallo } from '../../shared/rateLimit';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
 import { borrarImagenes, guardarImagen } from '../../shared/storage';
 import { firmarUrlArchivo } from '../../shared/urlFirmada';
@@ -155,8 +156,30 @@ export async function subirDocumentos(usuarioId: number, archivos: ArchivosDocum
     throw new AppError('VALIDACION', 'Subí la foto del DNI y/o la selfie.', 400);
   }
 
+  // Tope de subidas por usuario (5 cada 15 min, el mismo contador en memoria que el login):
+  // cada request son hasta 2 x 5 MB y los reemplazos dejan archivos huérfanos (deuda #41).
+  const claveLimite = `documentos:${usuarioId}`;
+  if (estaBloqueado(claveLimite)) {
+    throw new AppError(
+      'DEMASIADOS_INTENTOS',
+      'Subiste documentación muchas veces seguidas. Probá de nuevo en unos minutos.',
+      429,
+    );
+  }
+  registrarFallo(claveLimite);
+
   const actual = await repo.buscarPerfil(usuarioId);
   if (!actual) throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
+
+  // Un usuario verificado no reemplaza sus documentos: la aprobación del admin quedaría
+  // apuntando a archivos distintos de los que revisó. Cambiarlos pasa por un admin.
+  if (actual.verificado) {
+    throw new AppError(
+      'USUARIO_YA_VERIFICADO',
+      'Tu identidad ya está verificada. Si necesitás cambiar tus documentos, escribinos a soporte.',
+      409,
+    );
+  }
 
   const estadosPermitidos: string[] = [ESTADO_USUARIO.PENDIENTE, ESTADO_USUARIO.ACTIVO];
   const sinPermiso = new AppError(
