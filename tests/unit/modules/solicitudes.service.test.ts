@@ -7,6 +7,9 @@ import * as service from '../../../src/modules/solicitudes/solicitudes.service';
 
 vi.mock('../../../src/modules/solicitudes/solicitudes.repository');
 vi.mock('../../../src/shared/logAuditoria');
+// Avisos: el servicio real encola en BullMQ y consulta la base, y estos tests no los usan.
+vi.mock('../../../src/modules/notificaciones/notificaciones.service');
+vi.mock('../../../src/modules/favoritos/favoritos.service');
 
 afterEach(() => {
   FLAGS.EXIGIR_VERIFICACION_PARA_SOLICITAR = false;
