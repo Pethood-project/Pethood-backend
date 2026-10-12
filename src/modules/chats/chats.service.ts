@@ -314,7 +314,13 @@ interface MensajeFila {
  */
 function aCita(cita: CitaFila): MensajeCitadoDto {
   if (cita.fechaBaja !== null) {
-    return { id: cita.id, usuarioId: cita.usuarioId, contenido: '', adjunto: null, eliminado: true };
+    return {
+      id: cita.id,
+      usuarioId: cita.usuarioId,
+      contenido: '',
+      adjunto: null,
+      eliminado: true,
+    };
   }
 
   const adjuntos = clasificarAdjuntos(cita.imagenes);
@@ -416,8 +422,7 @@ function aMensajeDto(
         : null,
     eliminado,
     // Un eliminado tampoco muestra a qué respondía: en su lugar va sólo el aviso.
-    respondeA:
-      eliminado || !mensaje.mensajeRespondido ? null : aCita(mensaje.mensajeRespondido),
+    respondeA: eliminado || !mensaje.mensajeRespondido ? null : aCita(mensaje.mensajeRespondido),
     fechaAlta: mensaje.fechaAlta.toISOString(),
   };
 }
