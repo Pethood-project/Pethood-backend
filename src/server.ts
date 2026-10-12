@@ -1,7 +1,10 @@
 import { app } from './app';
 import { env } from './config/env';
 import { detenerJobsProgramados, iniciarJobsProgramados } from './jobs/notificaciones.scheduler';
-import { detenerWorkerNotificaciones, iniciarWorkerNotificaciones } from './modules/notificaciones/notificaciones.worker';
+import {
+  detenerWorkerNotificaciones,
+  iniciarWorkerNotificaciones,
+} from './modules/notificaciones/notificaciones.worker';
 import { detenerWebsockets, iniciarWebsockets } from './websockets';
 
 const server = app.listen(env.PORT, () => {

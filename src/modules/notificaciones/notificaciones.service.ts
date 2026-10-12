@@ -238,7 +238,10 @@ export async function notificarSoloPush(input: {
       entidadId: input.entidadId ?? null,
     });
   } catch (err) {
-    console.error(`No se pudo mandar el push (tipo=${input.tipo}, usuarioId=${input.usuarioId}):`, err);
+    console.error(
+      `No se pudo mandar el push (tipo=${input.tipo}, usuarioId=${input.usuarioId}):`,
+      err,
+    );
   }
 }
 

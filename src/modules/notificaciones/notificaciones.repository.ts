@@ -90,7 +90,11 @@ export function buscarChatAgrupadaSinLeer(usuarioId: number, chatId: number) {
   });
 }
 
-export function actualizarMensaje(notificacionId: number, mensaje: string, usuarioModificacion: number) {
+export function actualizarMensaje(
+  notificacionId: number,
+  mensaje: string,
+  usuarioModificacion: number,
+) {
   return prisma.notificacion.update({
     where: { id: notificacionId },
     data: {
@@ -118,7 +122,10 @@ export function marcarTodasLeidas(usuarioId: number) {
 }
 
 export function darDeBaja(notificacionId: number, usuarioBaja: number) {
-  return prisma.notificacion.update({ where: { id: notificacionId }, data: datosBaja(usuarioBaja) });
+  return prisma.notificacion.update({
+    where: { id: notificacionId },
+    data: datosBaja(usuarioBaja),
+  });
 }
 
 // ─────────────── Dispositivos push ───────────────

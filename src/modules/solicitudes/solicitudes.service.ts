@@ -103,9 +103,12 @@ export function listarPendientesDePublicacion(
   return repo.listarPendientesDePublicacion(publicacionId);
 }
 
-export async function destinatariosPublicador(mascota: {
-  refugioId: number | null;
-}, publicacionUsuarioId: number): Promise<number[]> {
+export async function destinatariosPublicador(
+  mascota: {
+    refugioId: number | null;
+  },
+  publicacionUsuarioId: number,
+): Promise<number[]> {
   if (mascota.refugioId === null) return [publicacionUsuarioId];
 
   const miembros = await repo.listarIdsMiembrosDeRefugio(mascota.refugioId);
@@ -588,7 +591,7 @@ export async function resolverSolicitud(
 }
 
 /**
-* HU-4.1: rechazada, o aprobada de un tránsito (la adopción aprobada tiene su propio aviso,
+ * HU-4.1: rechazada, o aprobada de un tránsito (la adopción aprobada tiene su propio aviso,
  * más completo, en `aprobarAdopcion` — a esta función ya no la alcanza porque
  * `resolverSolicitud` deriva ese caso antes de llegar a `resolverSiPendiente`).
  * Best-effort: la resolución de la solicitud ya se escribió, un aviso que falla no la revierte.
@@ -904,7 +907,11 @@ async function aprobarAdopcion(
     });
   }
 
-  await avisarAdopcionAprobada(resultado.solicitud, otrosPretendientes, resultado.solicitudesRechazadas);
+  await avisarAdopcionAprobada(
+    resultado.solicitud,
+    otrosPretendientes,
+    resultado.solicitudesRechazadas,
+  );
 
   return aDetalleDto(resultado.solicitud);
 }

@@ -174,7 +174,9 @@ async function avisarSeguimientoTerminado(
   if (previstos === 0) return;
 
   const automaticos = seguimientos.filter((seguimiento) => !seguimiento.esManual).length;
-  const hayAbiertos = seguimientos.some((seguimiento) => estadoDe(seguimiento, ahora) === 'PENDIENTE');
+  const hayAbiertos = seguimientos.some(
+    (seguimiento) => estadoDe(seguimiento, ahora) === 'PENDIENTE',
+  );
   if (automaticos < previstos || hayAbiertos) return;
 
   const mascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';

@@ -20,7 +20,7 @@ import * as repo from './favoritos.repository';
 
 const TIPO_SOLICITUD_ADOPCION = 'Adopcion';
 
-type FavoritoConMascota =Awaited<ReturnType<typeof repo.listarVisiblesDeUsuario>>[number];
+type FavoritoConMascota = Awaited<ReturnType<typeof repo.listarVisiblesDeUsuario>>[number];
 type Favorito = Awaited<ReturnType<typeof repo.crear>>;
 
 export interface ResultadoAgregado {

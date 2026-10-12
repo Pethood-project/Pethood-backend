@@ -2,7 +2,10 @@ import type { NextFunction, Request, Response } from 'express';
 import type { z } from 'zod';
 import { AppError } from '../../middlewares/errorHandler';
 import { parsearId } from '../../shared/validation/numbers';
-import { listarNotificacionesQuerySchema, type RegistrarDispositivoDto } from './notificaciones.dto';
+import {
+  listarNotificacionesQuerySchema,
+  type RegistrarDispositivoDto,
+} from './notificaciones.dto';
 import * as service from './notificaciones.service';
 
 /** Traduce el primer issue de Zod al formato de error de la API (mismo patrón que animales-perdidos). */

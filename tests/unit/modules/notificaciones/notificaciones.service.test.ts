@@ -134,7 +134,12 @@ describe('notificar — regla 2: mail se envía si se pide, sin importar si est�
   it('sin email cargado, no encola nada (no revienta)', async () => {
     vi.mocked(repo.buscarEmailUsuario).mockResolvedValue(null as never);
 
-    await service.notificar({ usuarioId: USUARIO, tipo: 'X', mensaje: 'hola', canal: { mail: true } });
+    await service.notificar({
+      usuarioId: USUARIO,
+      tipo: 'X',
+      mensaje: 'hola',
+      canal: { mail: true },
+    });
 
     expect(encolarEnvioMail).not.toHaveBeenCalled();
   });

@@ -62,7 +62,10 @@ function solicitudCreada(mascotaRefugioId: number | null) {
     },
     tipoSolicitud: { nombre: 'Adopcion' },
     historicoEstados: [
-      { estadoSolicitud: { id: 1, nombre: 'Pendiente' }, fechaAlta: new Date('2026-09-01T12:00:00.000Z') },
+      {
+        estadoSolicitud: { id: 1, nombre: 'Pendiente' },
+        fechaAlta: new Date('2026-09-01T12:00:00.000Z'),
+      },
     ],
   };
 }
@@ -98,7 +101,11 @@ beforeEach(() => {
 describe('crear una solicitud notifica al publicador (HU-4.2)', () => {
   it('mascota de un refugio: se guarda una notificación en bandeja para CADA miembro activo', async () => {
     vi.mocked(solicitudesRepo.buscarPublicacionParaSolicitar).mockResolvedValue({
-      mascota: { usuarioId: null, refugioId: REFUGIO_ID, historicoEstados: [{ estadoMascota: { nombre: 'Disponible' } }] },
+      mascota: {
+        usuarioId: null,
+        refugioId: REFUGIO_ID,
+        historicoEstados: [{ estadoMascota: { nombre: 'Disponible' } }],
+      },
       historicoEstados: [{ estadoPublicacion: { nombre: 'Activa' } }],
     } as never);
     vi.mocked(solicitudesRepo.crearConHogar).mockResolvedValue(
@@ -128,7 +135,11 @@ describe('crear una solicitud notifica al publicador (HU-4.2)', () => {
 
   it('mascota personal (sin refugio): se avisa solo a quien publicó', async () => {
     vi.mocked(solicitudesRepo.buscarPublicacionParaSolicitar).mockResolvedValue({
-      mascota: { usuarioId: PUBLICADOR, refugioId: null, historicoEstados: [{ estadoMascota: { nombre: 'Disponible' } }] },
+      mascota: {
+        usuarioId: PUBLICADOR,
+        refugioId: null,
+        historicoEstados: [{ estadoMascota: { nombre: 'Disponible' } }],
+      },
       historicoEstados: [{ estadoPublicacion: { nombre: 'Activa' } }],
     } as never);
     vi.mocked(solicitudesRepo.crearConHogar).mockResolvedValue(solicitudCreada(null) as never);

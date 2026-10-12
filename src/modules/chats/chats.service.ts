@@ -784,9 +784,7 @@ async function avisarDestinatarios(
           mensaje,
           push: {
             titulo:
-              noLeidos <= 1
-                ? nombreRemitente
-                : `${nombreRemitente} (${noLeidos} mensajes nuevos)`,
+              noLeidos <= 1 ? nombreRemitente : `${nombreRemitente} (${noLeidos} mensajes nuevos)`,
             cuerpo: vistaPreviaDelMensaje(contenido),
           },
         });

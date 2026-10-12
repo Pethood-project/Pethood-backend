@@ -113,7 +113,10 @@ export function estaEnSalaChat(usuarioId: number, chatId: number): boolean {
 }
 
 /** Notificación nueva de bandeja, a todos los dispositivos abiertos del destinatario. */
-export function emitirNotificacionNueva(usuarioId: number, notificacion: NotificacionItemDto): void {
+export function emitirNotificacionNueva(
+  usuarioId: number,
+  notificacion: NotificacionItemDto,
+): void {
   io?.to(salaUsuario(usuarioId)).emit(EVENTOS.NOTIFICACION_NUEVA, notificacion);
 }
 

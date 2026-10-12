@@ -498,7 +498,11 @@ async function avisarSolicitudesAbiertas(
       ),
     );
   } catch (err) {
-    console.error('No se pudo avisar las solicitudes abiertas de la publicación', publicacionId, err);
+    console.error(
+      'No se pudo avisar las solicitudes abiertas de la publicación',
+      publicacionId,
+      err,
+    );
   }
 }
 
