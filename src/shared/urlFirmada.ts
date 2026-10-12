@@ -6,8 +6,8 @@
  * `/api/v1/archivos` se sirve con `express.static` y sin autenticación: cualquiera con el
  * link abre el archivo, sin sesión y sin ser participante de nada. Para la foto de una mascota
  * da igual —se muestra en el feed de adopción, es pública por diseño—, pero los adjuntos de
- * una conversación, los comprobantes de historia clínica y las pruebas de vida de un
- * seguimiento no lo son.
+ * una conversación, los comprobantes de historia clínica, las pruebas de vida de un
+ * seguimiento y el DNI/selfie de un usuario no lo son.
  *
  * ## Por qué no alcanza con pedir el token
  *
@@ -41,12 +41,17 @@ import { RUTA_PUBLICA_ARCHIVOS } from './storage';
 
 /**
  * Las subcarpetas cuyo contenido NO es público. Coinciden con las `SUBCARPETA_*` de cada
- * módulo: `chats`, historia clínica y seguimiento.
+ * módulo: `chats`, historia clínica, seguimiento y documentos de identidad.
  *
  * Lo que queda afuera es público a propósito: `mascotas` y `publicaciones` se muestran en el
  * feed de adopción, y `perfiles` es el avatar que ve cualquiera con quien hables.
  */
-const NAMESPACES_PRIVADOS = new Set(['chats', 'historias-clinicas', 'seguimientos']);
+const NAMESPACES_PRIVADOS = new Set([
+  'chats',
+  'historias-clinicas',
+  'seguimientos',
+  'documentos-identidad',
+]);
 
 /** Cuánto dura una firma, y cada cuánto cambia. */
 const VENTANA_MS = 6 * 60 * 60 * 1000;

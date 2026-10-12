@@ -162,6 +162,14 @@ export function uploadImagen(campo: string): RequestHandler {
   return manejarError(upload.single(campo));
 }
 
+/**
+ * Upload de una imagen por cada campo nombrado (DNI + selfie, spec 002.1). Quedan en
+ * `req.files` como objeto `{ [campo]: File[] }`; `comprimirImagen` sabe recorrerlo.
+ */
+export function uploadImagenCampos(campos: string[]): RequestHandler {
+  return manejarError(upload.fields(campos.map((name) => ({ name, maxCount: 1 }))), campos.length);
+}
+
 /** Upload de varias imágenes bajo el mismo campo. Quedan en `req.files`, en orden. */
 export function uploadImagenes(campo: string, maximo: number): RequestHandler {
   return manejarError(upload.array(campo, maximo), maximo);

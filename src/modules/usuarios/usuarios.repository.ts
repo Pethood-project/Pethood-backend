@@ -148,6 +148,22 @@ export async function actualizarPerfil(
   }
 }
 
+/** Reemplaza el DNI y/o la selfie (spec 002.1). No toca `verificado` ni el estado. */
+export async function actualizarDocumentos(
+  usuarioId: number,
+  datos: { dniImagenUrl?: string; selfieUrl?: string },
+): Promise<UsuarioPerfil> {
+  return prisma.usuario.update({
+    where: { id: usuarioId },
+    data: {
+      ...(datos.dniImagenUrl ? { dniImagenUrl: datos.dniImagenUrl } : {}),
+      ...(datos.selfieUrl ? { selfieUrl: datos.selfieUrl } : {}),
+      ...datosModificacion(usuarioId),
+    },
+    include: includePerfil,
+  });
+}
+
 export interface DatosUbicacion {
   mapaUrl: string;
   latitud: number;

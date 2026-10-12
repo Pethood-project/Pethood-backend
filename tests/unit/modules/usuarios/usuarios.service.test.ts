@@ -17,12 +17,18 @@ vi.mock('../../../../src/modules/usuarios/usuarios.repository', () => ({
   buscarEstadoSolicitudPorNombre: vi.fn(),
   darDeBajaCuenta: vi.fn(),
   guardarDni: vi.fn(),
+  actualizarDocumentos: vi.fn(),
 }));
 
 // El servicio real encola en BullMQ y sin Redis (como en el CI) se cuelga.
 vi.mock('../../../../src/modules/notificaciones/notificaciones.service');
 vi.mock('../../../../src/shared/logAuditoria', () => ({
   registrarAuditoria: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../../src/shared/storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/shared/storage')>()),
+  guardarImagen: vi.fn().mockResolvedValue('/api/v1/archivos/documentos-identidad/x.jpg'),
 }));
 
 vi.mock('../../../../src/shared/imagenPerfil', () => ({
@@ -37,6 +43,7 @@ import {
   cargarDni,
   darDeBajaCuenta,
   obtenerPerfil,
+  subirDocumentos,
 } from '../../../../src/modules/usuarios/usuarios.service';
 import * as imagenPerfil from '../../../../src/shared/imagenPerfil';
 
@@ -55,6 +62,8 @@ function perfilFake(overrides: Partial<UsuarioPerfil> = {}): UsuarioPerfil {
     googleId: null,
     verificado: false,
     imagenUrl: null,
+    dniImagenUrl: null,
+    selfieUrl: null,
     ubicacion: 'Palermo, CABA',
     refugioId: null,
     refugio: null,
@@ -312,5 +321,47 @@ describe('cargarDni (spec 027)', () => {
       codigo: 'DNI_DUPLICADO',
       mensaje: 'Ya existe una cuenta con ese DNI.',
     });
+  });
+});
+
+describe('subirDocumentos (spec 002.1)', () => {
+  const archivo = { buffer: Buffer.from('x'), mimetype: 'image/jpeg', size: 1 } as never;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rechaza si no viene ningún archivo', async () => {
+    await expect(subirDocumentos(10, {})).rejects.toMatchObject({ codigo: 'VALIDACION' });
+    expect(mockedRepo.actualizarDocumentos).not.toHaveBeenCalled();
+  });
+
+  it('rechaza si la cuenta está suspendida', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(
+      perfilFake({ estado: { ...perfilFake().estado, nombre: ESTADO_USUARIO.SUSPENDIDO } }),
+    );
+
+    await expect(subirDocumentos(10, { selfie: [archivo] })).rejects.toMatchObject({
+      codigo: 'CUENTA_NO_ACTIVA',
+    } satisfies Partial<AppError>);
+  });
+
+  it('guarda DNI y selfie sin tocar el estado ni `verificado`', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake({ verificado: true }));
+    mockedRepo.actualizarDocumentos.mockResolvedValue(
+      perfilFake({
+        dniImagenUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
+        selfieUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
+      }),
+    );
+
+    const resultado = await subirDocumentos(10, { dni_imagen: [archivo], selfie: [archivo] });
+
+    expect(mockedRepo.actualizarDocumentos).toHaveBeenCalledWith(10, {
+      dniImagenUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
+      selfieUrl: '/api/v1/archivos/documentos-identidad/x.jpg',
+    });
+    // Namespace privado: la URL sale firmada.
+    expect(resultado.dniImagenUrl).toContain('sig=');
   });
 });

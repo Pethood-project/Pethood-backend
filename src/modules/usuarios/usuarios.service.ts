@@ -8,6 +8,8 @@ import { resolverCoordenadasDeMapsUrl } from '../../shared/geo';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { ESTADO_USUARIO, ROL_DB, rolesDbAApi } from '../../shared/roles';
+import { guardarImagen } from '../../shared/storage';
+import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import type { ArchivoSubida } from '../../shared/r2';
 import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
@@ -50,6 +52,11 @@ function aPerfil(
     longitud: usuario.longitud,
     ubicacionVerificada: usuario.ubicacionVerificada,
     imagenUrl: usuario.imagenUrl,
+    verificado: usuario.verificado,
+    documentos: {
+      dniImagenUrl: firmarUrlArchivo(usuario.dniImagenUrl),
+      selfieUrl: firmarUrlArchivo(usuario.selfieUrl),
+    },
     roles: rolesDbAApi(nombresDeRol(usuario)),
     refugio: aRefugioDeSesion(usuario.refugio),
     tienePassword: Boolean(usuario.contrasena),
@@ -128,6 +135,52 @@ export async function actualizarPerfil(
   });
 
   return armarPerfil(actualizado, ambito);
+}
+
+const SUBCARPETA_DOCUMENTOS = 'documentos-identidad';
+
+export interface ArchivosDocumentos {
+  dni_imagen?: ArchivoSubida[];
+  selfie?: ArchivoSubida[];
+}
+
+/**
+ * Sube o reemplaza el DNI y/o la selfie (spec 002.1). No cambia `verificado` ni el estado:
+ * solo deja la evidencia lista para que un admin decida con `PATCH /admin/usuarios/:id/verificar`.
+ */
+export async function subirDocumentos(usuarioId: number, archivos: ArchivosDocumentos) {
+  const dni = archivos.dni_imagen?.[0];
+  const selfie = archivos.selfie?.[0];
+  if (!dni && !selfie) {
+    throw new AppError('VALIDACION', 'Subí la foto del DNI y/o la selfie.', 400);
+  }
+
+  const actual = await repo.buscarPerfil(usuarioId);
+  if (!actual) throw new AppError('NO_AUTENTICADO', 'No encontramos tu sesión.', 401);
+
+  const estado = actual.estado.nombre;
+  if (estado !== ESTADO_USUARIO.PENDIENTE && estado !== ESTADO_USUARIO.ACTIVO) {
+    throw new AppError('CUENTA_NO_ACTIVA', 'Tu cuenta no puede subir documentación.', 403);
+  }
+
+  const [dniImagenUrl, selfieUrl] = await Promise.all([
+    dni ? guardarImagen(dni, SUBCARPETA_DOCUMENTOS) : undefined,
+    selfie ? guardarImagen(selfie, SUBCARPETA_DOCUMENTOS) : undefined,
+  ]);
+  const actualizado = await repo.actualizarDocumentos(usuarioId, { dniImagenUrl, selfieUrl });
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'SUBIR_DOCUMENTOS',
+    entidad: 'Usuario',
+    entidadId: usuarioId,
+    detalle: [dni ? 'dni' : null, selfie ? 'selfie' : null].filter(Boolean).join('+'),
+  });
+
+  return {
+    dniImagenUrl: firmarUrlArchivo(actualizado.dniImagenUrl),
+    selfieUrl: firmarUrlArchivo(actualizado.selfieUrl),
+  };
 }
 
 /**

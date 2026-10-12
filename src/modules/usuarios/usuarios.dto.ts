@@ -75,6 +75,11 @@ export const cambiarPasswordBodySchema = z.object({
 
 export type CambiarPasswordBody = z.infer<typeof cambiarPasswordBodySchema>;
 
+export interface DocumentosIdentidadDto {
+  dniImagenUrl: string | null;
+  selfieUrl: string | null;
+}
+
 export interface PerfilPropio {
   id: number;
   nombre: string;
@@ -94,6 +99,10 @@ export interface PerfilPropio {
   /** Si el usuario confirmó que el link de Maps apunta a su dirección real. */
   ubicacionVerificada: boolean;
   imagenUrl: string | null;
+  /** Identidad validada por un admin (HU-2.3). */
+  verificado: boolean;
+  /** DNI y selfie subidos (spec 002.1), con URL firmada. Solo viajan al dueño y a admins. */
+  documentos: DocumentosIdentidadDto;
   roles: string[];
   /** El refugio al que pertenece, o `null` en un adoptante. Igual que en el login. */
   refugio: { id: number; nombre: string; estado: string } | null;
