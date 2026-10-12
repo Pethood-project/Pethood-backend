@@ -89,7 +89,7 @@ Depende de Fase 2 (Mascota/Publicacion) y Fase 1 (Usuario).
 
 **Backend:**
 - Infraestructura de WebSockets para chat en tiempo real.
-- CRUD de Chat/Mensaje (el mensaje solo tiene alta; el chat tiene alta y baja).
+- CRUD de Chat/Mensaje (el chat tiene alta y baja; el mensaje, alta y —desde 2026-10-12— baja lógica de su autor, nunca modificación).
 - Motor de notificaciones (push + posiblemente email) enganchado a eventos de Solicitud, Chat y Seguimiento.
 
 **Frontend:** GUI-08 Chat Adoptante, GUI-31 Chat Refugio, GUI-14 Conversación.

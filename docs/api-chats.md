@@ -117,6 +117,7 @@ Authorization: Bearer <token>
 | `ultimoMensaje.tieneImagen` | `true` si el mensaje trae foto **o video**. Con `contenido: ""` significa mensaje de solo adjunto → mostrar "📷 Foto" |
 | `ultimoMensaje.tieneVideo` | `true` si ese adjunto es un video → mostrar "🎥 Video" en vez de "📷 Foto". Viaja aparte para que un cliente viejo, que no lo conoce, siga mostrando "Foto" y no una línea vacía |
 | `ultimoMensaje.tipo` | `"TEXTO"`, `"SOLICITUD"` o `"ANIMAL_PERDIDO"`. En los dos últimos el `contenido` va vacío: es una tarjeta → mostrar "📄 Solicitud" o "🐾 Mascota perdida", con el mismo criterio que la foto |
+| `ultimoMensaje.eliminado` | `true` si su autor lo eliminó. Viene con `contenido: ""` y `tieneImagen`/`tieneVideo` en `false` → mostrar "Se eliminó este mensaje" (o "Eliminaste este mensaje" si `esMio`). Ver [`api-chat-sala.md`](./api-chat-sala.md) |
 | `noLeidos` | Mensajes **del otro** que el usuario todavía no leyó. Número absoluto, no un delta. Sale de comparar la fecha de cada mensaje contra `usuario_chat_ultima_lectura` — ver la nota de abajo |
 | `fechaUltimaActividad` | **Clave de orden, nunca `null`.** Fecha del último mensaje o, si la sala está vacía, fecha de creación del chat |
 
@@ -305,4 +306,4 @@ Se implementó exactamente la solución que este documento venía proponiendo: *
 
 ### Auditoría de `Mensaje`
 
-`MODELO_DATOS.md` es explícito: el mensaje **solo tiene alta**, no baja ni modificación, y **no se implementa endpoint de borrado de mensaje individual**. El schema de Prisma ya lo refleja (`Mensaje` no tiene `fechaBaja`). Vale para HU-5.2: no agregar "eliminar mensaje" sin volver a discutir el modelo con el equipo.
+Hasta el 2026-10-12 el mensaje era **solo alta**. Desde esa fecha tiene **baja lógica** —el autor puede eliminar un mensaje propio, para los dos— y sigue sin modificación (decisión del equipo, ver `MODELO_DATOS.md`). En este listado se nota en `ultimoMensaje.eliminado`; el endpoint y el evento están en [`api-chat-sala.md`](./api-chat-sala.md), sección «Responder y eliminar».

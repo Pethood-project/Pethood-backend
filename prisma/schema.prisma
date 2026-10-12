@@ -840,14 +840,16 @@ model UsuarioChat {
   @@map("usuario_chat")
 }
 
-// Mensaje: solo alta, nunca baja ni modificación (MODELO_DATOS.md, excepción explícita).
+// Mensaje: alta y baja lógica, nunca modificación. La baja es la del autor al eliminar un
+// mensaje propio (decisión del 2026-10-12, ver MODELO_DATOS.md); antes era solo alta.
 //
 // La tabla no declara índices acá pero tiene dos en
 // `migrations/20260901120000_chat_indices_listado_conversaciones`:
 //
 // - `mensaje_chat_fecha_alta_idx` — (chat_id, fecha_alta DESC). Sostiene el DISTINCT ON que
 //   trae el último mensaje de todos los chats de un usuario en una sola query (HU-5.1) y el
-//   historial paginado de la sala (HU-5.2). No es parcial: no hay `fecha_baja` que filtrar.
+//   historial paginado de la sala (HU-5.2). No es parcial: un mensaje eliminado se sigue
+//   listando (como el aviso "Se eliminó este mensaje"), así que la baja no filtra filas.
 // - `mensaje_chat_usuario_no_leido_idx` — (chat_id, usuario_id) WHERE leido = false, para el
 //   contador de no leídos. Parcial porque las filas no leídas son una minoría que se achica
 //   sola a medida que se abren las salas.
@@ -879,16 +881,28 @@ model Mensaje {
   // índice único parcial sobre (animal_perdido_id, chat_id) evita repetir la misma.
   animalPerdidoId Int? @map("animal_perdido_id")
 
+  // El mensaje al que éste responde (deslizar para responder). Siempre de la misma sala y de
+  // tipo TEXTO: lo valida el service, que es el único que ve las dos filas.
+  mensajeRespondidoId Int? @map("mensaje_respondido_id")
+
   chatId    Int @map("chat_id")
   usuarioId Int @map("usuario_id")
 
   usuarioAlta Int      @map("mensaje_usuario_alta")
   fechaAlta   DateTime @default(now()) @map("mensaje_fecha_alta")
 
-  chat          Chat           @relation(fields: [chatId], references: [id])
-  usuario       Usuario        @relation(fields: [usuarioId], references: [id])
-  solicitud     Solicitud?     @relation(fields: [solicitudId], references: [id])
-  animalPerdido AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
+  // El autor eliminó el mensaje. La fila y sus adjuntos se conservan —moderación los sigue
+  // viendo si alguien lo había reportado—, pero a la sala la API le manda sólo el aviso
+  // "Se eliminó este mensaje", sin contenido ni adjuntos.
+  usuarioBaja Int?      @map("mensaje_usuario_baja")
+  fechaBaja   DateTime? @map("mensaje_fecha_baja")
+
+  chat              Chat           @relation(fields: [chatId], references: [id])
+  usuario           Usuario        @relation(fields: [usuarioId], references: [id])
+  solicitud         Solicitud?     @relation(fields: [solicitudId], references: [id])
+  animalPerdido     AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
+  mensajeRespondido Mensaje?       @relation("RespuestaMensaje", fields: [mensajeRespondidoId], references: [id])
+  respuestas        Mensaje[]      @relation("RespuestaMensaje")
 
   // Conteo de no leídos con el modelo nuevo: "mensajes de la sala que no emití yo y son
   // posteriores a mi última lectura". Los índices parciales de HU-5.1 siguen en SQL a mano.

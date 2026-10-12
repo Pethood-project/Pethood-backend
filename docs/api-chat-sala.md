@@ -51,6 +51,8 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
   "fechaLectura": null,
   "solicitud": null,
   "aviso": null,
+  "eliminado": false,
+  "respondeA": null,
   "fechaAlta": "2026-09-01T14:05:00.000Z"
 }
 ```
@@ -70,6 +72,8 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
 | `fechaLectura` | Cuándo lo leyó, ISO 8601 crudo, o `null` si todavía no |
 | `solicitud` | Sólo en los de `tipo: "SOLICITUD"`. Ver "Mensajes de sistema" |
 | `aviso` | Sólo en los de `tipo: "ANIMAL_PERDIDO"` (HU-13.2). Ver "Mensajes de sistema" |
+| `eliminado` | Su autor lo eliminó. Sigue en el historial pero **viaja vacío**: `contenido: ""`, sin adjuntos y con `respondeA: null`. Ver «Responder y eliminar» |
+| `respondeA` | El mensaje al que responde, resumido para la cita, o `null`. Ver «Responder y eliminar» |
 | `fechaAlta` | ISO 8601 crudo |
 
 ### ⚠️ `entregado` y `leido` son de la SALA, no del mensaje
@@ -366,6 +370,7 @@ Dos formatos, según lleve foto o no:
 |---|---|---|
 | `contenido` | texto, ≤1000 caracteres | Solo si no hay `foto` |
 | `foto` | jpg/png/webp (≤5 MB) — o **un video** mp4/mov/webm (≤30 MB). **Se puede repetir hasta 5 veces** | Solo si no hay `contenido` |
+| `respondeAId` | id de un mensaje de **esta** sala | No — el mensaje que se cita al responder. Ver «Responder y eliminar» |
 | `rotacion` | `90` \| `180` \| `270` | No — sin rotación por defecto. **Sólo con una `foto`** |
 | `cropX`, `cropY`, `cropWidth`, `cropHeight` | enteros ≥0, en píxeles sobre la `foto` original | No — los cuatro juntos o ninguno. **Sólo con una `foto`** |
 
@@ -442,8 +447,10 @@ el ícono de reproducir la arma el cliente.
 **`application/json`** (solo texto):
 
 ```json
-{ "contenido": "Dale, te espero el sábado a las 10" }
+{ "contenido": "Dale, te espero el sábado a las 10", "respondeAId": 410 }
 ```
+
+(`respondeAId` es opcional, igual que en multipart.)
 
 **Texto y foto pueden ir juntos** — el pie de foto es un mensaje válido. Lo que no se acepta es un mensaje sin ninguno de los dos.
 
@@ -485,6 +492,8 @@ El objeto `Mensaje` completo, **ya persistido**: cuando el cliente recibe el 201
 | 400 | `DEMASIADOS_ARCHIVOS` | Podés subir hasta 5 archivos | Más de 5 en el mismo mensaje |
 | 400 | `DEMASIADOS_ARCHIVOS` | Podés adjuntar un solo video por mensaje | Más de un video |
 | 400 | `ADJUNTOS_MEZCLADOS` | Mandá el video solo: no se puede combinar con fotos en el mismo mensaje | Video + foto juntos |
+| 400 | `RESPUESTA_INVALIDA` | No podés responder a ese mensaje | `respondeAId` no es de esta sala, no existe o es una tarjeta de sistema |
+| 400 | `VALIDACION` | El mensaje que respondés no es válido | `respondeAId` no es un id |
 | 409 | `CONTACTO_INACTIVO` | No podés escribirle: la cuenta de este contacto fue dada de baja | El otro se dio de baja |
 | 404 | `CHAT_SIN_CONTACTO` | Esta conversación ya no tiene contraparte | Sala sin ningún otro participante activo |
 
@@ -562,6 +571,91 @@ no se puede haber leído algo que no llegó.
 ### Errores
 
 Los mismos de `/leidos`: autenticación, `403 SIN_ACCESO_AL_CHAT` y `404 NO_ENCONTRADO`.
+
+---
+
+## Responder y eliminar
+
+Dos funciones que **no salen de ninguna HU**: las pidió el equipo el 2026-10-12, con WhatsApp
+como referencia (ver la nota en `REQUISITOS.md`, Módulo 5). La segunda cambió la excepción de
+auditoría de `Mensaje`, que hasta entonces era "solo alta" (`MODELO_DATOS.md`).
+
+### Responder un mensaje puntual
+
+En la app se desliza la burbuja hacia la derecha; arriba de la barra queda la cita y el envío
+lleva `respondeAId` (ver `POST /chats/:chatId/mensajes`). El mensaje que vuelve —por el 201, por
+el historial o por `chat:mensaje-nuevo`— trae la cita resuelta en `respondeA`:
+
+```json
+"respondeA": {
+  "id": 410,
+  "usuarioId": 41,
+  "contenido": "¿Se lleva bien con otros perros?",
+  "adjunto": null,
+  "eliminado": false
+}
+```
+
+| Campo de `respondeA` | Qué es |
+|---|---|
+| `id` | El mensaje citado. La app lo usa para saltar a él al tocar la cita |
+| `usuarioId` | Su autor. Si la cita dice "Vos" o el nombre del contacto lo decide el cliente |
+| `contenido` | Sin truncar. `""` si era sólo adjuntos o si se eliminó |
+| `adjunto` | `{ tipo: "IMAGEN" \| "VIDEO", cantidad, miniaturaUrl }`, o `null` si no llevaba. `miniaturaUrl` es la primera foto, **firmada**; un video no tiene miniatura (el servidor no genera fotogramas) y va `null` |
+| `eliminado` | El citado se eliminó después: la cita no muestra nada de lo que decía |
+
+Reglas:
+
+- **Sólo se cita un mensaje de la misma sala y de tipo `TEXTO`.** Un id de otra sala dejaría
+  leer, a través de la cita, un pedazo de una conversación ajena; las tarjetas de sistema no
+  las escribió nadie de la sala. Las dos cosas responden `400 RESPUESTA_INVALIDA`.
+- **Citar un mensaje ya eliminado se acepta.** El otro pudo eliminarlo mientras se escribía la
+  respuesta, y rechazarla haría perder lo escrito. La cita sale con `eliminado: true`.
+- La cita viaja como `include` del mensaje —un JOIN en la misma query del historial—, no como
+  una segunda pasada por ids.
+
+### `DELETE /api/v1/chats/:chatId/mensajes/:mensajeId` — Eliminar un mensaje propio
+
+En la app se mantiene apretado el mensaje (texto, foto o video) y se confirma. Sin body.
+
+**Para los dos participantes y sin límite de tiempo.** Es una **baja lógica**: la fila y sus
+adjuntos se conservan, y en el historial de los dos queda en su lugar el aviso "Se eliminó este
+mensaje" (`eliminado: true`, sin contenido, sin adjuntos y sin cita). Moderación lo sigue viendo
+entero, que es lo que permite resolver un reporte previo.
+
+#### Respuesta 200
+
+```json
+{ "chatId": 8, "mensajeId": 412 }
+```
+
+Lo mismo que viaja en `chat:mensaje-eliminado`: con el id alcanza para cambiar la burbuja.
+
+**Idempotente**: eliminar algo ya eliminado (un doble toque, un reintento) devuelve lo mismo sin
+volver a escribir ni a emitir.
+
+#### Errores
+
+| HTTP | `codigo` | `mensaje` | Cuándo |
+|---|---|---|---|
+| 401 | `NO_AUTENTICADO` | — | Sin token |
+| 403 | `SIN_ACCESO_AL_CHAT` | No tenés acceso a esta conversación | No sos participante activo |
+| 403 | `AMBITO_NO_PERMITIDO` | Esta conversación es de tu otro perfil… | La sala es del otro perfil (switch refugio/adoptante) |
+| 403 | `MENSAJE_AJENO` | Sólo podés eliminar los mensajes que enviaste vos | El mensaje es del otro, o es una tarjeta de sistema. Un mensaje ajeno se reporta |
+| 404 | `MENSAJE_NO_ENCONTRADO` | El mensaje no existe | No existe, es de **otra** sala, o el `:mensajeId` no es un número |
+
+**No depende de que el contacto siga activo**: retirar lo que uno dijo no es escribirle.
+
+### Lo que eliminar no puede deshacer
+
+- **La push.** Si el mensaje ya se había notificado, la vista previa quedó en el celular del
+  otro. La bandeja no tiene ese problema: guarda "Nuevo mensaje de X", sin el texto.
+- **El contador de no leídos lo sigue contando** si el otro todavía no lo había abierto. Es a
+  propósito: el aviso "Se eliminó este mensaje" es algo nuevo que ver en la sala, igual que en
+  WhatsApp.
+- **Un mensaje eliminado ya no se puede reportar** (para quien reporta, ya no existe), pero un
+  reporte anterior sigue: el admin lo ve con estado `DE_BAJA` y el contexto del reporte trae
+  `fechaBaja` en cada mensaje.
 
 ---
 
@@ -661,6 +755,23 @@ socket.on('chat:mensaje-nuevo', (mensaje) => { /* ... */ });
 - Un usuario puede tener varios dispositivos: excluir "al emisor" dejaría al resto sin el mensaje.
 
 **El cliente deduplica por `mensaje.id` al insertar.** No es trabajo extra: hay que hacerlo igual al reconectar, donde el refetch del historial y los eventos encolados se superponen.
+
+### `chat:mensaje-eliminado` — server → cliente
+
+El autor eliminó un mensaje. Mismo payload que la respuesta del `DELETE`:
+
+```json
+{ "chatId": 8, "mensajeId": 412 }
+```
+
+Va a las salas **personales** de todos los participantes, incluido el autor (por sus otros
+dispositivos), por lo mismo que `chat:mensaje-nuevo`: si era el último mensaje, el listado tiene
+que cambiar el preview aunque nadie tenga la sala abierta.
+
+**Qué hacer:** en la sala, reemplazar la burbuja por el aviso y marcar como eliminada la cita de
+las respuestas que lo nombraban. En el listado, volver a pedir `GET /chats` (el evento no dice si
+era el último). Al reconectar, el refetch del historial ya trae `eliminado: true`: un cliente que
+mezcla por id tiene que tomar la versión nueva de un mensaje que ya tenía si cambió `eliminado`.
 
 ### `chat:leido` — server → sala del chat
 
@@ -778,7 +889,10 @@ La fuente de verdad es **la base**, no el socket: el tiempo real es una optimiza
 | **Autorización por `UsuarioChat`, nunca por rol** | Igual que HU-5.1: quién puede leer una conversación lo define haber sido puesto en ella. Es **la misma función** en REST y en `chat:unirse` — la regla no puede divergir entre canales porque es una sola. |
 | **El service no importa socket.io** | Emite a través de `websockets/emisor.ts`, que es no-op si no hay servidor registrado. Así el service se testea sin base, sin disco y sin levantar un socket, y la regla de capas del proyecto se mantiene. |
 | **413 → 400 para archivo grande** | El middleware de upload es compartido con HU-6.1 y otros tres módulos. Devolver 413 sólo en chat rompería la consistencia de la API por un matiz semántico. |
-| **No se escribe en `logAuditoria`** | Enviar un mensaje es una operación normal de usuario y **ya queda registrada de forma permanente** en `mensaje`, que es append-only por definición del modelo. |
+| **No se escribe en `logAuditoria`** | Enviar un mensaje es una operación normal de usuario y **ya queda registrada de forma permanente** en `mensaje`. Eliminarlo tampoco: la baja lógica guarda quién y cuándo en la misma fila, y el contenido no se pierde. |
+| **Eliminar es baja lógica y no DELETE** | Regla transversal del proyecto, y además lo necesita moderación: un mensaje reportado y después eliminado tiene que seguir pudiéndose revisar. Lo que no sale hacia la sala es el contenido: el DTO lo vacía. |
+| **Un eliminado viaja vacío, no se filtra del historial** | Sacarlo del historial dejaría huecos sin explicación y rompería las citas que lo nombran. Vaciarlo en el cliente no alcanza: con la URL firmada en la mano, el otro podría seguir abriendo la foto hasta que venza. |
+| **El DELETE no es optimista en la app** | Deshacer un optimista fallido obligaría a restaurar también las citas que lo nombraban. El diálogo de confirmación queda cargando hasta la respuesta, que es rápida. |
 
 ### Índices — ninguno nuevo
 
@@ -853,4 +967,4 @@ que la de una solicitud — las consecuencias, en `api-chats.md`.
 
 ### Auditoría de `Mensaje`
 
-`MODELO_DATOS.md` es explícito y esta HU lo respeta: el mensaje **solo tiene alta**. No hay endpoint de edición ni de borrado, y `Mensaje` no tiene `fechaBaja` ni campos de modificación. **No agregar "eliminar mensaje" sin volver a discutir el modelo con el equipo.**
+HU-5.2 se implementó con el mensaje como **solo alta**, que era lo que decía `MODELO_DATOS.md`. El 2026-10-12 el equipo decidió que el autor pueda eliminar un mensaje propio: desde entonces `Mensaje` tiene **baja lógica** (`mensaje_usuario_baja`, `mensaje_fecha_baja`) y sigue **sin modificación** — no hay edición de mensajes. Ver «Responder y eliminar».
