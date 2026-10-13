@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { validarAliasOpcional, validarCbuOpcional } from './bancario';
 import { validarDni } from './documento';
+import { validarPasswordNueva } from './password';
 import {
   parsearFecha,
   validarFechaFutura,
@@ -178,6 +179,20 @@ export function cbuOpcionalSchema() {
 export function dniSchema() {
   return z.unknown().transform((valor, ctx) => {
     const resultado = validarDni(valor);
+
+    if (!resultado.valido) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });
+      return z.NEVER;
+    }
+
+    return resultado.valor;
+  });
+}
+
+/** Contraseña nueva (registro, recuperación y cambio): ver `validarPasswordNueva`. */
+export function passwordNuevaSchema() {
+  return z.unknown().transform((valor, ctx) => {
+    const resultado = validarPasswordNueva(valor);
 
     if (!resultado.valido) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: resultado.error });

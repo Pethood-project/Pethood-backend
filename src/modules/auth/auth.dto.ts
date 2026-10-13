@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
-import { dniSchema, textoOpcionalSchema, textoSchema } from '../../shared/validation/schemas';
+import {
+  dniSchema,
+  passwordNuevaSchema,
+  textoOpcionalSchema,
+  textoSchema,
+} from '../../shared/validation/schemas';
 import { ROL_API } from '../../shared/roles';
 
 export const nombrePersonaSchema = z
@@ -30,7 +35,7 @@ export const telefonoSchema = z
     return digitos.length >= 8 && digitos.length <= 15 && /^\+?\d+$/.test(valor);
   }, 'Ingresá un teléfono válido.');
 
-export const passwordSchema = z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.');
+export const passwordSchema = passwordNuevaSchema();
 
 export const registroBodySchema = z.object({
   nombre: nombrePersonaSchema,

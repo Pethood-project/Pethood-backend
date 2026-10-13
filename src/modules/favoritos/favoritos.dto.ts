@@ -25,6 +25,10 @@ export interface MascotaFavoritaDto {
   id: number;
   nombre: string | null;
   fechaNacimiento: string | null;
+  /** Para las etiquetas de la tarjeta ("Macho", "Mediano"). Mismos valores que el resto de la API. */
+  genero: 'MACHO' | 'HEMBRA';
+  /** Opcional en el modelo: `null` si quien la dio de alta no lo cargó. */
+  tamanio: 'PEQUENO' | 'MEDIANO' | 'GRANDE' | null;
   imagenUrl: string | null;
   especie: { id: number; nombre: string };
   raza: { id: number; nombre: string };

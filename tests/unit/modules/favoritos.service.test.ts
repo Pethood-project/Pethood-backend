@@ -57,6 +57,8 @@ function favoritoConMascota(opciones: {
       id: mascotaId,
       nombre: 'Fido',
       fechaNacimiento,
+      genero: 'MACHO',
+      tamanio: 'MEDIANO',
       imagenUrl: '/api/v1/archivos/mascotas/x.jpg',
       raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
       refugio,
@@ -236,6 +238,8 @@ describe('listarFavoritos', () => {
     expect(favoritos[0]).toMatchObject({
       nombre: 'Fido',
       fechaNacimiento: '2022-03-15',
+      genero: 'MACHO',
+      tamanio: 'MEDIANO',
       estado: { id: 1, nombre: 'Disponible' },
       fechaAgregado: reciente.toISOString(),
     });

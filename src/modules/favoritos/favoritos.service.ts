@@ -57,6 +57,8 @@ function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
     id: mascota.id,
     nombre: mascota.nombre,
     fechaNacimiento: mascota.fechaNacimiento ? aFechaISO(mascota.fechaNacimiento) : null,
+    genero: mascota.genero,
+    tamanio: mascota.tamanio,
     imagenUrl: mascota.imagenUrl,
     especie: { id: mascota.raza.especie.id, nombre: mascota.raza.especie.nombre },
     raza: { id: mascota.raza.id, nombre: mascota.raza.nombre },
