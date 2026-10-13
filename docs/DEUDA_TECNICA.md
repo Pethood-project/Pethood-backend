@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-10-01**
+> Última revisión: **2026-10-12**
 
 ## Cómo se usa
 
@@ -50,16 +50,26 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 20 | Las vacunas cargadas antes de la spec 019 no tienen tipo y no dan medalla | Baja | backend |
 | 21 | El catálogo de Provincia/Localidad vive sólo en el cliente, y la publicación sigue con ubicación en texto libre | Media | ambos |
 | 22 | Los `limite` de otros listados responden en inglés si vienen fuera de rango | Baja | backend |
-| 23 | Inicio muestra Campañas y Mascotas perdidas como «Muy pronto», y arma los contadores del refugio con cuatro pedidos | Baja | frontend |
+| 23 | Las tarjetas de Inicio no muestran datos de campañas, y el refugio arma sus contadores con cuatro pedidos | Baja | frontend |
 | 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
 | 25 | Reseña no avisa al recibir una reseña (el reporte ya existe, spec 008) | Baja | ambos |
 | 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
 | 27 | Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado | Baja | backend |
-| 28 | El dueño de un aviso de mascota perdida no puede retirarlo (el admin sí, spec 008) | Baja | backend |
+| ~~28~~ | ~~El dueño de un aviso de mascota perdida no puede retirarlo~~ | ✅ cerrada | — |
 | 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
-| 30 | Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto | Baja | backend |
+| 30 | El admin no puede ocultar un mensaje reportado (el autor sí puede eliminarlo) y ve una ventana fija de contexto | Baja | backend |
 | 31 | El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra | Baja | backend |
 | 32 | En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy | Media | backend |
+| 33 | `chat` tiene dos FK de origen y nada en base impide llenar las dos | Baja | backend |
+| 34 | Sin tope de donaciones pendientes por adoptante | Baja | backend |
+| 35 | La quota de campañas no es atómica | Baja | backend |
+| 36 | «Hoy» depende de la zona horaria del proceso Node, que no está fijada | Media | backend |
+| 37 | Sin webhook de Mercado Pago: una transferencia que llega después de «Terminar donación» tarda hasta 5 minutos en confirmarse | Baja | backend |
+| 38 | Las donaciones desde otro banco o billetera no se confirman solas | Media | ambos |
+| 39 | Notificaciones de Campañas/Perdidos/Reputación/Moderación completa/Historia Clínica/Soporte: pausado a propósito | Baja | backend |
+| 40 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
+| 41 | Documentos de identidad: archivos huérfanos al reemplazar y expuestos si se activa R2 | Media | backend |
+| 42 | `LogAuditoria` es un archivo efímero y ahora respalda el rollback de documentos | Media | backend |
 
 ---
 
@@ -306,7 +316,6 @@ No se repite acá; el link va al detalle.
 |---|---|
 | Presencia en memoria: no escala a varias instancias y puede quedar stale al salir de la sala | [`api-chat-sala.md`](./api-chat-sala.md) § «Presencia: dos limitaciones conocidas» |
 | `mensaje_leido` quedó obsoleto pero se sigue poblando; ninguna query lo consulta | [`api-chat-sala.md`](./api-chat-sala.md) |
-| Falta la sala de HU-13.2 (mascota perdida/encontrada), que no nace de una solicitud | [`api-chats.md`](./api-chats.md) § «Creación de salas» |
 | Desnormalizar el último mensaje en `Chat`: evaluado y descartado, revisitable con cientos de chats por usuario | [`api-chats.md`](./api-chats.md) |
 | `chat_tipo` sigue sin definirse y no se escribe | [`api-chats.md`](./api-chats.md) |
 
@@ -474,19 +483,21 @@ id y quedó corregido para todos los módulos en esa misma spec.
 
 ---
 
-## 23. Inicio muestra Campañas y Mascotas perdidas como «Muy pronto» — Baja
+## 23. Las tarjetas de Inicio no muestran datos de campañas, y el refugio arma sus contadores con cuatro pedidos — Baja
 
-**Qué pasa.** El rediseño de Inicio (adoptante y refugio) trae secciones de Campañas y de
-Mascotas perdidas con datos reales (montos, donantes, reportes cerca). Esos módulos son las
-fases 10 y 11 del roadmap y todavía no tienen backend, así que en
-`apps/mobile/components/home/SeccionesProximamente.tsx` se muestran con el color y la forma
-del diseño pero con un texto genérico y la pastilla «Muy pronto», sin números inventados.
-Además, el panel de solicitudes del refugio saca sus contadores (pendientes, en revisión,
-aprobadas del mes, llegadas hoy) del `total` de cuatro `GET /solicitudes/recibidas` con
-distinto filtro, porque no hay un endpoint de resumen.
+> Numerado 21 en `origin/dev`, que chocó con el 21 y el 22 de otra rama en el merge de la
+> spec 020: se renumeró a 23 al resolver el conflicto (los números no se reciclan). Hasta la
+> spec 026 se llamaba «Inicio muestra Campañas y Mascotas perdidas como «Muy pronto»».
 
-**Cómo se arregla.** Cuando se implemente cada módulo, reemplazar su tarjeta de
-`SeccionesProximamente.tsx` por una con datos (el diseño de referencia está en el proyecto
+**Qué pasa.** Campañas (spec 026) y Mascotas perdidas (spec 020) ya tienen módulo y sus
+tarjetas de Inicio llevan a sus pantallas (`CampaniasInicio.tsx`, `PerdidasInicio.tsx`), pero
+el rediseño de Inicio las dibujaba con datos reales (montos, donantes, reportes cerca) y hoy
+muestran un texto fijo. Además, el panel de solicitudes del refugio saca sus contadores
+(pendientes, en revisión, aprobadas del mes, llegadas hoy) del `total` de cuatro
+`GET /solicitudes/recibidas` con distinto filtro, porque no hay un endpoint de resumen.
+
+**Cómo se arregla.** Pedir la primera campaña del portal (o las del refugio) desde
+`useDatosInicio` y pintarla en la tarjeta (el diseño de referencia está en el proyecto
 «Pethood - Ideas de inicio» de Claude Design). El «Ver mapa» del prototipo no se implementa:
 el proyecto excluye el mapa interactivo. Si los cuatro pedidos del refugio se notan lentos,
 sumar un `GET /solicitudes/recibidas/resumen` que devuelva los contadores en una sola
@@ -587,11 +598,23 @@ Tampoco existe un endpoint para que el reportante vea el estado y la respuesta d
 correo además del aviso en la app. El relevamiento de todos los puntos donde iría un
 correo está en [`MAIL.md`](MAIL.md).
 
-**Cómo se arregla.** Cuando se haga el Módulo 4: endpoints para listar y marcar como leídas
-las `Notificacion`, y enganchar `suspenderUsuario` y `suspenderRefugio` de `admin-usuarios` al
-mismo `crearNotificacion`. Mismo trabajo que la parte pendiente de la #25.
+**Parcialmente resuelto por la spec 004 (Módulo 4, 2026-09-29).** Ya existe la bandeja completa
+(`GET /notificaciones`, marcar leída/todas, eliminar) y `suspenderUsuario`/`suspenderRefugio`
+de `admin-usuarios` ya llaman a `notificaciones.notificar(...)` con mail + push. Lo que sigue
+sin resolver es específico de Moderación (Fase 2, pausada — ver #34): el reportante no tiene
+cómo ver el estado/respuesta de SU reporte, y "resolver un reporte" todavía no dispara ningún
+aviso (ni al reportante ni al reportado) porque el módulo de Moderación en sí no está hecho.
 
-## 28. El dueño de un aviso de mascota perdida no puede retirarlo — Baja
+**Cómo se termina de arreglar.** Cuando se implemente Moderación: enganchar la resolución de un
+reporte a `notificaciones.notificar(...)` (ya no hace falta tocar nada de bajo nivel, el
+servicio central ya existe) y, si se decide que el reportante necesita ver el detalle, un
+endpoint de "mis reportes". Mismo trabajo que la parte pendiente de la #25.
+
+## 28. El dueño de un aviso de mascota perdida no puede retirarlo — ✅ **CERRADA**
+
+> Cerrada el 2026-10-04 por la spec 025 (HU-13.3): quien publicó el aviso lo edita y lo elimina
+> desde Mis publicaciones (`PUT` y `DELETE /animales-perdidos/:id`), y lo marca como resuelto
+> desde HU-13.2. Lo que sigue abajo es el registro de cómo estaba.
 
 **Qué pasa.** `animales-perdidos` (spec 020) tiene alta y listado. La baja por el **admin** existe
 desde la spec 008 (`PATCH /admin/animales-perdidos/:id/baja`), pero quien publicó el aviso no
@@ -620,17 +643,20 @@ sus validaciones en `shared/validation/`), estado de confirmación en `Donacion`
 con notificación al refugio. Después, sumar `alias` y `cbu` a la `vista` de `CAMPANIA` y que
 `montoActual` cuente solo las confirmadas. Toca `docs/MODELO_DATOS.md`.
 
-## 30. Un mensaje de chat no se puede ocultar y el admin ve una ventana fija de contexto — Baja
+## 30. El admin no puede ocultar un mensaje reportado y ve una ventana fija de contexto — Baja
 
-**Qué pasa.** `Mensaje` solo tiene alta (sin baja lógica), así que un reporte de mensaje se
-resuelve pero el mensaje sigue visible para quien lo recibió: la única acción posible es
-suspender al autor (`PATCH /admin/usuarios/:id/suspender`). Además el admin ve los 10 mensajes
-anteriores y los 10 posteriores (`VENTANA_CONTEXTO_MENSAJES`), sin forma de pedir más.
+**Qué pasa.** Desde el 2026-10-12 `Mensaje` tiene baja lógica, pero sólo la usa **su autor** al
+eliminarlo (ver `api-chat-sala.md`, «Responder y eliminar»). El admin todavía no: un reporte de
+mensaje se resuelve y el mensaje sigue visible para quien lo recibió, así que la única acción
+posible es suspender al autor (`PATCH /admin/usuarios/:id/suspender`). Además el admin ve los 10
+mensajes anteriores y los 10 posteriores (`VENTANA_CONTEXTO_MENSAJES`), sin forma de pedir más.
 
-**Cómo se arregla.** Si hace falta ocultar un mensaje, agregar una baja lógica solo para
-moderación (y que el chat lo filtre); es un cambio de modelo y de contrato del chat, no solo de
-moderación. Para el contexto, un parámetro de ampliación en `GET /admin/reportes/:id` si en la
-práctica falta información.
+**Cómo se arregla.** La mitad difícil ya está: el modelo tiene `mensaje_fecha_baja`, el chat
+muestra un mensaje dado de baja como "Se eliminó este mensaje" sin su contenido, y existe el
+evento `chat:mensaje-eliminado` para que la sala se actualice en vivo. Falta una acción de admin
+que dé de baja el mensaje reportado (con `mensaje_usuario_baja` = el admin, y probablemente otro
+texto en la sala, "Un moderador eliminó este mensaje"). Para el contexto, un parámetro de
+ampliación en `GET /admin/reportes/:id` si en la práctica falta información.
 
 ## 31. El perfil público de un refugio cuenta publicaciones que su lista filtrada no muestra — Baja
 
@@ -643,6 +669,8 @@ refugio la ve contada y no la ve en la lista (spec 023, §9).
 (la opción 2 del pedido en `docs/ideas/USER.md`), o contar en el resumen con el mismo criterio
 que el feed. Lo mismo vale para `GET /publicaciones?usuarioId=`.
 
+---
+
 ## 32. En Render/Railway el log de auditoría en `logs/` se pierde en cada deploy — Media
 
 **Qué pasa.** `CONSTITUTION.md` §4 pide el log de auditoría en un archivo append-only en
@@ -654,3 +682,146 @@ panel de logs de la plataforma. Pero esa retención es limitada y depende del pl
 **Cómo se arregla.** Montar un volumen persistente en `logs/` (Railway lo permite; en Render es
 un disk pago), o mandar stdout a un servicio de logs con retención. Pasarlo a una tabla
 contradice la constitución: sería una decisión de equipo.
+
+---
+
+## 33. `chat` tiene dos FK de origen y nada en base impide llenar las dos — Baja
+
+**Qué pasa.** Desde HU-13.2 (spec 024), `chat` tiene `solicitud_id` y `animal_perdido_id`: las
+dos guardan qué hecho **abrió** la conversación, y sólo se escribe una, la del hecho que creó la
+fila. Esa invariante la sostienen las dos funciones que crean salas
+—`asegurarChatDeSolicitud` y `asegurarChatDeReclamo`— y **nada más**. Un INSERT a mano, un seed
+descuidado o una tercera forma de abrir salas pueden dejar una fila con las dos.
+
+**Qué rompería.** Poco, y menos que antes: la cabecera ya no las lee para decidir nada —el
+contexto sale de las **tarjetas** de `mensaje`, no de estas columnas—, así que una fila con las dos
+no cambia ninguna pantalla. Queda como un dato inconsistente sobre el origen de la sala.
+
+**Cómo se arregla.** Un `CHECK` en la tabla, en SQL a mano porque Prisma no expresa constraints
+de tabla:
+
+```sql
+ALTER TABLE "chat" ADD CONSTRAINT "chat_origen_excluyente"
+  CHECK ("solicitud_id" IS NULL OR "animal_perdido_id" IS NULL);
+```
+
+No se hizo en el PR de la HU para no mezclar un cambio de integridad con la funcionalidad, y
+porque conviene decidir antes si el origen de una sala no debería ser **una** columna polimórfica
+(`origen_tipo` + `origen_id`, como ya hace `reporte_problema`) en lugar de una FK por tipo. Con
+una tercera clase de sala, el patrón actual suma una columna más.
+
+---
+
+## 34. Sin tope de donaciones pendientes por adoptante — Baja
+
+**Qué pasa.** Un adoptante puede declarar donaciones sin límite (spec 026, HU-12.3): cada
+«Terminar donación» crea una donación Pendiente que el refugio tiene que revisar a mano.
+Alguien malintencionado podría llenar la bandeja de un refugio con donaciones falsas.
+
+**Cómo se arregla.** Si molesta en la práctica, un tope de pendientes por adoptante y por
+campaña, con el mismo criterio que el de solicitudes (regla transversal 7). Ningún requisito
+lo pide todavía.
+
+## 35. La quota de campañas no es atómica — Baja
+
+**Qué pasa.** El alta de campaña cuenta las Inactiva + Activa del refugio y después crea
+(spec 026 §6.3). Dos altas simultáneas del mismo refugio pueden pasar las dos el conteo y
+dejar 6 campañas vigentes. Es el mismo criterio que el resto de las quotas del proyecto.
+
+**Cómo se arregla.** Contar y crear dentro de una transacción serializable, o con un lock
+por refugio, si alguna vez se ve en la práctica.
+
+## 36. «Hoy» depende de la zona horaria del proceso Node, que no está fijada — Media
+
+**Qué pasa.** `parsearFecha`, `inicioDelDia`, `finDelDia`, `esPasada` y `esFutura`
+(`src/shared/validation/dates.ts`) trabajan en la hora LOCAL del proceso, y ni `.env.example`
+ni `server.ts` ni los jobs fijan `TZ`. Con el servidor en UTC (lo típico en un contenedor o en
+Render): a las 22 hs de Argentina una campaña que «empieza hoy» se rechaza por fecha pasada, y
+el cron de campañas (spec 026) finaliza unas 3 horas antes las que terminan «hoy». Es un
+patrón de todo el proyecto (fecha de nacimiento, visitas médicas); campañas es el primer
+módulo donde el cron lo vuelve visible.
+
+**Cómo se arregla.** Fijar `TZ=America/Argentina/Buenos_Aires` en el entorno del servidor y
+del cron (y sumarlo a `.env.example` y a la guía de despliegue), o poner
+`process.env.TZ` al principio de `server.ts` y de cada entrypoint de `src/jobs/`.
+
+## 37. Sin webhook de Mercado Pago: la confirmación tardía espera al cron — Baja
+
+**Qué pasa.** La spec 027 confirma las donaciones consultando `/v1/payments/search`: en el
+momento de «Terminar donación» y después cada 5 minutos con el cron
+`conciliar-donaciones-mp`. Si la transferencia se acredita después de que el adoptante tocó
+el botón (una transferencia bancaria demorada), la donación se ve Pendiente hasta la próxima
+corrida.
+
+**Cómo se arregla.** Suscribir la aplicación al webhook de pagos de Mercado Pago (evento
+`payment`, validando la firma `x-signature`) y conciliar el grupo de ese pago al recibirlo. El
+cron queda como respaldo. Necesita una URL pública estable.
+
+## 38. Las donaciones desde otro banco o billetera no se confirman solas — Media
+
+**Qué pasa.** En una transferencia desde otro banco o billetera a la cuenta de Mercado Pago del
+refugio (Naranja X, por ejemplo), la API de Mercado Pago informa como pagador al dueño de la
+cuenta que recibe, no al que transfirió (spec 027 §9, decisión 8). Sin el DNI del que
+transfirió no hay match, así que esas donaciones (`origen = OTRO_BANCO`) las confirma el
+refugio a mano.
+
+**Cómo se arregla.** Montos con centavos únicos: al elegir «Otro banco», la app le indica al
+donante un monto exacto con centavos que ninguna otra donación pendiente de ese refugio esté
+usando (por ejemplo, $2.000,37), y un ingreso por ese monto exacto confirma la donación sin
+necesitar el DNI. Cambia el flujo de «Donar» (el monto se reserva antes de transferir).
+
+## 39. Notificaciones de Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica y Soporte — pausado a propósito
+
+**Qué pasa.** La spec 004 (Notificaciones) implementa el servicio central `notificar(...)`,
+la bandeja y los escenarios de "Fase 1" del documento fuente del módulo (Cuenta, Solicitudes,
+Chat, Seguimiento, Refugios/Administración). Los escenarios de "Fase 2" y "Fase 3" —
+Campañas, Mascotas Perdidas/Encontradas, Reputación, Moderación (salvo "cuenta suspendida",
+que sí está), Historia Clínica y Soporte— quedaron sin implementar, no por olvido: dependen de
+módulos que hoy no existen (Campañas, Reputación como endpoints propios) o que el equipo
+prefirió no tocar todavía (Mascotas Perdidas ya tiene módulo, pero sus notificaciones quedaron
+para cuando el resto de la app esté más completo). Decisión del usuario, 2026-09-29.
+
+**Cómo se retoma.** El servicio central ya existe (`modules/notificaciones/notificaciones.service.ts`,
+función `notificar(...)`): agregar estos escenarios es, en cada módulo nuevo, la misma llamada
+de 3-6 líneas que ya se usa en `solicitudes`/`seguimiento`/`chats` — no hace falta rediseñar
+nada, solo enganchar el módulo dueño cuando exista.
+
+## 40. `usuarios.repository.ts` usa un `PrismaClient` distinto al del resto del proyecto — Media
+
+**Qué pasa.** `src/modules/usuarios/usuarios.repository.ts` importa `prisma` desde
+`config/prisma.ts`, un `PrismaClient` propio, en vez de la instancia única de
+`shared/prisma.ts` que importan todos los demás `repository.ts`. Son dos pools de conexión
+distintos a la misma base — no rompe nada hoy (Postgres soporta varias conexiones sin
+problema), pero es la clase de divergencia silenciosa que un día explica un comportamiento
+raro (una transacción que no ve lo que la otra acaba de escribir, el límite de conexiones del
+plan gratis de Neon agotándose el doble de rápido).
+
+**Cómo se arregla.** Cambiar el import de `usuarios.repository.ts` a `shared/prisma.ts` y
+borrar `config/prisma.ts` si ningún otro archivo lo usa.
+
+## 41. Documentos de identidad: archivos huérfanos al reemplazar y expuestos si se activa R2 — Media
+
+**Qué pasa.** Spec 002.1 guarda DNI y selfie en `documentos-identidad/` (namespace privado, URL
+firmada). Dos huecos conocidos: (1) al reemplazar un documento el archivo viejo queda huérfano
+en storage, no se borra; (2) vale lo del ítem 14: con R2 activado las URLs absolutas no se firman,
+y el DNI de la gente quedaría accesible con solo tener el link.
+
+**Cómo se arregla.** Borrar el archivo anterior con `borrarImagen` al reemplazar (o cron de
+limpieza), y resolver el ítem 14 **antes** de activar R2 en producción: esto sube la urgencia, ya
+no son fotos de mascotas. Con R2 hay que servir `documentos-identidad/` desde un bucket
+**privado** y firmar con `getSignedUrl` al leer; `R2_PUBLIC_BASE_URL` es público y permanente.
+
+## 42. `LogAuditoria` es un archivo efímero y ahora respalda el rollback de documentos — Media
+
+**Qué pasa.** La spec 002.1 deja en `LogAuditoria` las rutas del DNI/selfie de cada subida,
+revocación y acceso de un admin, para poder revisar un documento viejo (los archivos no se borran
+del storage). Pero `logs/auditoria.log` vive en el disco del contenedor, que en Render se pierde en
+cada deploy; en producción solo sobrevive el stdout, en el panel de logs de la plataforma, con la
+retención del plan. Sin esas rutas, el archivo viejo queda en el bucket sin forma de saber de
+quién era.
+
+**Cómo se arregla.** Pasar `LogAuditoria` a una tabla append-only (o retener el stdout fuera de la
+plataforma) antes de depender de esto en producción. Alternativa chica: no pisar la columna al
+reemplazar/revocar, sino guardar el historial de documentos en una tabla propia (`usuario_id`,
+`tipo`, `url`, `fecha_baja`), que además cumple la regla de bajas lógicas del proyecto.
+

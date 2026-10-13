@@ -13,6 +13,8 @@ export const EVENTOS = {
   SALIR: 'chat:salir',
   /** server → cliente. Un mensaje nuevo, con la misma forma que el del historial. */
   MENSAJE_NUEVO: 'chat:mensaje-nuevo',
+  /** server → cliente. El autor eliminó un mensaje: la burbuja pasa a ser el aviso. */
+  MENSAJE_ELIMINADO: 'chat:mensaje-eliminado',
   /** server → sala. Alguien leyó la conversación: habilita el doble check del emisor. */
   LEIDO: 'chat:leido',
   /** server → sala. A alguien le LLEGARON los mensajes, aunque no los haya abierto. */
@@ -23,6 +25,10 @@ export const EVENTOS = {
   PRESENCIA: 'chat:presencia',
   /** server → cliente. Error no solicitado (ej. token vencido con el socket abierto). */
   ERROR: 'chat:error',
+  /** server → sala personal. Notificación nueva de bandeja (spec 004, regla 3). */
+  NOTIFICACION_NUEVA: 'notificacion:nueva',
+  /** server → sala personal. Contador de no leídas de la campana, recalculado. */
+  NOTIFICACION_CONTADOR: 'notificacion:contador',
 } as const;
 
 /**

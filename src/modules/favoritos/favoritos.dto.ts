@@ -25,6 +25,10 @@ export interface MascotaFavoritaDto {
   id: number;
   nombre: string | null;
   fechaNacimiento: string | null;
+  /** Para las etiquetas de la tarjeta ("Macho", "Mediano"). Mismos valores que el resto de la API. */
+  genero: 'MACHO' | 'HEMBRA';
+  /** Opcional en el modelo: `null` si quien la dio de alta no lo cargó. */
+  tamanio: 'PEQUENO' | 'MEDIANO' | 'GRANDE' | null;
   imagenUrl: string | null;
   especie: { id: number; nombre: string };
   raza: { id: number; nombre: string };
@@ -45,6 +49,11 @@ export interface MascotaFavoritaDto {
    * muestra "Solicitud enviada" en lugar del botón.
    */
   solicitudAbiertaId: number | null;
+  /**
+   * `true` si este usuario es quien la adoptó (tiene la solicitud de adopción aprobada). Con
+   * el estado "Adoptado" no alcanza para distinguirlo de una mascota que adoptó otra persona.
+   */
+  adoptadaPorMi: boolean;
   /** Momento en que se guardó: define el orden por defecto del listado. */
   fechaAgregado: string;
 }

@@ -18,7 +18,7 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 001 | Gestión de Perfiles y Autenticación | 1 | BORRADOR |
 | 002 | Publicación de Mascotas | 2 | pendiente |
 | 003 | Adopción y Favoritos | 3 | BORRADOR |
-| 004 | Chat y Notificaciones | 4 | pendiente |
+| 004 | Notificaciones (Fase 1 — mail/push/bandeja) | 13 | APROBADA |
 | 005 | Historia Clínica (HU-8.1 a HU-8.4) | 5 | APROBADA |
 | 006 | Hogares de Tránsito y Reputación | 6 | pendiente |
 | 007 | Campañas, Padrinazgos y Perdidos | 7 | pendiente |
@@ -35,3 +35,7 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 021 | Navegación y Filtros de Adoptar (HU-11.1 a HU-11.4) | 13 | IMPLEMENTADA |
 | 022 | Sistema de Reputación (HU-10.1 a HU-10.6) | 13 | IMPLEMENTADA |
 | 023 | Perfiles públicos: persona y refugio (GUI-26) | 13 | IMPLEMENTADA |
+| 024 | Reclamar mascota perdida/encontrada (HU-13.2) | 13 | APROBADA |
+| 025 | Gestión del aviso de mascota perdida por quien lo publicó (HU-13.3) | 13 | IMPLEMENTADA |
+| 026 | Campañas de donación (HU-12.1 a HU-12.7) | 13 | APROBADA |
+| 027 | Confirmación automática de donaciones con Mercado Pago | 13 | APROBADA |

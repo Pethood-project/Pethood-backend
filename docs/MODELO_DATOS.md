@@ -29,6 +29,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 - **Estado_Refugio** (`estado_refugio_id PK`).
 - **Estado_Solicitud** (`estado_solicitud_id PK`).
 - **Estado_Campaña** (`estado_campaña_id PK`) — valores: Inactiva, Activa, Finalizada, Cancelada.
+- **Estado_Donacion** (`estado_donacion_id PK`) — valores: Pendiente, Realizada, Cancelada. Agregado fuera del diagrama de clases (spec 026).
 - **Estado_Animal_Perdido** (`estado_animal_perdido_id PK`) — incluye "Encontrado/Perdido/Resuelto".
 - **Tipo_Solicitud** (`tipo_solicitud_id PK`) — incluye `tipo_solicitud_secuencia_dias` (usado para ventanas de tiempo, ej. la cancelación automática a los 6 meses).
 - **Rol** (`rol_id PK`) — Administrador, Refugio, Adoptante.
@@ -39,7 +40,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 
 ### Usuario
 
-`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
+`usuario_id PK`, `usuario_nombre`, `usuario_apellido`, `usuario_email`, `usuario_contraseña` (nullable si la cuenta se creó solo con Google), `usuario_telefono` (obligatorio en el registro con email/contraseña; nullable para cuentas Google), `usuario_dni` (nullable — el registro mobile actual y OAuth no lo exigen), `usuario_fecha_nacimiento` (nullable), `usuario_google_id` (nullable, único — id `sub` de Google OAuth 2.0), `usuario_verificado`, `usuario_imagen_url`, `usuario_dni_imagen_url` y `usuario_selfie_url` (nullable, privadas — URL firmada; spec 002.1), FK `refugio_id` (nullable — solo aplica si el usuario pertenece a un refugio), FK `estado_id` (→ Estado_Usuario).
 
 **Campos agregados fuera del diagrama de clases (2026-09-29, geolocalización de perfil):** `usuario_provincia`, `usuario_localidad`, `usuario_calle_altura` (texto, nullable — dirección estructurada que carga el usuario), `usuario_mapa_url` (texto, nullable — URL de Google Maps generada al geocodificar), `usuario_latitud` / `usuario_longitud` (`Float`, nullable — coordenadas resultantes) y `usuario_ubicacion_verificada` (boolean — si el usuario confirmó que el link apunta a su dirección). El texto que se muestra es la concatenación «calle_altura, localidad - provincia» (`src/shared/ubicacion.ts`). Las coordenadas se guardan aparte de la URL para calcular la distancia al refugio con Haversine (`distanciaKm`, `src/shared/geo.ts`) sin parsear el link. La geocodificación la hace `src/shared/geocoding.ts` con `node-geocoder` (proveedor `openstreetmap` por defecto o `google`, ver `GEOCODER_PROVIDER`/`GEOCODER_API_KEY`).
 
@@ -193,9 +194,16 @@ Con `solicitud_id` null la fila es del **catálogo** que se sortea. Con valor, e
 
 ### Chat
 
-`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable).
+`chat_id PK`, `chat_tipo` (probablemente distingue chat adoptante↔refugio vs. chat de coordinación de mascota perdida/encontrada — confirmar con el equipo el enum exacto; **hoy no se escribe**), FK `refugio_id` (nullable), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable).
 
-`solicitud_id` es la solicitud que habilitó la sala (CONSTITUTION §7: no hay chat sin interacción previa). Es nullable porque las salas de coordinación por mascota perdida (HU-13.2) no salen de una solicitud. Un índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL` evita dos salas para la misma solicitud.
+**Dos FK dicen de qué nació la sala** (CONSTITUTION §7: no hay chat sin interacción previa). Las dos guardan el ORIGEN de la conversación, no todo lo que se habló en ella:
+
+- `solicitud_id` — la solicitud de adopción o tránsito que la habilitó. Índice único parcial sobre `(solicitud_id) WHERE solicitud_id IS NOT NULL AND chat_fecha_baja IS NULL`: evita dos salas para la misma solicitud.
+- `animal_perdido_id` — el aviso de mascota perdida/encontrada cuyo reclamo la abrió (HU-13.2, spec 024).
+
+Las dos son nullables y en la práctica nunca se llenan juntas, porque sólo se escribe la del hecho que creó la fila. Con las dos en `null` es una sala anterior a HU-5.2. (Nada en base lo impide: anotado en `DEUDA_TECNICA.md`, ítem 33.)
+
+**La sala es siempre entre las partes**, tanto para una solicitud como para un reclamo: una segunda solicitud al mismo refugio, o el reclamo de un aviso de alguien con quien ya se hablaba, caen en la conversación que ya existía. Por eso **lo que se habló vive en `Mensaje`** y no acá: una sala puede acumular dos solicitudes, dos avisos, o una de cada uno. La sala de un reclamo lleva `refugio_id` en `null` — el aviso es de la persona, no de su refugio.
 
 ### Usuario_Chat
 
@@ -205,19 +213,38 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 
 ### Mensaje
 
-`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable).
+`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD` | `ANIMAL_PERDIDO` | `MASCOTA` | `UBICACION_REFUGIO`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable), FK `mascota_id` (nullable), FK `mensaje_respondido_id` (nullable, autorreferencia a `mensaje`), `mensaje_usuario_baja` y `mensaje_fecha_baja` (nullable).
 
 - **`mensaje_leido` quedó obsoleto.** Lo reemplazan las marcas de `Usuario_Chat`. Se sigue poblando para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo.
 - **`mensaje_imagen_url` es la PRIMERA de `mensaje_imagenes`**, desnormalizada para que el preview del listado no tenga que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`. Un mensaje admite hasta 5 fotos (`LIMITES.mensaje.fotos.maximo`).
 - **`mensaje_tipo = SOLICITUD`** es la tarjeta que PetHood inserta en la sala al enviarse una solicitud: la emite el usuario SISTEMA y lleva `solicitud_id`. No es una burbuja de texto y su `mensaje_contenido` va vacío — el texto lo pone la UI.
+- **`mensaje_tipo = ANIMAL_PERDIDO`** (HU-13.2) es lo mismo con la tarjeta del aviso reclamado: la emite SISTEMA, lleva `animal_perdido_id` y su contenido va vacío. Índice único parcial sobre `(animal_perdido_id, chat_id) WHERE animal_perdido_id IS NOT NULL`: una tarjeta por aviso y por sala, y es el equivalente del índice de `chat.solicitud_id`.
+- **Resolver un aviso no deja ningún mensaje.** Se evaluó una línea de sistema "Volvió con su dueño" en la sala y se descartó junto con el cierre de la conversación (spec 024 §9, decisión 2): la leyenda vive en el portal, que es donde el aviso se mira.
 
-**Nota de auditoría — excepción:** el mensaje **solo tiene alta**, no baja (consistente con la nota del documento de requisitos: "El mensaje solo va a tener alta, y el chat va a tener alta y baja"). No implementar endpoint de borrado de mensaje individual.
+- **`mensaje_tipo = MASCOTA`** y **`UBICACION_REFUGIO`** (2026-10-12) son tarjetas que manda **una persona** de la sala, no SISTEMA: van de su lado y su autor las puede eliminar. `MASCOTA` lleva `mascota_id` (como persona, una mascota que quien la manda tiene en favoritos y que es de la contraparte; como refugio, una mascota publicada del propio refugio); `UBICACION_REFUGIO` no lleva columna propia: es la del refugio de la sala (`chat.refugio_id`), sacada del perfil del refugio. Como las de sistema, sus datos se resuelven en cada pedido y su `mensaje_contenido` va vacío.
+- **`mensaje_respondido_id`** es el mensaje que éste cita (deslizar para responder). Siempre de la misma sala y de tipo `TEXTO`: lo valida el service, la base no lo puede expresar.
+
+**Nota de auditoría — excepción (cambiada el 2026-10-12):** el mensaje tiene **alta y baja lógica, sin modificación**. Hasta esa fecha era "solo alta", siguiendo la nota del documento de requisitos ("El mensaje solo va a tener alta, y el chat va a tener alta y baja"); el equipo decidió que el autor pueda **eliminar un mensaje propio**, para los dos participantes y sin límite de tiempo. La baja es lógica como en el resto del modelo: la fila y sus adjuntos se conservan —moderación los sigue viendo si alguien lo había reportado— y a la sala la API le manda sólo el aviso "Se eliminó este mensaje", sin contenido ni adjuntos. Sólo el autor da de baja (`mensaje_usuario_baja` es siempre él) y nunca un mensaje de sistema. Contrato en `api-chat-sala.md`.
 
 ### Notificacion
 
-`notificacion_id PK`, `notificacion_tipo`, `notificacion_mensaje`, `notificacion_leido`, FK `usuario_id FK` (destinatario).
+`notificacion_id PK`, `notificacion_tipo`, `notificacion_mensaje`, `notificacion_leido`, `notificacion_entidad_tipo` (nullable), `notificacion_entidad_id` (nullable), FK `usuario_id FK` (destinatario).
 
-Disparada por eventos de: Solicitud (aceptada/rechazada/nueva), Chat/Mensaje (mensaje nuevo), Seguimiento (post-adopción, revisión).
+Es la bandeja (spec 004) — fuente de verdad de toda notificación, se envíe o no además por mail/push. `notificacion_tipo` es un código corto (`SOLICITUD_ACEPTADA`, `SEGUIMIENTO_VENCIDO`, etc.) y `notificacion_mensaje` el texto ya armado en voseo, listo para mostrar.
+
+`notificacion_entidad_tipo` / `notificacion_entidad_id` son **polimórficos a propósito** (no una FK real): le dicen al frontend a qué pantalla navegar al tocarla (`SOLICITUD`, `CHAT`, `SEGUIMIENTO`, `PUBLICACION`, `REFUGIO`, según el escenario). Si la entidad referenciada ya no existe, el cliente lo trata como "ya no disponible", no como un error.
+
+La baja lógica existente cumple doble función: "eliminar" una notificación de la bandeja (acción del usuario) y la retención de 30 días (job de sistema, `usuario_baja = SISTEMA`).
+
+Disparada por eventos de: Cuenta (alta, verificación, recuperación, cambio de contraseña, perfil incompleto), Solicitud (nueva, aceptada/rechazada, vencida, mascota adoptada por otro, etc.), Chat/Mensaje (mensaje nuevo, agrupado), Seguimiento (post-adopción, recordatorios, vencimiento, revisión), Refugios/Administración (validación, suspensión, baja). El resto de los escenarios del documento de notificaciones (Campañas, Mascotas Perdidas, Reputación, Moderación, Historia Clínica, Soporte) quedan pausados — ver `DEUDA_TECNICA.md`.
+
+### Dispositivo_Push
+
+`dispositivo_push_id PK`, `dispositivo_push_expo_push_token`, `dispositivo_push_plataforma` (`ios` | `android`), FK `usuario_id FK`.
+
+Un dispositivo físico puede tener push registrado para varios usuarios a la vez (ej. un dispositivo familiar compartido en distintos momentos): la unicidad es `(usuario_id, dispositivo_push_expo_push_token)`, no el token solo. Volver a loguearse con el mismo usuario en el mismo dispositivo actualiza la fila existente en vez de duplicarla.
+
+Baja lógica al cerrar sesión en ese dispositivo (regla 10 del documento de notificaciones) y también cuando Expo devuelve `DeviceNotRegistered` al intentar enviarle un push. El envío filtra siempre `dispositivo_push_fecha_baja IS NULL`.
 
 ### Hogar
 
@@ -243,7 +270,9 @@ Representa el hogar de tránsito de un usuario/adoptante — no es una entidad d
 
 ### Campaña
 
-`campaña_id PK`, `campaña_titulo`, `campaña_descripcion`, `campaña_objetivo`, `campaña_fechaInicio`, `campaña_fechaFin`, `campaña_imagen_url`, FK `refugio_id FK NOT NULL`, FK `estado_campaña_id FK NOT NULL`.
+`campaña_id PK`, `campaña_titulo`, `campaña_descripcion`, `campaña_objetivo`, `campaña_fechaInicio`, `campaña_fechaFin`, `campaña_imagen_url`, `campaña_alias`, `campaña_cbu`, FK `refugio_id FK NOT NULL`, FK `estado_campaña_id FK NOT NULL`.
+
+**Campos agregados fuera del diagrama de clases (2026-09-30, spec 026):** `campaña_alias` y `campaña_cbu`, nullables: los datos para transferir. La campaña exige al menos uno (lo impone el DTO). Índice `(refugio_id, estado_campaña_id)` para la quota y el listado del refugio.
 
 Validaciones (HU-12.1): descripción ≤300 caracteres; objetivo numérico entre $10.000 y $2.500.000; fecha_inicio ≥ hoy; fecha_fin > fecha_inicio; imagen jpg/png/webp; máximo 5 campañas activas por refugio.
 
@@ -253,11 +282,25 @@ Transiciones automáticas (cron, usuario "SISTEMA"): Inactiva→Activa al llegar
 
 Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
 
+### Estado_Donacion
+
+Catálogo nuevo (spec 026). Valores: Pendiente, Realizada, Cancelada.
+
 ### Donacion
 
-`donacion_id PK`, `donacion_monto`, FK `campaña_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (donante).
+`donacion_id PK`, `donacion_monto`, `donacion_motivo_rechazo` (nullable: `NO_RECIBIDA` | `MONTO_NO_COINCIDE`), FK `campaña_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (donante), FK `estado_donacion_id FK NOT NULL`.
 
-**Regla de negocio crítica:** el monto declarado por el adoptante NO impacta automáticamente el progreso acumulado de la campaña. Solo se contabiliza cuando el refugio verifica manualmente el ingreso real en su cuenta y confirma (acción explícita "Aceptar" en el flujo de HU-12.3).
+**Regla de negocio crítica:** el monto declarado nace en «Pendiente» y NO impacta el progreso. Solo suman las «Realizada»: el refugio verifica el ingreso real en su cuenta y la aplica (HU-12.3). Si la rechaza, queda «Cancelada» con motivo. Quién y cuándo la revisó sale de la auditoría (`donacion_usuario_modificacion`, `donacion_fecha_modificacion`). Las donaciones anteriores a la spec 026 quedaron «Realizada». Índice `(campaña_id, estado_donacion_id)`.
+
+`donacion_origen` (texto, nullable, spec 027): `MERCADO_PAGO` | `OTRO_BANCO`, desde dónde dijo el donante que transfirió. Sólo las de Mercado Pago se confirman solas. Nulo en las donaciones anteriores al campo.
+
+`donacion_mp_pago_id` (texto, nullable, **único**, spec 027): id del pago de Mercado Pago que la confirmó sola. Nulo en las confirmadas a mano y en las Pendientes; único para que una transferencia no confirme dos donaciones.
+
+### Conexion_MercadoPago
+
+**Agregada fuera del diagrama de clases (2026-09-30, spec 027).** Conexión OAuth de un refugio con su cuenta de Mercado Pago, para confirmar donaciones solas.
+
+`conexion_mp_id PK`, FK `refugio_id FK NOT NULL` **único** (1 Refugio → 0..1 Conexion_MercadoPago), `conexion_mp_user_id`, `conexion_mp_access_token` y `conexion_mp_refresh_token` (**cifrados** con AES-256-GCM; la clave vive en `.env`, nunca en la base), `conexion_mp_vence`, `conexion_mp_estado` (`VINCULADA` | `REVINCULAR`), más los seis campos de auditoría. Desvincular es baja lógica y además borra los dos tokens; revincular reactiva la misma fila.
 
 ### Animal_Perdido
 
@@ -274,6 +317,12 @@ Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
 - `animal_perdido_imagenes`: de 1 a 5 fotos. **El orden del array es el de la galería del detalle.** Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`: `animal_perdido_imagen_url` es la PRIMERA, la portada de la tarjeta del portal.
 
 Pendiente: reflejarlos en el diagrama de clases del grupo.
+
+**`animal_perdido_fecha_resuelto` la escribe HU-13.2** (spec 024). Hasta entonces sólo la llenaba el seed. Se completa cuando el reportante marca el caso resuelto, junto con el paso del estado a "Resuelto"; es el dato de **cuándo volvió**, independiente de `fecha_modificacion`, que cambia con cualquier edición.
+
+Hoy "Resuelto" es un **estado terminal**: no hay reapertura ni histórico de estados (si HU-13.3 los pide, corresponde una tabla `AnimalPerdidoEstado` con el patrón de `PublicacionEstado`).
+
+**Resolver el aviso no toca los chats.** REQUISITOS §13 pedía cerrar "el chat asociado"; se descartó por decisión del equipo del 2026-10-01 (spec 024 §9, decisión 2), porque la conversación es compartida con esa persona y cerrarla silenciaría charlas ajenas al aviso.
 
 **Resuelto:** `animal_perdido_latitud` / `animal_perdido_longitud` se mantienen — sí se captura la coordenada al reportar un animal perdido/encontrado (ej. desde el GPS del dispositivo al momento del reporte). Lo que **no existe** es un mapa interactivo en la UI: el usuario busca y visualiza por ubicación administrativa (Provincia/Localidad), no por un mapa con pines. No quitar estos campos del modelo ni reemplazarlos por FK a Provincia/Localidad — conviven ambos: lat/long como dato del reporte, Provincia/Localidad como criterio de filtro para el usuario. Las del teléfono **nunca se exponen** en la API: sólo sirven de respaldo del filtro por cercanía cuando el lugar no se pudo geocodificar (2026-09-30).
 
@@ -378,6 +427,10 @@ Ver catálogos.
 
 - Notificacion
   -> Usuario (destinatario)
+  -> (entidad_tipo/entidad_id: referencia polimórfica de navegación, sin FK)
+
+- Dispositivo_Push
+  -> Usuario
 
 - Hogar
   -> Usuario

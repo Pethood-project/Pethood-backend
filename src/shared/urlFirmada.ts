@@ -6,8 +6,8 @@
  * `/api/v1/archivos` se sirve con `express.static` y sin autenticación: cualquiera con el
  * link abre el archivo, sin sesión y sin ser participante de nada. Para la foto de una mascota
  * da igual —se muestra en el feed de adopción, es pública por diseño—, pero los adjuntos de
- * una conversación, los comprobantes de historia clínica y las pruebas de vida de un
- * seguimiento no lo son.
+ * una conversación, los comprobantes de historia clínica, las pruebas de vida de un
+ * seguimiento y el DNI/selfie de un usuario no lo son.
  *
  * ## Por qué no alcanza con pedir el token
  *
@@ -35,21 +35,36 @@
  * como siempre.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { posix } from 'node:path';
 
 import { env } from '../config/env';
 import { RUTA_PUBLICA_ARCHIVOS } from './storage';
 
 /**
  * Las subcarpetas cuyo contenido NO es público. Coinciden con las `SUBCARPETA_*` de cada
- * módulo: `chats`, historia clínica y seguimiento.
+ * módulo: `chats`, historia clínica, seguimiento y documentos de identidad.
  *
  * Lo que queda afuera es público a propósito: `mascotas` y `publicaciones` se muestran en el
  * feed de adopción, y `perfiles` es el avatar que ve cualquiera con quien hables.
  */
-const NAMESPACES_PRIVADOS = new Set(['chats', 'historias-clinicas', 'seguimientos']);
+const NAMESPACES_PRIVADOS = new Set([
+  'chats',
+  'historias-clinicas',
+  'seguimientos',
+  'documentos-identidad',
+]);
 
 /** Cuánto dura una firma, y cada cuánto cambia. */
 const VENTANA_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Ventana más corta para lo que es documentación de identidad: un link filtrado de un DNI no
+ * puede seguir sirviendo medio día. La URL vale entre 1 y 2 ventanas (5–10 min); quien tenga
+ * la pantalla abierta más tiempo tiene que volver a pedir el detalle. El caché del cliente
+ * no importa acá: son dos imágenes que se miran una vez.
+ */
+const VENTANA_DOCUMENTOS_MS = 5 * 60 * 1000;
+const NAMESPACE_DOCUMENTOS = 'documentos-identidad';
 
 /** Longitud de la firma en hex. 32 caracteres son 128 bits: de sobra, y no infla la URL. */
 const LARGO_FIRMA = 32;
@@ -60,8 +75,8 @@ const LARGO_FIRMA = 32;
  * Se suman dos ventanas y no una para que una URL emitida justo antes del corte no nazca
  * venciendo en dos segundos.
  */
-function vencimiento(ahora: number): number {
-  return (Math.floor(ahora / VENTANA_MS) + 2) * VENTANA_MS;
+function vencimiento(ahora: number, ventanaMs: number = VENTANA_MS): number {
+  return (Math.floor(ahora / ventanaMs) + 2) * ventanaMs;
 }
 
 function calcularFirma(rutaRelativa: string, exp: number): string {
@@ -73,8 +88,28 @@ function calcularFirma(rutaRelativa: string, exp: number): string {
 
 /** `true` si esa ruta cae en una subcarpeta privada. Espera la ruta SIN el prefijo público. */
 export function esRutaPrivada(rutaRelativa: string): boolean {
-  const primerTramo = rutaRelativa.replace(/^\/+/, '').split('/')[0];
+  const primerTramo = rutaRelativa.replace(/^\/+/, '').split('/')[0]?.toLowerCase();
   return primerTramo !== undefined && NAMESPACES_PRIVADOS.has(primerTramo);
+}
+
+/**
+ * Ruta decodificada y **ya normalizada**, o `null` si el request trae segmentos `.`/`..`, `//`
+ * o un escape inválido.
+ *
+ * Existe porque `express.static` normaliza DESPUÉS de que el middleware de firma decidió con el
+ * primer tramo: `/perfiles/../documentos-identidad/x.jpg` parecía pública, pasaba sin firma y
+ * el estático la resolvía a la carpeta privada. Ninguna URL legítima (`firmarUrlArchivo`) trae
+ * esos segmentos, así que se rechaza todo lo que no sea idéntico a su forma normalizada.
+ */
+export function normalizarRutaArchivo(rutaCruda: string): string | null {
+  let ruta: string;
+  try {
+    ruta = decodeURIComponent(rutaCruda);
+  } catch {
+    return null;
+  }
+  if (ruta.includes('\0') || ruta.includes('\\') || posix.normalize(ruta) !== ruta) return null;
+  return ruta;
 }
 
 /**
@@ -97,7 +132,9 @@ export function firmarUrlArchivo(url: string | null | undefined): string | null 
 
   if (!esRutaPrivada(rutaRelativa)) return url;
 
-  const exp = vencimiento(Date.now());
+  const primerTramo = rutaRelativa.replace(/^\/+/, '').split('/')[0]?.toLowerCase();
+  const ventana = primerTramo === NAMESPACE_DOCUMENTOS ? VENTANA_DOCUMENTOS_MS : VENTANA_MS;
+  const exp = vencimiento(Date.now(), ventana);
   return `${url}?exp=${exp}&sig=${calcularFirma(rutaRelativa, exp)}`;
 }
 

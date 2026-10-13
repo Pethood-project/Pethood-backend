@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
+  dniSchema,
   textoOpcionalSchema,
   textoSchema,
   urlSchema,
@@ -32,6 +33,11 @@ export const actualizarPerfilBodySchema = z.object({
 });
 
 export type ActualizarPerfilBody = z.infer<typeof actualizarPerfilBodySchema>;
+
+/** Carga única del DNI (spec 027 §6.11). */
+export const cargarDniBodySchema = z.object({ dni: dniSchema() });
+
+export type CargarDniBody = z.infer<typeof cargarDniBodySchema>;
 
 /**
  * Preview del link de Google Maps: geocodifica la dirección estructurada SIN guardarla, para
@@ -69,12 +75,19 @@ export const cambiarPasswordBodySchema = z.object({
 
 export type CambiarPasswordBody = z.infer<typeof cambiarPasswordBodySchema>;
 
+export interface DocumentosIdentidadDto {
+  dniImagenUrl: string | null;
+  selfieUrl: string | null;
+}
+
 export interface PerfilPropio {
   id: number;
   nombre: string;
   apellido: string;
   email: string;
   telefono: string | null;
+  /** Se carga una sola vez; `null` en cuentas viejas y de Google (spec 027). */
+  dni: string | null;
   /** Dirección estructurada del perfil (para geocodificar). */
   provincia: string | null;
   localidad: string | null;
@@ -86,6 +99,10 @@ export interface PerfilPropio {
   /** Si el usuario confirmó que el link de Maps apunta a su dirección real. */
   ubicacionVerificada: boolean;
   imagenUrl: string | null;
+  /** Identidad validada por un admin (HU-2.3). */
+  verificado: boolean;
+  /** DNI y selfie subidos (spec 002.1), con URL firmada. Solo viajan al dueño y a admins. */
+  documentos: DocumentosIdentidadDto;
   roles: string[];
   /** El refugio al que pertenece, o `null` en un adoptante. Igual que en el login. */
   refugio: { id: number; nombre: string; estado: string } | null;

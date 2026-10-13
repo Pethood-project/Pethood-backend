@@ -17,6 +17,17 @@ function exigirChatId(req: Request): number {
   return chatId;
 }
 
+/** El `:mensajeId` de la URL, con el mismo criterio que `exigirChatId`. */
+function exigirMensajeId(req: Request): number {
+  const mensajeId = Number(req.params.mensajeId);
+
+  if (!Number.isInteger(mensajeId) || mensajeId <= 0) {
+    throw new AppError('MENSAJE_NO_ENCONTRADO', 'El mensaje no existe', 404);
+  }
+
+  return mensajeId;
+}
+
 /**
  * HU-5.1. Devuelve el total además del listado, para el badge de la pestaña Chat.
  *
@@ -109,6 +120,85 @@ export async function enviarMensaje(
     });
 
     res.status(201).json(mensaje);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Eliminar un mensaje propio. 200 con `{ chatId, mensajeId }`, lo mismo que viaja en
+ * `chat:mensaje-eliminado`: el cliente cambia la burbuja por el aviso sin pedir nada más.
+ */
+export async function eliminarMensaje(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    const mensajeId = exigirMensajeId(req);
+    res.json(await service.eliminarMensaje(req.usuario!.usuarioId, chatId, mensajeId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Las mascotas que se pueden compartir en la sala: favoritas y de la contraparte. */
+export async function listarMascotasCompartibles(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    res.json(await service.listarMascotasCompartibles(req.usuario!.usuarioId, chatId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Comparte una mascota: 201 con el mensaje de la tarjeta, igual que un envío. */
+export async function compartirMascota(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    const mensaje = await service.compartirMascota(
+      req.usuario!.usuarioId,
+      chatId,
+      req.body.mascotaId,
+    );
+    res.status(201).json(mensaje);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Lo que mandaría el refugio como ubicación, para el diálogo que pregunta antes. */
+export async function obtenerUbicacionRefugio(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    res.json(await service.obtenerUbicacionRefugio(req.usuario!.usuarioId, chatId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Manda la ubicación del refugio: 201 con el mensaje de la tarjeta, igual que un envío. */
+export async function enviarUbicacionRefugio(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    res.status(201).json(await service.enviarUbicacionRefugio(req.usuario!.usuarioId, chatId));
   } catch (err) {
     next(err);
   }

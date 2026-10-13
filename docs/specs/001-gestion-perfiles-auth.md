@@ -53,7 +53,7 @@ Errores: `400 VALIDACION`, `409 EMAIL_DUPLICADO`, `401 CREDENCIALES_INVALIDAS`, 
 
 ## 5. Pantallas
 
-1. **Registro:** foto opcional, datos personales, selector de rol (Adoptante/Refugio — si Refugio, campos extra del refugio), validaciones inline (email válido, contraseña ≥ 8 con mayúscula y número, confirmación).
+1. **Registro:** foto opcional, datos personales, selector de rol (Adoptante/Refugio — si Refugio, campos extra del refugio), validaciones inline (email válido, contraseña ≥ 8 con mayúscula, minúscula, número y símbolo, confirmación).
 2. **Login:** email + contraseña, link "¿Olvidaste tu contraseña?", errores sin revelar si el email existe.
 3. **Recuperación:** ingreso de email → mensaje genérico de envío.
 4. **Edición de perfil:** cambio de foto, datos y contraseña; modal de confirmación al descartar cambios sin guardar.

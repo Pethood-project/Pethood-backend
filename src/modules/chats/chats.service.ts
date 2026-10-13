@@ -2,7 +2,9 @@
  * Chat: listado de conversaciones (HU-5.1, GUI-08 / GUI-31) y sala (HU-5.2, GUI-14).
  *
  * El listado es sólo lectura y NUNCA marca nada como leído: eso pasa al abrir la sala, con
- * su propio endpoint. Crear salas sigue siendo de otra HU.
+ * su propio endpoint. Las salas las abren otros módulos a través de este: la solicitud de
+ * adopción (`asegurarChatDeSolicitud`) y el reclamo de un aviso de animal perdido
+ * (`asegurarChatDeReclamo`, HU-13.2).
  *
  * RENDIMIENTO del listado: traer el último mensaje y el conteo de no leídos chat por chat
  * sería un N+1 sobre una tabla sin cota. En vez de eso se hacen cuatro queries de tamaño
@@ -26,10 +28,14 @@ import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { borrarImagenes, guardarImagenes } from '../../shared/storage';
 import { clasificarAdjuntos, esMimeDeVideo, tipoDeUrl } from '../../shared/adjuntos';
 import { firmarUrlArchivo, firmarUrlsArchivo } from '../../shared/urlFirmada';
+import { etiquetaUbicacion } from '../../shared/ubicacion';
+import { aFechaISO } from '../../shared/validation/dates';
 import { estaEnLinea } from '../../websockets/presencia';
 import * as emisor from '../../websockets/emisor';
 import { LIMITES } from '../../shared/validation/limits';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
+  AvisoEnChatDto,
   CabeceraChatDto,
   ConversacionDto,
   ContactoChatDto,
@@ -39,8 +45,13 @@ import type {
   HistorialQuery,
   LeidosDto,
   ListaChatsDto,
+  MascotaEnChatDto,
+  MascotasCompartiblesDto,
+  MensajeCitadoDto,
   MensajeDto,
+  MensajeEliminadoDto,
   SolicitudEnChatDto,
+  UbicacionRefugioEnChatDto,
 } from './chats.dto';
 import * as repo from './chats.repository';
 import type { UltimoMensajeFila } from './chats.repository';
@@ -124,6 +135,10 @@ function aConversacion(
   // Una sala sin mensajes se ordena por su fecha de creación: es lo último que pasó en ella.
   const orden = ultimo?.fechaAlta ?? chat.fechaAlta;
 
+  // Un último mensaje eliminado no muestra nada de lo que decía, igual que en la sala.
+  const eliminado = ultimo?.fechaBaja != null;
+  const imagenUrl = eliminado ? null : (ultimo?.imagenUrl ?? null);
+
   return {
     orden,
     conversacion: {
@@ -131,12 +146,13 @@ function aConversacion(
       contacto,
       ultimoMensaje: ultimo
         ? {
-            contenido: ultimo.contenido,
+            contenido: eliminado ? '' : ultimo.contenido,
             fecha: ultimo.fechaAlta.toISOString(),
             esMio: ultimo.usuarioId === usuarioId,
-            tieneImagen: ultimo.imagenUrl !== null,
-            tieneVideo: ultimo.imagenUrl !== null && tipoDeUrl(ultimo.imagenUrl) === 'VIDEO',
+            tieneImagen: imagenUrl !== null,
+            tieneVideo: imagenUrl !== null && tipoDeUrl(imagenUrl) === 'VIDEO',
             tipo: ultimo.tipo,
+            eliminado,
           }
         : null,
       noLeidos: noLeidos.get(chat.id) ?? 0,
@@ -268,6 +284,16 @@ interface MarcaParticipante {
   ultimaEntrega: Date | null;
 }
 
+/** El mensaje citado por una respuesta, como lo trae el `include` del repository. */
+interface CitaFila {
+  id: number;
+  usuarioId: number;
+  contenido: string;
+  imagenes: string[];
+  tipo: TipoMensaje;
+  fechaBaja: Date | null;
+}
+
 /** La fila de `mensaje` que este módulo devuelve al cliente. */
 interface MensajeFila {
   id: number;
@@ -277,8 +303,65 @@ interface MensajeFila {
   imagenes: string[];
   tipo: TipoMensaje;
   solicitudId: number | null;
+  animalPerdidoId: number | null;
   usuarioId: number;
   fechaAlta: Date;
+  /** Opcionales: las filas que no pasan por el `include` de la cita (tarjetas) no los traen. */
+  mascotaId?: number | null;
+  fechaBaja?: Date | null;
+  mensajeRespondido?: CitaFila | null;
+}
+
+/**
+ * Las tarjetas que resolvió quien arma el DTO. Cada una viaja sólo en el mensaje que la
+ * anuncia: `aMensajeDto` descarta la que no corresponde a su tipo o a su id.
+ */
+interface TarjetasDelMensaje {
+  solicitud?: SolicitudEnChatDto | null;
+  aviso?: AvisoEnChatDto | null;
+  mascota?: MascotaEnChatDto | null;
+  ubicacion?: UbicacionRefugioEnChatDto | null;
+}
+
+/**
+ * Las tarjetas que emite SISTEMA. Las demás (`TEXTO`, `MASCOTA`, `UBICACION_REFUGIO`) las
+ * escribe una persona de la sala: van de su lado y su autor las puede eliminar.
+ */
+const TIPOS_DE_SISTEMA: readonly TipoMensaje[] = ['SOLICITUD', 'ANIMAL_PERDIDO'];
+
+/**
+ * Lo que la respuesta muestra del mensaje citado. Si el citado se eliminó, la cita lo dice y
+ * no lleva nada de lo que decía: ni el texto ni la miniatura.
+ */
+function aCita(cita: CitaFila): MensajeCitadoDto {
+  if (cita.fechaBaja !== null) {
+    return {
+      id: cita.id,
+      usuarioId: cita.usuarioId,
+      contenido: '',
+      adjunto: null,
+      eliminado: true,
+    };
+  }
+
+  const adjuntos = clasificarAdjuntos(cita.imagenes);
+  const primero = adjuntos[0];
+
+  return {
+    id: cita.id,
+    usuarioId: cita.usuarioId,
+    contenido: cita.contenido,
+    adjunto: primero
+      ? {
+          tipo: primero.tipo,
+          cantidad: adjuntos.length,
+          // Firmada como cualquier adjunto de la sala. Un video no tiene miniatura: el
+          // servidor no genera fotogramas.
+          miniaturaUrl: primero.tipo === 'IMAGEN' ? firmarUrlArchivo(primero.url) : null,
+        }
+      : null,
+    eliminado: false,
+  };
 }
 
 /**
@@ -323,30 +406,55 @@ function acuseDe(
 function aMensajeDto(
   mensaje: MensajeFila,
   marcas: MarcaParticipante[],
-  solicitud: SolicitudEnChatDto | null,
+  tarjetas: TarjetasDelMensaje = {},
 ): MensajeDto {
+  const { solicitud = null, aviso = null, mascota = null, ubicacion = null } = tarjetas;
+
+  // Un mensaje eliminado viaja vacío: el hecho sí, nada de lo que decía. Tampoco sus
+  // adjuntos, porque con la URL firmada en la mano se podrían seguir abriendo hasta que venza.
+  const eliminado = mensaje.fechaBaja != null;
+  const imagenes = eliminado ? [] : mensaje.imagenes;
+
   return {
     id: mensaje.id,
     chatId: mensaje.chatId,
-    contenido: mensaje.contenido,
+    contenido: eliminado ? '' : mensaje.contenido,
     // Los adjuntos de una conversación son privados: la URL sale firmada y vence. El tipo se
     // clasifica ANTES de firmar, porque la firma le agrega query params y `tipoDeUrl` mira la
     // extensión del final.
-    imagenUrl: firmarUrlArchivo(mensaje.imagenUrl),
-    imagenes: firmarUrlsArchivo(mensaje.imagenes),
-    adjuntos: clasificarAdjuntos(mensaje.imagenes).map((adjunto) => ({
+    imagenUrl: eliminado ? null : firmarUrlArchivo(mensaje.imagenUrl),
+    imagenes: firmarUrlsArchivo(imagenes),
+    adjuntos: clasificarAdjuntos(imagenes).map((adjunto) => ({
       ...adjunto,
       url: firmarUrlArchivo(adjunto.url) ?? adjunto.url,
     })),
     usuarioId: mensaje.usuarioId,
     tipo: mensaje.tipo,
     ...acuseDe(mensaje, marcas),
-    // La tarjeta sólo viaja en el mensaje que la anuncia, y sólo si es la solicitud de ESTA
-    // sala: hoy no hay forma de referenciar otra, y traerla por mensaje sería un N+1.
+    // La tarjeta sólo viaja en el mensaje que la anuncia: el que la pide resuelve la de cada
+    // mensaje (ver `listarHistorial`).
     solicitud:
       mensaje.tipo === 'SOLICITUD' && solicitud !== null && solicitud.id === mensaje.solicitudId
         ? solicitud
         : null,
+    // Mismo criterio que la solicitud: la tarjeta viaja sólo en el mensaje que la anuncia.
+    aviso:
+      mensaje.tipo === 'ANIMAL_PERDIDO' && aviso !== null && aviso.id === mensaje.animalPerdidoId
+        ? aviso
+        : null,
+    // Las que manda una persona, igual; salvo que un eliminado no muestra la suya: en su lugar
+    // va sólo el aviso, como con el texto.
+    mascota:
+      !eliminado &&
+      mensaje.tipo === 'MASCOTA' &&
+      mascota !== null &&
+      mascota.id === mensaje.mascotaId
+        ? mascota
+        : null,
+    ubicacion: !eliminado && mensaje.tipo === 'UBICACION_REFUGIO' ? ubicacion : null,
+    eliminado,
+    // Un eliminado tampoco muestra a qué respondía: en su lugar va sólo el aviso.
+    respondeA: eliminado || !mensaje.mensajeRespondido ? null : aCita(mensaje.mensajeRespondido),
     fechaAlta: mensaje.fechaAlta.toISOString(),
   };
 }
@@ -372,6 +480,76 @@ function aSolicitudEnChat(
       // La foto de la publicación manda sobre la de la mascota: es la que el adoptante vio.
       imagenUrl: solicitud.publicacion.imagenUrl ?? mascota.imagenUrl,
     },
+  };
+}
+
+/** Resumen del aviso para la tarjeta embebida y la cabecera de la sala de reencuentro. */
+function aAvisoEnChat(
+  aviso: NonNullable<Awaited<ReturnType<typeof repo.buscarAvisoParaChat>>>,
+): AvisoEnChatDto {
+  return {
+    id: aviso.id,
+    nombre: aviso.nombre,
+    especie: aviso.especie?.nombre ?? null,
+    estado: aviso.estadoAnimalPerdido.nombre,
+    imagenUrl: aviso.imagenUrl,
+    // Mismo formato que el portal: «referencia, localidad - provincia».
+    ubicacion: etiquetaUbicacion({
+      calleAltura: aviso.referencia,
+      localidad: aviso.localidad,
+      provincia: aviso.provincia,
+    }),
+    // Sólo el día, como en el portal: con hora, un día cargado en Argentina podría mostrarse
+    // como el anterior en otra zona horaria.
+    fechaSuceso: aviso.fechaSuceso ? aFechaISO(aviso.fechaSuceso) : null,
+    fechaAlta: aviso.fechaAlta.toISOString(),
+  };
+}
+
+type MascotaParaChat = NonNullable<Awaited<ReturnType<typeof repo.buscarMascotaParaChat>>>;
+
+/**
+ * La mascota para su tarjeta y para la lista de compartibles. La foto de la publicación manda
+ * sobre la de la mascota, como en la solicitud: es la que se vio en el feed.
+ */
+function aMascotaEnChat(
+  mascota: Omit<MascotaParaChat, 'fechaBaja'> & { fechaBaja?: Date | null },
+): MascotaEnChatDto {
+  const publicacion = mascota.publicaciones[0];
+
+  return {
+    id: mascota.id,
+    nombre: mascota.nombre,
+    especie: mascota.raza.especie.nombre,
+    raza: mascota.raza.nombre,
+    genero: mascota.genero,
+    tamanio: mascota.tamanio,
+    // Sólo el día, como en Favoritos: con hora, un día cargado en Argentina podría mostrarse
+    // como el anterior en otra zona horaria.
+    fechaNacimiento: mascota.fechaNacimiento ? aFechaISO(mascota.fechaNacimiento) : null,
+    imagenUrl: publicacion?.imagenUrl ?? mascota.imagenUrl,
+    estado: mascota.historicoEstados[0]?.estadoMascota.nombre ?? null,
+    // Una mascota eliminada no tiene a dónde llevar, aunque le quede una publicación colgada.
+    publicacionId: mascota.fechaBaja ? null : (publicacion?.id ?? null),
+  };
+}
+
+type RefugioParaUbicacion = NonNullable<
+  Awaited<ReturnType<typeof repo.buscarRefugioParaUbicacion>>
+>;
+
+/** La ubicación del refugio para su tarjeta: la dirección con el formato de siempre y el link. */
+function aUbicacionRefugio(refugio: RefugioParaUbicacion): UbicacionRefugioEnChatDto {
+  return {
+    refugioId: refugio.id,
+    nombre: refugio.nombre,
+    imagenUrl: refugio.imagenUrl,
+    ubicacion: etiquetaUbicacion({
+      calleAltura: refugio.calleAltura,
+      localidad: refugio.localidad,
+      provincia: refugio.provincia,
+    }),
+    mapaUrl: refugio.mapaUrl,
   };
 }
 
@@ -424,6 +602,26 @@ function minutosDeRespuesta(
 }
 
 /**
+ * De qué se está hablando en la sala: de la solicitud o del aviso.
+ *
+ * Una conversación puede tener las dos tarjetas desde que el reclamo de un aviso entra en la
+ * sala que ya existía con esa persona (HU-13.2), y el subtítulo de la cabecera muestra una. Se
+ * elige la **más reciente**, que es la misma regla que ya regía para dos solicitudes en la
+ * misma sala: lo vigente es la última tarjeta.
+ *
+ * El backend decide y el cliente obedece, para que la regla no quede escrita en dos lugares.
+ */
+function contextoVigente(
+  fechaSolicitud: Date | null,
+  fechaAviso: Date | null,
+): 'SOLICITUD' | 'ANIMAL_PERDIDO' | null {
+  if (fechaAviso === null) return fechaSolicitud === null ? null : 'SOLICITUD';
+  if (fechaSolicitud === null) return 'ANIMAL_PERDIDO';
+
+  return fechaAviso >= fechaSolicitud ? 'ANIMAL_PERDIDO' : 'SOLICITUD';
+}
+
+/**
  * Cabecera de la sala: contacto resuelto y su presencia.
  *
  * Un chat sin contraparte activa se trata como inexistente en vez de devolver una cabecera a
@@ -439,9 +637,10 @@ export async function obtenerCabecera(usuarioId: number, chatId: number): Promis
     throw new AppError('CHAT_SIN_CONTACTO', 'Esta conversación ya no tiene contraparte', 404);
   }
 
-  const [ultimos, ultimaSolicitud] = await Promise.all([
+  const [ultimos, ultimaSolicitud, ultimoAviso] = await Promise.all([
     repo.ultimosMensajesParaRespuesta(chatId, MENSAJES_PARA_RESPUESTA),
     repo.buscarUltimaSolicitudDelChat(chatId),
+    repo.buscarUltimoAvisoDelChat(chatId),
   ]);
 
   // La cabecera nombra la solicitud VIGENTE de la sala —la última tarjeta—, no la que la
@@ -451,6 +650,13 @@ export async function obtenerCabecera(usuarioId: number, chatId: number): Promis
     ultimaSolicitud?.solicitudId == null
       ? null
       : await repo.buscarSolicitudParaChat(ultimaSolicitud.solicitudId);
+
+  // Lo mismo con el aviso: la sala puede tener las dos tarjetas desde que el reclamo entra en
+  // la conversación que ya existía con esa persona.
+  const avisoFila =
+    ultimoAviso?.animalPerdidoId == null
+      ? null
+      : await repo.buscarAvisoParaChat(ultimoAviso.animalPerdidoId);
 
   // El tiempo de respuesta se mide contra QUIEN CONTESTA, que es una persona aunque la
   // contraparte se muestre como refugio: un refugio no emite mensajes, los emite su gente.
@@ -463,6 +669,8 @@ export async function obtenerCabecera(usuarioId: number, chatId: number): Promis
     enLinea: contacto.tipo === 'USUARIO' && estaEnLinea(contacto.id),
     minutosRespuesta: quienResponde === null ? null : minutosDeRespuesta(ultimos, quienResponde),
     solicitud: solicitud === null ? null : aSolicitudEnChat(solicitud),
+    aviso: avisoFila === null ? null : aAvisoEnChat(avisoFila),
+    contexto: contextoVigente(ultimaSolicitud?.fechaAlta ?? null, ultimoAviso?.fechaAlta ?? null),
   };
 }
 
@@ -496,18 +704,114 @@ export async function listarHistorial(
   const hayMas = filas.length > query.limite;
   const pagina = hayMas ? filas.slice(0, query.limite) : filas;
 
-  // La solicitud se pide sólo si la página trae la tarjeta que la anuncia: la mayoría de las
-  // páginas son mensajes de texto y no tienen por qué pagar esa query.
-  const solicitudId = pagina.find((fila) => fila.tipo === 'SOLICITUD')?.solicitudId ?? null;
-  const solicitud = solicitudId === null ? null : await repo.buscarSolicitudParaChat(solicitudId);
+  // Cada tarjeta de la página lleva SU solicitud o SU aviso. La conversación es entre las
+  // partes, así que una misma página puede traer dos solicitudes, dos avisos o uno de cada uno:
+  // resolver sólo la primera dejaba a las demás sin carga y el cliente no las dibujaba (el
+  // aviso anterior "desaparecía" al reclamar otro). Se piden sólo las que la página trae: la
+  // mayoría de las páginas son mensajes de texto y no pagan ninguna query.
+  const idsDeSolicitud = new Set(
+    pagina.flatMap((fila) =>
+      fila.tipo === 'SOLICITUD' && fila.solicitudId !== null ? [fila.solicitudId] : [],
+    ),
+  );
+  const idsDeAviso = new Set(
+    pagina.flatMap((fila) =>
+      fila.tipo === 'ANIMAL_PERDIDO' && fila.animalPerdidoId !== null ? [fila.animalPerdidoId] : [],
+    ),
+  );
 
-  const resumen = solicitud === null ? null : aSolicitudEnChat(solicitud);
+  // Lo mismo con las tarjetas que manda una persona. Las eliminadas no se resuelven: viajan
+  // como el aviso, sin carga.
+  const vigentes = pagina.filter((fila) => fila.fechaBaja == null);
+  const idsDeMascota = new Set(
+    vigentes.flatMap((fila) =>
+      fila.tipo === 'MASCOTA' && fila.mascotaId !== null ? [fila.mascotaId] : [],
+    ),
+  );
+  // La ubicación es siempre la del refugio de la sala: una sola consulta, aunque la página
+  // traiga varias tarjetas.
+  const hayUbicacion = vigentes.some((fila) => fila.tipo === 'UBICACION_REFUGIO');
+
+  const [solicitudes, avisos, mascotas, ubicacion] = await Promise.all([
+    Promise.all([...idsDeSolicitud].map((id) => repo.buscarSolicitudParaChat(id))),
+    Promise.all([...idsDeAviso].map((id) => repo.buscarAvisoParaChat(id))),
+    Promise.all([...idsDeMascota].map((id) => repo.buscarMascotaParaChat(id))),
+    hayUbicacion ? ubicacionDeLaSala(chatId) : Promise.resolve(null),
+  ]);
+
+  const solicitudPorId = new Map(
+    solicitudes.flatMap((fila) => (fila === null ? [] : [[fila.id, aSolicitudEnChat(fila)]])),
+  );
+  const avisoPorId = new Map(
+    avisos.flatMap((fila) => (fila === null ? [] : [[fila.id, aAvisoEnChat(fila)]])),
+  );
+  const mascotaPorId = new Map(
+    mascotas.flatMap((fila) => (fila === null ? [] : [[fila.id, aMascotaEnChat(fila)]])),
+  );
 
   return {
-    mensajes: pagina.map((fila) => aMensajeDto(fila, marcas, resumen)),
+    mensajes: pagina.map((fila) =>
+      aMensajeDto(fila, marcas, {
+        solicitud:
+          fila.solicitudId === null ? null : (solicitudPorId.get(fila.solicitudId) ?? null),
+        aviso:
+          fila.animalPerdidoId === null ? null : (avisoPorId.get(fila.animalPerdidoId) ?? null),
+        mascota: fila.mascotaId === null ? null : (mascotaPorId.get(fila.mascotaId) ?? null),
+        ubicacion,
+      }),
+    ),
     hayMas,
     proximoCursor: hayMas ? (pagina[pagina.length - 1]?.id ?? null) : null,
   };
+}
+
+/**
+ * Guard del mensaje que se cita al responder: tiene que ser de ESTA sala y de tipo TEXTO.
+ *
+ * Un id de otra sala dejaría leer, a través de la cita, un pedazo de una conversación ajena.
+ * Las tarjetas (`SOLICITUD`, `ANIMAL_PERDIDO`) no se responden: no las escribió nadie de la
+ * sala, y la cita no tendría qué mostrar.
+ *
+ * Un mensaje ya eliminado SÍ se acepta: el otro pudo eliminarlo mientras se escribía la
+ * respuesta, y rechazarla haría perder lo escrito. La cita va a decir "Se eliminó este
+ * mensaje", que es exactamente lo que pasó.
+ */
+async function exigirMensajeRespondible(chatId: number, mensajeId: number): Promise<void> {
+  const citado = await repo.buscarMensajeDeChat(chatId, mensajeId);
+
+  if (!citado || citado.tipo !== 'TEXTO') {
+    throw new AppError('RESPUESTA_INVALIDA', 'No podés responder a ese mensaje', 400);
+  }
+}
+
+/**
+ * Guard de todo lo que se escribe en la sala (texto o tarjeta): tiene que haber contraparte y
+ * su cuenta tiene que seguir activa. Devuelve el contacto y el refugio de quien escribe, que
+ * las tarjetas necesitan para sus propias reglas.
+ */
+async function exigirContactoParaEscribir(
+  usuarioId: number,
+  sala: SalaConContacto,
+): Promise<{ contacto: ContactoChatDto; refugioDelUsuario: number | null }> {
+  const usuario = await repo.buscarRefugioDeUsuario(usuarioId);
+  const refugioDelUsuario = usuario?.refugioId ?? null;
+  const contacto = resolverContacto(sala.chat, refugioDelUsuario);
+
+  if (!contacto) {
+    throw new AppError('CHAT_SIN_CONTACTO', 'Esta conversación ya no tiene contraparte', 404);
+  }
+
+  // Leer una conversación con alguien dado de baja se puede; escribirle no. El listado
+  // expone `activo` justamente para que el cliente deshabilite el input antes de llegar acá.
+  if (!contacto.activo) {
+    throw new AppError(
+      'CONTACTO_INACTIVO',
+      'No podés escribirle: la cuenta de este contacto fue dada de baja',
+      409,
+    );
+  }
+
+  return { contacto, refugioDelUsuario };
 }
 
 export interface ContextoEnvio {
@@ -572,21 +876,10 @@ export async function enviarMensaje(
     );
   }
 
-  const refugio = await repo.buscarRefugioDeUsuario(contexto.usuarioId);
-  const contacto = resolverContacto(sala.chat, refugio?.refugioId ?? null);
+  await exigirContactoParaEscribir(contexto.usuarioId, sala);
 
-  if (!contacto) {
-    throw new AppError('CHAT_SIN_CONTACTO', 'Esta conversación ya no tiene contraparte', 404);
-  }
-
-  // Leer una conversación con alguien dado de baja se puede; escribirle no. El listado
-  // expone `activo` justamente para que el cliente deshabilite el input antes de llegar acá.
-  if (!contacto.activo) {
-    throw new AppError(
-      'CONTACTO_INACTIVO',
-      'No podés escribirle: la cuenta de este contacto fue dada de baja',
-      409,
-    );
+  if (datos.respondeAId !== undefined) {
+    await exigirMensajeRespondible(contexto.chatId, datos.respondeAId);
   }
 
   // En paralelo y en orden: `guardarImagenes` conserva la posición de cada archivo, que es
@@ -600,6 +893,7 @@ export async function enviarMensaje(
       usuarioId: contexto.usuarioId,
       contenido: datos.contenido,
       imagenes,
+      mensajeRespondidoId: datos.respondeAId ?? null,
     });
   } catch (err) {
     // No dejar las fotos huérfanas si la escritura en base falló.
@@ -608,7 +902,7 @@ export async function enviarMensaje(
   }
 
   // Un mensaje recién nacido no puede estar entregado ni leído: sin marcas que consultar.
-  const dto = aMensajeDto(mensaje, [], null);
+  const dto = aMensajeDto(mensaje, []);
 
   // Los participantes salen de la sala que ya trajimos: no hace falta otra query. El emisor
   // se incluye a propósito, para que se sincronicen sus otros dispositivos.
@@ -619,7 +913,358 @@ export async function enviarMensaje(
 
   emisor.emitirMensajeNuevo(dto, participantes);
 
+  await avisarDestinatarios(contexto.usuarioId, contexto.chatId, participantes, {
+    texto: datos.contenido ?? '',
+    cantidadImagenes: imagenes.length,
+  });
+
   return dto;
+}
+
+/**
+ * El autor elimina un mensaje que mandó: baja lógica y aviso a la sala.
+ *
+ * **Para todos y sin límite de tiempo** (decisión del 2026-10-12). En el historial de los dos
+ * queda el aviso "Se eliminó este mensaje" en vez de la burbuja; la fila sigue en la base con
+ * su contenido, que es lo que permite que un reporte previo se siga pudiendo moderar.
+ *
+ * Sólo los propios: un mensaje ajeno se reporta, no se borra. Las tarjetas de SISTEMA
+ * (solicitud, aviso) no son de nadie de la sala; las que manda una persona (mascota, ubicación)
+ * sí, y su autor las puede eliminar como a un texto. Eliminar no depende de que el contacto
+ * siga activo —retirar lo que uno dijo no es escribirle—.
+ *
+ * Idempotente: eliminar algo ya eliminado (un doble toque, un reintento) responde lo mismo
+ * sin volver a escribir ni a despertar a nadie.
+ *
+ * Lo que no se puede deshacer es la push: si el mensaje ya se había notificado, la vista
+ * previa quedó en el celular del otro. La bandeja sólo guarda "Nuevo mensaje de X", sin texto.
+ */
+export async function eliminarMensaje(
+  usuarioId: number,
+  chatId: number,
+  mensajeId: number,
+): Promise<MensajeEliminadoDto> {
+  const sala = await exigirSala(usuarioId, chatId);
+  const mensaje = await repo.buscarMensajeDeChat(chatId, mensajeId);
+
+  // Un id de otra sala se trata como inexistente en ésta, igual que el cursor del historial.
+  if (!mensaje) {
+    throw new AppError('MENSAJE_NO_ENCONTRADO', 'El mensaje no existe', 404);
+  }
+
+  if (mensaje.usuarioId !== usuarioId || TIPOS_DE_SISTEMA.includes(mensaje.tipo)) {
+    throw new AppError('MENSAJE_AJENO', 'Sólo podés eliminar los mensajes que enviaste vos', 403);
+  }
+
+  const resultado = { chatId, mensajeId };
+
+  if (mensaje.fechaBaja !== null) return resultado;
+
+  await repo.darDeBajaMensaje(mensajeId, usuarioId);
+
+  // A todos, incluido el autor: sus otros dispositivos también tienen que cambiar la burbuja.
+  emisor.emitirMensajeEliminado(resultado, [
+    usuarioId,
+    ...sala.chat.participantes.map((participante) => participante.usuarioId),
+  ]);
+
+  return resultado;
+}
+
+// ─────────────── Tarjetas que manda una persona (2026-10-12) ───────────────
+
+/**
+ * Con quién se compara una mascota para poder compartirla: la contraparte de la sala. Con un
+ * refugio, sus mascotas; con una persona, las suyas personales.
+ */
+function contraparteDe(contacto: ContactoChatDto): repo.Contraparte {
+  return contacto.tipo === 'REFUGIO' ? { refugioId: contacto.id } : { usuarioId: contacto.id };
+}
+
+/**
+ * Quien comparte habla **como refugio** cuando la sala es de su refugio (la contraparte es un
+ * adoptante). Es el mismo criterio que separa las conversaciones por perfil: se mira el dato,
+ * no la cabecera, así que no se puede forzar desde el cliente.
+ */
+function hablaComoRefugio(sala: SalaConContacto, refugioDelUsuario: number | null): boolean {
+  const refugioDeLaSala = sala.chat.refugio?.id ?? null;
+  return refugioDelUsuario !== null && refugioDeLaSala === refugioDelUsuario;
+}
+
+/**
+ * Las mascotas que el usuario puede compartir en esta sala. Es lo que lista la hoja "Compartir
+ * una mascota", y la regla cambia según quién habla (decisión del equipo, 2026-10-12):
+ *
+ * - **Como persona:** las que tiene **en favoritos** y que son **de la contraparte**. Sirve para
+ *   decirle a un refugio o a una persona "me interesa esta tuya", no para recomendar mascotas
+ *   de terceros.
+ * - **Como refugio:** las **propias del refugio que están publicadas**. Sirve para mostrarle a
+ *   un adoptante otra mascota que podría adoptar; el refugio no tiene favoritos.
+ */
+export async function listarMascotasCompartibles(
+  usuarioId: number,
+  chatId: number,
+): Promise<MascotasCompartiblesDto> {
+  const sala = await exigirSala(usuarioId, chatId);
+  const usuario = await repo.buscarRefugioDeUsuario(usuarioId);
+  const refugioDelUsuario = usuario?.refugioId ?? null;
+
+  if (hablaComoRefugio(sala, refugioDelUsuario)) {
+    const propias = await repo.listarMascotasPublicadasDeRefugio(refugioDelUsuario!);
+    return { mascotas: propias.map(aMascotaEnChat) };
+  }
+
+  const contacto = resolverContacto(sala.chat, refugioDelUsuario);
+
+  // Sin contraparte no hay de quién pueda ser la mascota: la lista vacía es honesta.
+  if (!contacto) return { mascotas: [] };
+
+  const favoritos = await repo.listarMascotasCompartibles(usuarioId, contraparteDe(contacto));
+
+  return { mascotas: favoritos.map((favorito) => aMascotaEnChat(favorito.mascota)) };
+}
+
+/** Alta de una tarjeta que manda una persona: persiste, emite y avisa, como un texto. */
+async function publicarTarjeta(
+  usuarioId: number,
+  sala: SalaConContacto,
+  datos: { tipo: 'MASCOTA' | 'UBICACION_REFUGIO'; mascotaId?: number },
+  tarjetas: TarjetasDelMensaje,
+  textoDelAviso: string,
+): Promise<MensajeDto> {
+  const mensaje = await repo.crearMensaje({
+    chatId: sala.chatId,
+    usuarioId,
+    // Las tarjetas no tienen texto propio: lo pone la UI, como en la solicitud.
+    contenido: '',
+    imagenes: [],
+    tipo: datos.tipo,
+    mascotaId: datos.mascotaId ?? null,
+  });
+
+  const dto = aMensajeDto(mensaje, [], tarjetas);
+  const participantes = [
+    usuarioId,
+    ...sala.chat.participantes.map((participante) => participante.usuarioId),
+  ];
+
+  emisor.emitirMensajeNuevo(dto, participantes);
+  await avisarDestinatarios(usuarioId, sala.chatId, participantes, {
+    texto: '',
+    cantidadImagenes: 0,
+    tarjeta: textoDelAviso,
+  });
+
+  return dto;
+}
+
+/**
+ * Comparte una mascota en la sala: deja la tarjeta con su foto, sus datos y "Ver mascota".
+ *
+ * Se vuelve a verificar la regla de la lista (ver `listarMascotasCompartibles`) porque el
+ * cliente puede mandar cualquier id. Se puede compartir la misma mascota más de una vez.
+ */
+export async function compartirMascota(
+  usuarioId: number,
+  chatId: number,
+  mascotaId: number,
+): Promise<MensajeDto> {
+  const sala = await exigirSala(usuarioId, chatId);
+  const { contacto, refugioDelUsuario } = await exigirContactoParaEscribir(usuarioId, sala);
+
+  if (hablaComoRefugio(sala, refugioDelUsuario)) {
+    const propia = await repo.buscarMascotaPublicadaDeRefugio(refugioDelUsuario!, mascotaId);
+
+    if (!propia) {
+      throw new AppError(
+        'MASCOTA_NO_COMPARTIBLE',
+        'Sólo podés compartir mascotas publicadas de tu refugio',
+        409,
+      );
+    }
+  } else {
+    const favorito = await repo.buscarFavoritoCompartible(
+      usuarioId,
+      mascotaId,
+      contraparteDe(contacto),
+    );
+
+    if (!favorito) {
+      throw new AppError(
+        'MASCOTA_NO_COMPARTIBLE',
+        `Sólo podés compartir mascotas que tengas en favoritos y que sean de ${contacto.nombre}`,
+        409,
+      );
+    }
+  }
+
+  const fila = await repo.buscarMascotaParaChat(mascotaId);
+  const mascota = fila === null ? null : aMascotaEnChat(fila);
+  const nombre = mascota?.nombre ?? 'una mascota';
+
+  return publicarTarjeta(
+    usuarioId,
+    sala,
+    { tipo: 'MASCOTA', mascotaId },
+    { mascota },
+    mascota?.nombre ? `Te compartió a ${nombre}` : 'Te compartió una mascota',
+  );
+}
+
+/** La ubicación del refugio de la sala, sólo si quien pregunta es de ese refugio. */
+async function ubicacionDeMiRefugio(
+  refugioDelUsuario: number | null,
+  sala: SalaConContacto,
+): Promise<UbicacionRefugioEnChatDto> {
+  const refugioDeLaSala = sala.chat.refugio?.id ?? null;
+
+  // La ruta ya exige la vista de refugio; esto mira el dato, no la cabecera: la sala tiene que
+  // ser de SU refugio, no de otro con el que habla como adoptante.
+  if (refugioDeLaSala === null || refugioDeLaSala !== refugioDelUsuario) {
+    throw new AppError(
+      'SOLO_REFUGIO',
+      'Sólo el refugio puede mandar su ubicación en esta conversación',
+      403,
+    );
+  }
+
+  const ubicacion = await ubicacionDeLaSala(sala.chatId);
+
+  if (!ubicacion || (ubicacion.ubicacion === null && ubicacion.mapaUrl === null)) {
+    throw new AppError(
+      'REFUGIO_SIN_UBICACION',
+      'Tu refugio todavía no cargó su ubicación. Cargala desde el perfil del refugio',
+      409,
+    );
+  }
+
+  return ubicacion;
+}
+
+/** La ubicación del refugio de una sala, o `null` si la sala no es con un refugio. */
+async function ubicacionDeLaSala(chatId: number): Promise<UbicacionRefugioEnChatDto | null> {
+  const chat = await repo.buscarRefugioDeChat(chatId);
+  if (chat?.refugioId == null) return null;
+
+  const refugio = await repo.buscarRefugioParaUbicacion(chat.refugioId);
+  return refugio === null ? null : aUbicacionRefugio(refugio);
+}
+
+/**
+ * Lo que va a mandar el refugio, para el diálogo que pregunta antes: la dirección y el link
+ * de Google Maps de su perfil. Si no cargó ninguno de los dos responde `REFUGIO_SIN_UBICACION`
+ * y el cliente explica cómo cargarla.
+ */
+export async function obtenerUbicacionRefugio(
+  usuarioId: number,
+  chatId: number,
+): Promise<UbicacionRefugioEnChatDto> {
+  const sala = await exigirSala(usuarioId, chatId);
+  const usuario = await repo.buscarRefugioDeUsuario(usuarioId);
+
+  return ubicacionDeMiRefugio(usuario?.refugioId ?? null, sala);
+}
+
+/** Manda la ubicación del refugio a la sala: la tarjeta con su foto, la dirección y el mapa. */
+export async function enviarUbicacionRefugio(
+  usuarioId: number,
+  chatId: number,
+): Promise<MensajeDto> {
+  const sala = await exigirSala(usuarioId, chatId);
+  const { refugioDelUsuario } = await exigirContactoParaEscribir(usuarioId, sala);
+  const ubicacion = await ubicacionDeMiRefugio(refugioDelUsuario, sala);
+
+  return publicarTarjeta(
+    usuarioId,
+    sala,
+    { tipo: 'UBICACION_REFUGIO' },
+    { ubicacion },
+    'Te mandó la ubicación del refugio',
+  );
+}
+
+/**
+ * Spec 004, regla 4: un mensaje de chat se notifica (bandeja/push) solo si el destinatario
+ * NO tiene esa conversación abierta en este momento, y los mensajes seguidos se agrupan en
+ * una sola fila ("Tenés N mensajes nuevos de X") — lo resuelve
+ * `notificaciones.notificarMensajeChat` con un upsert; acá solo se arma el texto y se decide
+ * a quién le toca.
+ */
+const LARGO_MAXIMO_VISTA_PREVIA = 90;
+
+/** Lo que dice el push de un mensaje: su texto, sus fotos o, si es una tarjeta, qué es. */
+interface ContenidoAvisado {
+  texto: string;
+  cantidadImagenes: number;
+  /** Sólo en las tarjetas, que no tienen texto: "Te compartió a Greta". */
+  tarjeta?: string;
+}
+
+/** Lo que se ve en el push: el texto recortado, o un aviso si el mensaje es solo imágenes. */
+function vistaPreviaDelMensaje(mensaje: ContenidoAvisado): string {
+  if (mensaje.tarjeta) return mensaje.tarjeta;
+
+  const texto = mensaje.texto.replace(/\s+/g, ' ').trim();
+
+  if (texto === '') {
+    return mensaje.cantidadImagenes > 1 ? 'Te envió fotos' : 'Te envió una foto';
+  }
+
+  return texto.length > LARGO_MAXIMO_VISTA_PREVIA
+    ? `${texto.slice(0, LARGO_MAXIMO_VISTA_PREVIA - 1).trimEnd()}…`
+    : texto;
+}
+
+async function avisarDestinatarios(
+  remitenteId: number,
+  chatId: number,
+  participantesIds: number[],
+  contenido: ContenidoAvisado,
+): Promise<void> {
+  const destinatarios = participantesIds.filter((id) => id !== remitenteId);
+  if (destinatarios.length === 0) return;
+
+  // Best-effort, mismo criterio que `asegurarChatDeSolicitud`: el mensaje ya se guardó y se
+  // emitió por socket; que la bandeja/push falle no puede convertir el envío en un error.
+  try {
+    // Si la sala es con un refugio y escribe alguien de ese refugio, habla el refugio: el
+    // destinatario ve su nombre y no el de la persona que atendió.
+    const { usuario: remitente, refugio } = await repo.buscarRemitenteDeAviso(remitenteId, chatId);
+    const habloComoRefugio = refugio !== null && remitente?.refugioId === refugio.id;
+    const nombreRemitente = habloComoRefugio
+      ? refugio.nombre
+      : remitente
+        ? `${remitente.nombre} ${remitente.apellido}`
+        : 'alguien';
+
+    await Promise.all(
+      destinatarios.map(async (destinatarioId) => {
+        // Ya la está viendo: la recibe en vivo por el socket, no hace falta bandeja ni push.
+        if (emisor.estaEnSalaChat(destinatarioId, chatId)) return;
+
+        const [fila] = (await repo.contarNoLeidosPorChat(destinatarioId, [chatId])) ?? [];
+        const noLeidos = fila?.noLeidos ?? 1;
+
+        const mensaje =
+          noLeidos <= 1
+            ? `Nuevo mensaje de ${nombreRemitente}`
+            : `Tenés ${noLeidos} mensajes nuevos de ${nombreRemitente}`;
+
+        await notificaciones.notificarMensajeChat({
+          destinatarioId,
+          chatId,
+          mensaje,
+          push: {
+            titulo:
+              noLeidos <= 1 ? nombreRemitente : `${nombreRemitente} (${noLeidos} mensajes nuevos)`,
+            cuerpo: vistaPreviaDelMensaje(contenido),
+          },
+        });
+      }),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar el mensaje nuevo del chat', chatId, err);
+  }
 }
 
 /**
@@ -700,8 +1345,8 @@ const CONTENIDO_MENSAJE_SOLICITUD = '';
  * cuando no hay ninguna viva entre los dos. `chat.solicitudId` queda como la que la ABRIÓ;
  * cada tarjeta lleva la suya en `mensaje.solicitudId`.
  *
- * Es el único lugar donde se crean chats, y por eso concentra las condiciones que
- * `docs/api-chats.md` venía anotando:
+ * Es uno de los dos lugares donde se crean chats —el otro es `asegurarChatDeReclamo`, más
+ * abajo— y por eso concentra las condiciones que `docs/api-chats.md` venía anotando:
  *
  * 1. **CONSTITUTION §7** — sólo hay chat tras una interacción previa. Acá la interacción es
  *    la solicitud misma, que el llamador ya persistió.
@@ -771,9 +1416,122 @@ export async function asegurarChatDeSolicitud(solicitudId: number): Promise<numb
   });
 
   emisor.emitirMensajeNuevo(
-    aMensajeDto(mensaje, [], aSolicitudEnChat(solicitud)),
+    aMensajeDto(mensaje, [], { solicitud: aSolicitudEnChat(solicitud) }),
     participantesIds,
   );
 
   return chatId;
+}
+
+// ─────────────── La tarjeta de un aviso reclamado (HU-13.2) ───────────────
+
+/**
+ * Deja la tarjeta de un aviso de mascota perdida en la conversación con quien lo publicó,
+ * abriéndola si todavía no existe.
+ *
+ * **La sala es entre las partes, igual que la de una solicitud.** Si las dos personas ya se
+ * estaban escribiendo —por una adopción, o por otro aviso— el reclamo cae en la conversación
+ * que ya tenían en vez de abrir una segunda con el mismo contacto. Decisión del equipo del
+ * 2026-10-01: dos filas con el mismo nombre y la misma foto en el listado son indistinguibles,
+ * y el motivo que tenía la variante anterior (aislar el cierre del caso) desapareció cuando se
+ * descartó que resolver un aviso cerrara la conversación. Ver spec 024 §9.
+ *
+ * `chat.animalPerdidoId` queda como el aviso que ABRIÓ la sala; cada tarjeta lleva el suyo en
+ * `mensaje.animalPerdidoId`, que es lo que permite que una conversación acumule dos avisos, o
+ * un aviso y una solicitud.
+ *
+ * Condiciones, en el mismo orden en que las concentra `asegurarChatDeSolicitud`:
+ *
+ * 1. **CONSTITUTION §7** — la interacción previa es el reclamo, que el artículo nombra
+ *    explícitamente junto con la solicitud ("solicitud de adopción o reporte de mascota
+ *    perdida").
+ * 2. **Fila de `UsuarioChat` para los dos**: la autorización del módulo es la membresía.
+ * 3. **`Chat.refugioId` siempre `null`**: el aviso es de la persona que lo cargó, no de su
+ *    refugio, así que las dos partes ven la sala desde su perfil personal.
+ * 4. **Sin tarjetas duplicadas**: se busca la conversación y la tarjeta antes de crear, y el
+ *    índice único parcial sobre `(animal_perdido_id, chat_id)` de `mensaje` cubre dos requests
+ *    concurrentes.
+ * 5. **`chat_tipo` no se escribe**: sus valores siguen sin definirse en MODELO_DATOS.md.
+ *
+ * A diferencia de la de solicitudes, esta función SÍ lanza: el reclamo no persistió nada antes
+ * de llamarla —la conversación ES el resultado de la acción—, así que si no se puede abrir, el
+ * endpoint tiene que decirlo y no devolver un 200 vacío.
+ *
+ * Las validaciones del aviso (que exista, que no sea propio, que no esté resuelto) las hace
+ * `animales-perdidos.service`, que es el dueño de esa entidad.
+ *
+ * `nueva` es `true` sólo cuando hubo que abrir la conversación: con `false` el cliente está
+ * entrando a una que ya tenía.
+ */
+/** Best-effort: la sala y la tarjeta ya existen, un aviso que falla no las deshace. */
+async function avisarReclamo(
+  reclamanteId: number,
+  reportanteId: number,
+  chatId: number,
+): Promise<void> {
+  try {
+    const reclamante = await repo.buscarNombreUsuario(reclamanteId);
+    const nombre = reclamante ? `${reclamante.nombre} ${reclamante.apellido}` : 'Alguien';
+
+    await notificaciones.notificar({
+      usuarioId: reportanteId,
+      tipo: 'ANIMAL_PERDIDO_RECLAMADO',
+      mensaje: `${nombre} se contactó por tu aviso de mascota perdida o encontrada.`,
+      entidadTipo: 'CHAT',
+      entidadId: chatId,
+      canal: { push: true },
+      usuarioAlta: reclamanteId,
+    });
+  } catch (err) {
+    console.error('No se pudo avisar el reclamo del aviso', chatId, err);
+  }
+}
+
+export async function asegurarChatDeReclamo(
+  animalPerdidoId: number,
+  reclamanteId: number,
+  reportanteId: number,
+): Promise<{ chatId: number; nueva: boolean }> {
+  // La conversación entre las dos personas, sin refugio de por medio: la misma regla que usa
+  // una segunda solicitud para no abrir otra sala con el mismo contacto.
+  const existente = await repo.buscarChatEntre(reclamanteId, { usuarioId: reportanteId });
+
+  const chatId =
+    existente?.id ??
+    (
+      await repo.crearChatDeReclamo({
+        animalPerdidoId,
+        participantesIds: [reclamanteId, reportanteId],
+        // El alta es de quien reclama: es quien disparó la interacción que habilita la sala.
+        creadoPor: reclamanteId,
+      })
+    ).id;
+
+  // Idempotente: volver a tocar "Enviar mensaje" entra a la misma conversación sin repetir la
+  // tarjeta. Es el caso normal, porque el botón no se esconde después del primer reclamo.
+  const yaAnunciado = await repo.buscarMensajeDeReclamo(animalPerdidoId, chatId);
+
+  if (yaAnunciado) return { chatId, nueva: false };
+
+  const aviso = await repo.buscarAvisoParaChat(animalPerdidoId);
+
+  // La tarjeta la emite SISTEMA y no el reclamante: no es algo que él haya escrito, y con su
+  // autoría se pintaría como una burbuja propia en su pantalla.
+  const mensaje = await repo.crearMensaje({
+    chatId,
+    usuarioId: USUARIO_SISTEMA_ID,
+    contenido: '',
+    imagenes: [],
+    tipo: 'ANIMAL_PERDIDO',
+    animalPerdidoId,
+  });
+
+  emisor.emitirMensajeNuevo(
+    aMensajeDto(mensaje, [], { aviso: aviso === null ? null : aAvisoEnChat(aviso) }),
+    [reclamanteId, reportanteId],
+  );
+
+  await avisarReclamo(reclamanteId, reportanteId, chatId);
+
+  return { chatId, nueva: existente === null };
 }

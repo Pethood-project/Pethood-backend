@@ -5,6 +5,7 @@ import {
   esFutura,
   esPasada,
   parsearFecha,
+  validarFechaNoPasada,
   validarFechaPasada,
 } from '../../../../src/shared/validation/dates';
 
@@ -98,5 +99,28 @@ describe('validarFechaPasada', () => {
     const resultado = validarFechaPasada('cualquier cosa', 'La fecha de nacimiento');
 
     expect(resultado).toEqual({ valida: false, error: 'La fecha de nacimiento no es válida' });
+  });
+});
+
+describe('validarFechaNoPasada', () => {
+  it('acepta hoy y fechas futuras', () => {
+    expect(validarFechaNoPasada(new Date(), 'La fecha de inicio')).toMatchObject({ valida: true });
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    expect(validarFechaNoPasada(manana, 'La fecha de inicio')).toMatchObject({ valida: true });
+  });
+
+  it('rechaza ayer', () => {
+    const ayer = new Date();
+    ayer.setDate(ayer.getDate() - 1);
+    expect(validarFechaNoPasada(ayer, 'La fecha de inicio')).toEqual({
+      valida: false,
+      error: 'La fecha de inicio no puede ser anterior a hoy',
+    });
+  });
+
+  it('rechaza vacío y texto inválido', () => {
+    expect(validarFechaNoPasada('', 'La fecha de inicio')).toMatchObject({ valida: false });
+    expect(validarFechaNoPasada('nada', 'La fecha de inicio')).toMatchObject({ valida: false });
   });
 });

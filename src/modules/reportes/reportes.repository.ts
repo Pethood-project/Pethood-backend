@@ -1,8 +1,18 @@
 import { Prisma, type TipoReporte } from '@prisma/client';
 import { datosAlta, datosModificacion } from '../../shared/auditoria';
 import { prisma } from '../../shared/prisma';
+import { ROL_DB } from '../../shared/roles';
 
 const PERSONA = { id: true, nombre: true, apellido: true } as const;
+
+/** Administradores activos: a quienes les llega el aviso de un reporte nuevo. */
+export async function listarIdsAdmins(): Promise<number[]> {
+  const filas = await prisma.rolUsuario.findMany({
+    where: { fechaBaja: null, rol: { nombre: ROL_DB.ADMIN }, usuario: { fechaBaja: null } },
+    select: { usuarioId: true },
+  });
+  return filas.map((fila) => fila.usuarioId);
+}
 
 export function buscarUsuario(usuarioId: number) {
   return prisma.usuario.findFirst({
@@ -211,11 +221,19 @@ export const BUSCAR_OBJETO = {
         donaciones: { where: { fechaBaja: null }, select: { monto: true } },
       },
     }),
-  // `Mensaje` no tiene baja lógica (solo alta): no hay `fechaBaja` que filtrar.
-  MENSAJE: (id: number) =>
+  // La baja de un mensaje es la de su autor al eliminarlo: para reportar ya no existe (en la
+  // sala sólo queda el aviso), pero el admin lo sigue viendo entero con `incluirBajas`.
+  MENSAJE: (id: number, incluirBajas: boolean) =>
     prisma.mensaje.findFirst({
-      where: { id },
-      select: { id: true, contenido: true, tipo: true, usuarioId: true, chatId: true },
+      where: { id, ...vigente(incluirBajas) },
+      select: {
+        id: true,
+        contenido: true,
+        tipo: true,
+        usuarioId: true,
+        chatId: true,
+        fechaBaja: true,
+      },
     }),
 } as const;
 
@@ -257,6 +275,8 @@ export async function ventanaDeMensajes(chatId: number, mensajeId: number, taman
     contenido: true,
     imagenes: true,
     fechaAlta: true,
+    // El contexto muestra los eliminados enteros: el admin tiene que saber cuáles lo fueron.
+    fechaBaja: true,
     usuario: { select: PERSONA },
   } as const;
 

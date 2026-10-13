@@ -14,9 +14,19 @@ const ESTADOS_QUE_HABILITAN_PUBLICACION = ['Disponible', 'En_Transito'];
 
 /**
  * Estados con los que nace un aviso de animal perdido (spec 020). "Resuelto" existe en el
- * catálogo pero es el cierre del caso (HU-13.3), nunca un alta.
+ * catálogo pero es el cierre del caso (HU-13.2), nunca un alta.
  */
 const ESTADOS_ANIMAL_PERDIDO_EN_ALTA = ['Perdido', 'Encontrado'];
+
+/**
+ * El cierre del caso (HU-13.2, spec 024): el aviso queda marcado "Volvió con su dueño" y sus
+ * salas de reencuentro pasan a sólo lectura.
+ *
+ * Es el nombre del catálogo `Estado_Animal_Perdido` y vive acá —y no en cada módulo— porque
+ * lo miran tres: el alta (para rechazarlo), el reclamo (para no abrir sala de un caso
+ * cerrado) y el chat (para cerrar la sala).
+ */
+const ESTADO_ANIMAL_PERDIDO_RESUELTO = 'Resuelto';
 
 export function listarEspecies() {
   return repo.listarEspecies();
@@ -67,6 +77,11 @@ export async function listarEstadosMascota() {
  * Estados del aviso de animal perdido: alimentan el filtro del portal (todos) y el selector del
  * alta (sólo los que tienen `seleccionableEnAlta`).
  */
+/** Filtro por estado de «Mis Campañas» (spec 026). */
+export function listarEstadosCampania() {
+  return repo.listarEstadosCampania();
+}
+
 export async function listarEstadosAnimalPerdido() {
   const estados = await repo.listarEstadosAnimalPerdido();
 
@@ -80,4 +95,5 @@ export {
   ESTADOS_SELECCIONABLES_EN_ALTA,
   ESTADOS_QUE_HABILITAN_PUBLICACION,
   ESTADOS_ANIMAL_PERDIDO_EN_ALTA,
+  ESTADO_ANIMAL_PERDIDO_RESUELTO,
 };

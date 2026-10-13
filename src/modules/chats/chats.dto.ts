@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
 import { idSchema, textoOpcionalNoNuloSchema } from '../../shared/validation/schemas';
-import type { AdjuntoMensaje } from '../../shared/adjuntos';
+import type { AdjuntoMensaje, TipoAdjunto } from '../../shared/adjuntos';
 
 /**
  * El otro lado de la conversación, YA RESUELTO por el backend.
@@ -37,6 +37,16 @@ export interface ContactoChatDto {
   activo: boolean;
 }
 
+/**
+ * Qué es un mensaje. `TEXTO` es lo que escribe una persona, con o sin adjuntos; el resto son
+ * tarjetas, con `contenido` vacío:
+ *
+ * - `SOLICITUD` y `ANIMAL_PERDIDO` las emite el usuario SISTEMA (no son de nadie de la sala).
+ * - `MASCOTA` y `UBICACION_REFUGIO` las manda una persona: van de su lado y las puede eliminar.
+ */
+export type TipoMensajeDto =
+  'TEXTO' | 'SOLICITUD' | 'ANIMAL_PERDIDO' | 'MASCOTA' | 'UBICACION_REFUGIO';
+
 /** Vista previa del último mensaje. `null` si la sala todavía no tiene ninguno. */
 export interface UltimoMensajeDto {
   /** Sin truncar: el recorte visual es del cliente. */
@@ -54,10 +64,18 @@ export interface UltimoMensajeDto {
    */
   tieneVideo: boolean;
   /**
-   * `SOLICITUD` cuando lo último de la sala es la tarjeta de una solicitud: su `contenido`
-   * va vacío y el cliente pone el texto ("Solicitud"), igual que con la foto.
+   * `SOLICITUD` cuando lo último de la sala es la tarjeta de una solicitud,
+   * `ANIMAL_PERDIDO` cuando es la de un aviso reclamado (HU-13.2), `MASCOTA` cuando alguien
+   * compartió una mascota y `UBICACION_REFUGIO` cuando el refugio mandó su ubicación: su
+   * `contenido` va vacío y el cliente pone el texto ("Solicitud", "Mascota compartida"…),
+   * igual que con la foto.
    */
-  tipo: 'TEXTO' | 'SOLICITUD';
+  tipo: TipoMensajeDto;
+  /**
+   * El autor lo eliminó. Viaja con `contenido` vacío y sin adjuntos: el texto ("Se eliminó
+   * este mensaje") lo pone el cliente, igual que con la foto o la tarjeta.
+   */
+  eliminado: boolean;
 }
 
 /**
@@ -133,10 +151,11 @@ export interface MensajeDto {
   /** Id del emisor. El cliente decide de qué lado de la burbuja va. */
   usuarioId: number;
   /**
-   * Qué es este mensaje. `SOLICITUD` lo emite el usuario SISTEMA y trae `solicitud`
-   * completa: es la tarjeta embebida de la sala, no una burbuja de texto.
+   * Qué es este mensaje. `SOLICITUD` y `ANIMAL_PERDIDO` los emite el usuario SISTEMA y
+   * traen `solicitud` o `aviso` completos; `MASCOTA` y `UBICACION_REFUGIO` los manda una
+   * persona y traen `mascota` o `ubicacion`. Todos son tarjetas, no burbujas de texto.
    */
-  tipo: 'TEXTO' | 'SOLICITUD';
+  tipo: TipoMensajeDto;
   /**
    * El otro ya lo recibió en algún dispositivo, aunque no lo haya abierto. Es el segundo
    * tilde. Un mensaje leído está siempre entregado.
@@ -152,8 +171,54 @@ export interface MensajeDto {
   fechaLectura: string | null;
   /** Sólo en los de tipo `SOLICITUD`. */
   solicitud: SolicitudEnChatDto | null;
+  /** Sólo en los de tipo `ANIMAL_PERDIDO` (HU-13.2). */
+  aviso: AvisoEnChatDto | null;
+  /** Sólo en los de tipo `MASCOTA`: la mascota compartida. */
+  mascota: MascotaEnChatDto | null;
+  /** Sólo en los de tipo `UBICACION_REFUGIO`: la ubicación del refugio de la sala. */
+  ubicacion: UbicacionRefugioEnChatDto | null;
+  /**
+   * El autor lo eliminó. El mensaje sigue en el historial —en su lugar la sala pinta "Se
+   * eliminó este mensaje"— pero viaja vacío: `contenido` en `""`, sin adjuntos y sin cita. No
+   * alcanza con esconderlo en el cliente: con la URL firmada en la mano, el otro podría seguir
+   * abriendo la foto hasta que venza.
+   */
+  eliminado: boolean;
+  /** El mensaje al que éste responde, ya resumido para la cita, o `null` si no responde a nada. */
+  respondeA: MensajeCitadoDto | null;
   /** ISO 8601 crudo. La hora la formatea el cliente. */
   fechaAlta: string;
+}
+
+/**
+ * Lo que la burbuja que responde muestra del mensaje citado (deslizar para responder).
+ *
+ * Es un resumen y no el mensaje entero, por lo mismo que la solicitud embebida: la cita pinta
+ * una línea de texto y, como mucho, una miniatura. Si el citado se eliminó después, la cita lo
+ * dice (`eliminado`) y no muestra nada de lo que decía.
+ */
+export interface MensajeCitadoDto {
+  id: number;
+  /** Autor del citado. Si dice "Vos" o el nombre del contacto lo decide el cliente. */
+  usuarioId: number;
+  /** Sin truncar. Vacío si el citado era sólo adjuntos o si se eliminó. */
+  contenido: string;
+  /**
+   * Qué adjuntos llevaba, para el "Foto" / "Video" de la cita, o `null` si ninguno.
+   * `miniaturaUrl` es la primera foto, firmada; un video no tiene miniatura (el servidor no
+   * genera fotogramas), así que va `null` y el cliente pone el ícono.
+   */
+  adjunto: { tipo: TipoAdjunto; cantidad: number; miniaturaUrl: string | null } | null;
+  eliminado: boolean;
+}
+
+/**
+ * Respuesta de eliminar un mensaje, y payload del evento `chat:mensaje-eliminado`: con el id
+ * alcanza para que cada cliente reemplace la burbuja por el aviso, sin pedir nada más.
+ */
+export interface MensajeEliminadoDto {
+  chatId: number;
+  mensajeId: number;
 }
 
 /**
@@ -181,6 +246,83 @@ export interface SolicitudEnChatDto {
     fechaNacimiento: string | null;
     imagenUrl: string | null;
   };
+}
+
+/**
+ * El aviso de animal perdido/encontrado que abrió la sala de reencuentro (HU-13.2), tal como
+ * lo pintan la tarjeta embebida y la cabecera.
+ *
+ * Mismo criterio que `SolicitudEnChatDto`: es un resumen y no el aviso entero. El detalle
+ * completo sigue saliendo del portal (`GET /animales-perdidos`), y el cliente navega ahí
+ * con el `id`.
+ *
+ * NO lleva coordenadas ni distancia: la regla 6 de la spec 020 es que las del dispositivo no
+ * se exponen nunca, y la distancia depende de dónde está quien mira, que en una sala de chat
+ * no es un dato que la tarjeta necesite.
+ */
+export interface AvisoEnChatDto {
+  id: number;
+  /** `null` en un aviso "Encontrado" sin nombre: el texto de relleno lo pone el cliente. */
+  nombre: string | null;
+  /** Nombre de la especie, del catálogo, o `null` si el aviso no la tiene cargada. */
+  especie: string | null;
+  /** Estado vigente: "Perdido", "Encontrado" o "Resuelto". El color lo decide el cliente. */
+  estado: string;
+  /** Portada del aviso. */
+  imagenUrl: string;
+  /** «referencia, localidad - provincia», ya armada por el backend. */
+  ubicacion: string | null;
+  /** Sólo el día, como en el portal, o `null` si el aviso no la tiene. */
+  fechaSuceso: string | null;
+  /** ISO 8601 crudo: cuándo se publicó el aviso. */
+  fechaAlta: string;
+}
+
+/**
+ * Una mascota compartida en la sala, tal como la pinta su tarjeta y la lista para elegirla.
+ *
+ * Se resuelve en el momento del pedido, como la solicitud embebida: si la adoptaron o se
+ * despublicó después de compartirla, la tarjeta lo dice.
+ */
+export interface MascotaEnChatDto {
+  id: number;
+  /** `null` en una mascota sin nombre cargado: el texto de relleno lo pone el cliente. */
+  nombre: string | null;
+  especie: string;
+  raza: string;
+  genero: 'MACHO' | 'HEMBRA';
+  tamanio: 'PEQUENO' | 'MEDIANO' | 'GRANDE' | null;
+  /** Sólo el día (`AAAA-MM-DD`), o `null`. La edad la calcula el cliente. */
+  fechaNacimiento: string | null;
+  /** La foto de la publicación, o la de la mascota si aquélla no tiene. */
+  imagenUrl: string | null;
+  /** Estado vigente ("Disponible", "Adoptado"…), o `null` si la mascota no tiene ninguno. */
+  estado: string | null;
+  /**
+   * La publicación activa, que es a donde lleva "Ver mascota". `null` si ya no está publicada
+   * (pausada, finalizada o la mascota se eliminó): el cliente esconde el botón.
+   */
+  publicacionId: number | null;
+}
+
+/**
+ * La ubicación del refugio de la sala, tal como la pinta su tarjeta y el diálogo que pregunta
+ * antes de mandarla. Sale del perfil del refugio en cada pedido: muestra siempre la dirección
+ * vigente.
+ */
+export interface UbicacionRefugioEnChatDto {
+  refugioId: number;
+  nombre: string;
+  imagenUrl: string | null;
+  /** «calle y altura, localidad - provincia», ya armada, o `null` si no la cargó. */
+  ubicacion: string | null;
+  /** El link de Google Maps del perfil, o `null`. Nunca vienen los dos en `null`. */
+  mapaUrl: string | null;
+}
+
+/** Las mascotas que se pueden compartir en una sala: favoritas y de la contraparte. */
+export interface MascotasCompartiblesDto {
+  mascotas: MascotaEnChatDto[];
 }
 
 /**
@@ -223,8 +365,24 @@ export interface CabeceraChatDto {
    * ISO: el texto es una decisión de UI y el redondeo depende del idioma.
    */
   minutosRespuesta: number | null;
-  /** La solicitud que originó la sala, o `null` si no nació de una (HU-13.2, salas viejas). */
+  /** La solicitud vigente de la sala, o `null` si no hay ninguna. */
   solicitud: SolicitudEnChatDto | null;
+  /**
+   * El aviso de la última tarjeta de aviso de la sala (HU-13.2), o `null` si no hay ninguna.
+   *
+   * **No es excluyente con `solicitud`**: desde que el reclamo entra en la conversación que ya
+   * existía con esa persona, una sala puede tener las dos tarjetas.
+   */
+  aviso: AvisoEnChatDto | null;
+  /**
+   * De qué se está hablando: cuál de las dos tarjetas es la vigente, o `null` si no hay
+   * ninguna. Es la más reciente, la misma regla que ya regía para dos solicitudes en la misma
+   * sala.
+   *
+   * Lo decide el backend para que el subtítulo de la cabecera no tenga que comparar fechas ni
+   * conocer la regla.
+   */
+  contexto: 'SOLICITUD' | 'ANIMAL_PERDIDO' | null;
 }
 
 /**
@@ -281,12 +439,26 @@ export type HistorialQuery = z.infer<typeof historialQuerySchema>;
  *
  * Las fotos no se declaran acá: viajan como multipart y las valida el middleware de upload
  * (formato, peso y cantidad), no Zod.
+ *
+ * `respondeAId` es el mensaje que se cita al responder. Acá sólo se valida que sea un id: que
+ * exista, que sea de esta sala y que se pueda responder lo decide el service.
  */
 export const enviarMensajeSchema = z.object({
   contenido: textoOpcionalNoNuloSchema({
     max: LIMITES.mensaje.contenido.max,
     etiqueta: 'El mensaje',
   }),
+  respondeAId: idSchema('El mensaje que respondés').optional(),
 });
 
 export type EnviarMensajeDto = z.infer<typeof enviarMensajeSchema>;
+
+/**
+ * Body de compartir una mascota. Acá sólo se valida que sea un id: que esté en favoritos y que
+ * sea de la contraparte lo decide el service.
+ */
+export const compartirMascotaSchema = z.object({
+  mascotaId: idSchema('La mascota'),
+});
+
+export type CompartirMascotaDto = z.infer<typeof compartirMascotaSchema>;

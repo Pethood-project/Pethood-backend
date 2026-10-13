@@ -4,9 +4,9 @@
  * El listado resuelve el último mensaje y el conteo de no leídos de TODOS los chats con dos
  * queries fijas, no una por chat: ver `ultimoMensajePorChat` y `contarNoLeidosPorChat`.
  *
- * Lo que se escribe es el alta de un mensaje, las marcas de lectura y entrega del
- * participante y el alta de una sala; nunca hay baja ni modificación de `Mensaje`:
- * MODELO_DATOS.md lo declara excepción de auditoría (solo alta).
+ * Lo que se escribe es el alta de un mensaje, su baja lógica (el autor lo eliminó), las marcas
+ * de lectura y entrega del participante y el alta de una sala. Nunca hay modificación de
+ * `Mensaje`, y la baja no borra la fila: ver `darDeBajaMensaje`.
  *
  * **Leído y entregado viven en `UsuarioChat`, no en `Mensaje`.** Cada participante guarda
  * hasta qué momento tiene la sala leída y recibida, así que el estado de un mensaje es una
@@ -15,7 +15,25 @@
  */
 import { Prisma, type TipoMensaje } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta, datosModificacion } from '../../shared/auditoria';
+import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
+
+/**
+ * Lo que hace falta del mensaje citado para pintar la cita dentro de la burbuja que responde:
+ * quién lo escribió, el texto, si llevaba fotos o video y si ya se eliminó.
+ *
+ * Viaja como `include` de cada mensaje —un JOIN en la misma query del historial— y no en una
+ * segunda pasada por ids: la relación es 1 a 1 y la página tiene como mucho 50 filas.
+ */
+const CITA_MENSAJE = {
+  select: {
+    id: true,
+    usuarioId: true,
+    contenido: true,
+    imagenes: true,
+    tipo: true,
+    fechaBaja: true,
+  },
+} as const;
 
 /**
  * Salas donde el usuario es participante ACTIVO, con el refugio y el otro participante.
@@ -68,6 +86,33 @@ export function listarChatsActivosDeUsuario(usuarioId: number) {
  * Hace falta para saber de qué lado del mostrador está: en un chat con refugio, el adoptante
  * ve al refugio y el miembro del refugio ve al adoptante.
  */
+/** Nombre para mostrar del emisor de un mensaje (spec 004: texto de la notificación agrupada). */
+export function buscarNombreUsuario(usuarioId: number) {
+  return prisma.usuario.findFirst({
+    where: { id: usuarioId },
+    select: { nombre: true, apellido: true },
+  });
+}
+
+/**
+ * Quién escribe, para el texto de la notificación: la persona y, si la sala es con un
+ * refugio, cuál. Sirve para distinguir cuándo habla alguien "como refugio".
+ */
+export async function buscarRemitenteDeAviso(usuarioId: number, chatId: number) {
+  const [usuario, chat] = await Promise.all([
+    prisma.usuario.findFirst({
+      where: { id: usuarioId },
+      select: { nombre: true, apellido: true, refugioId: true },
+    }),
+    prisma.chat.findFirst({
+      where: { id: chatId },
+      select: { refugio: { select: { id: true, nombre: true } } },
+    }),
+  ]);
+
+  return { usuario, refugio: chat?.refugio ?? null };
+}
+
 export function buscarRefugioDeUsuario(usuarioId: number) {
   return prisma.usuario.findUnique({
     where: { id: usuarioId },
@@ -83,6 +128,8 @@ export interface UltimoMensajeFila {
   imagenUrl: string | null;
   tipo: TipoMensaje;
   fechaAlta: Date;
+  /** El autor lo eliminó: el preview dice "Se eliminó este mensaje". */
+  fechaBaja: Date | null;
 }
 
 /**
@@ -110,7 +157,8 @@ export function ultimoMensajePorChat(chatIds: number[]): Promise<UltimoMensajeFi
            m."usuario_id"         AS "usuarioId",
            m."mensaje_imagen_url" AS "imagenUrl",
            m."mensaje_tipo"       AS "tipo",
-           m."mensaje_fecha_alta" AS "fechaAlta"
+           m."mensaje_fecha_alta" AS "fechaAlta",
+           m."mensaje_fecha_baja" AS "fechaBaja"
       FROM "mensaje" m
      WHERE m."chat_id" IN (${Prisma.join(chatIds)})
      ORDER BY m."chat_id", m."mensaje_fecha_alta" DESC, m."mensaje_id" DESC
@@ -263,6 +311,9 @@ export function buscarSalaConContacto(usuarioId: number, chatId: number) {
  * fila de la sala. Cae sobre `mensaje_chat_fecha_alta_idx`, que ya existe desde HU-5.1.
  *
  * `skip: 1` sobre el cursor porque `antesDe` es un mensaje que el cliente YA tiene.
+ *
+ * Los mensajes eliminados vienen igual —la sala los pinta como el aviso "Se eliminó este
+ * mensaje"—: vaciarles el contenido es trabajo del service, que arma el DTO.
  */
 export function listarMensajes(chatId: number, limite: number, antesDe?: number) {
   return prisma.mensaje.findMany({
@@ -270,19 +321,24 @@ export function listarMensajes(chatId: number, limite: number, antesDe?: number)
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
     take: limite + 1,
     ...(antesDe === undefined ? {} : { cursor: { id: antesDe }, skip: 1 }),
-  });
-}
-
-/** ¿El mensaje del cursor pertenece a esta sala? Evita paginar con un id de otro chat. */
-export function buscarMensajeDeChat(chatId: number, mensajeId: number) {
-  return prisma.mensaje.findFirst({
-    where: { id: mensajeId, chatId },
-    select: { id: true },
+    include: { mensajeRespondido: CITA_MENSAJE },
   });
 }
 
 /**
- * Alta de mensaje. Nunca se edita ni se borra.
+ * ¿El mensaje pertenece a esta sala? Es el guard del cursor del historial (un id de otro chat
+ * paginaría desde cualquier lado), del mensaje que se cita al responder y del que se elimina:
+ * en los tres casos, un id de otra sala no puede tocar ésta.
+ */
+export function buscarMensajeDeChat(chatId: number, mensajeId: number) {
+  return prisma.mensaje.findFirst({
+    where: { id: mensajeId, chatId },
+    select: { id: true, usuarioId: true, tipo: true, fechaBaja: true },
+  });
+}
+
+/**
+ * Alta de mensaje. Nunca se edita; lo único que puede pasarle después es su baja lógica.
  *
  * `imagenUrl` guarda la PRIMERA de `imagenes`, desnormalizada, para que el preview del
  * listado no tenga que mirar el array — mismo par que en `Publicacion`.
@@ -297,6 +353,9 @@ export function crearMensaje(datos: {
   imagenes: string[];
   tipo?: TipoMensaje;
   solicitudId?: number | null;
+  animalPerdidoId?: number | null;
+  mascotaId?: number | null;
+  mensajeRespondidoId?: number | null;
 }) {
   return prisma.mensaje.create({
     data: {
@@ -307,8 +366,29 @@ export function crearMensaje(datos: {
       imagenUrl: datos.imagenes[0] ?? null,
       tipo: datos.tipo ?? 'TEXTO',
       solicitudId: datos.solicitudId ?? null,
+      animalPerdidoId: datos.animalPerdidoId ?? null,
+      mascotaId: datos.mascotaId ?? null,
+      mensajeRespondidoId: datos.mensajeRespondidoId ?? null,
       ...datosAlta(datos.usuarioId),
     },
+    // La misma forma que el historial: el DTO del envío lleva la cita ya resuelta.
+    include: { mensajeRespondido: CITA_MENSAJE },
+  });
+}
+
+/**
+ * Baja lógica de un mensaje: el autor lo eliminó.
+ *
+ * **La fila no se borra, ni sus adjuntos.** La sala la sigue listando como el aviso "Se
+ * eliminó este mensaje" —y las respuestas que lo citaban siguen apuntando a algo—, y si alguien
+ * lo había reportado el administrador lo sigue viendo entero en el contexto del reporte. Lo
+ * que deja de salir hacia los participantes es el contenido, y eso lo resuelve el DTO.
+ */
+export function darDeBajaMensaje(mensajeId: number, usuarioId: number) {
+  return prisma.mensaje.update({
+    where: { id: mensajeId },
+    data: datosBaja(usuarioId),
+    select: { id: true },
   });
 }
 
@@ -364,7 +444,7 @@ export function buscarUltimaSolicitudDelChat(chatId: number) {
   return prisma.mensaje.findFirst({
     where: { chatId, tipo: 'SOLICITUD', solicitudId: { not: null } },
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
-    select: { solicitudId: true },
+    select: { solicitudId: true, fechaAlta: true },
   });
 }
 
@@ -537,5 +617,226 @@ export function ultimosMensajesParaRespuesta(chatId: number, limite: number) {
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
     take: limite,
     select: { usuarioId: true, fechaAlta: true },
+  });
+}
+
+// ─────────────── La tarjeta de un aviso reclamado (HU-13.2) ───────────────
+
+/**
+ * Crea la sala de un reclamo con sus dos participantes, en una transacción.
+ *
+ * Sólo se llama cuando NO existe conversación entre las dos personas: si existe, el reclamo
+ * deja su tarjeta ahí (ver `asegurarChatDeReclamo`), igual que hace una segunda solicitud.
+ *
+ * `refugioId` queda en `null` SIEMPRE: el aviso es de la persona que lo cargó, no de su
+ * refugio (ver `animales-perdidos.service.ts`), así que la sala es entre personas y las dos
+ * la ven desde su perfil personal.
+ *
+ * `chat_tipo` NO se escribe: sus valores siguen sin definirse en MODELO_DATOS.md.
+ */
+export function crearChatDeReclamo(datos: {
+  animalPerdidoId: number;
+  participantesIds: number[];
+  creadoPor: number;
+}) {
+  return prisma.chat.create({
+    data: {
+      animalPerdidoId: datos.animalPerdidoId,
+      refugioId: null,
+      ...datosAlta(datos.creadoPor),
+      participantes: {
+        create: datos.participantesIds.map((usuarioId) => ({
+          usuarioId,
+          ...datosAlta(datos.creadoPor),
+        })),
+      },
+    },
+    select: { id: true },
+  });
+}
+
+/**
+ * ¿Este aviso ya dejó su tarjeta en esta sala?
+ *
+ * Es la idempotencia del reclamo: el botón "Enviar mensaje" no se esconde después del
+ * primero, así que volver a tocarlo tiene que devolver la misma conversación sin repetir la
+ * tarjeta. Es por (aviso, sala) y no por aviso a secas: el mismo aviso reclamado por cinco
+ * personas deja cinco tarjetas, una en la conversación de cada una con el reportante.
+ */
+export function buscarMensajeDeReclamo(animalPerdidoId: number, chatId: number) {
+  return prisma.mensaje.findFirst({
+    where: { tipo: 'ANIMAL_PERDIDO', animalPerdidoId, chatId },
+    select: { chatId: true },
+  });
+}
+
+/** Datos del aviso que pinta la tarjeta embebida y la cabecera de la sala. */
+export function buscarAvisoParaChat(animalPerdidoId: number) {
+  return prisma.animalPerdido.findUnique({
+    where: { id: animalPerdidoId },
+    select: {
+      id: true,
+      nombre: true,
+      descripcion: true,
+      imagenUrl: true,
+      provincia: true,
+      localidad: true,
+      referencia: true,
+      fechaSuceso: true,
+      fechaAlta: true,
+      fechaBaja: true,
+      usuarioReportanteId: true,
+      estadoAnimalPerdido: { select: { id: true, nombre: true } },
+      especie: { select: { nombre: true } },
+    },
+  });
+}
+
+/**
+ * El aviso de la ÚLTIMA tarjeta de aviso de la sala, con su fecha.
+ *
+ * Mismo criterio que `buscarUltimaSolicitudDelChat`: la cabecera nombra lo vigente, que es lo
+ * último que se dejó en la conversación. La fecha sale para poder compararla con la de la
+ * última solicitud, porque una sala puede tener las dos cosas y el subtítulo muestra una.
+ */
+export function buscarUltimoAvisoDelChat(chatId: number) {
+  return prisma.mensaje.findFirst({
+    where: { chatId, tipo: 'ANIMAL_PERDIDO', animalPerdidoId: { not: null } },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { animalPerdidoId: true, fechaAlta: true },
+  });
+}
+
+// ─────────────── Tarjetas que manda una persona: mascota y ubicación del refugio ───────────────
+
+/** De quién tiene que ser una mascota para poder compartirla en la sala. */
+export type Contraparte = { refugioId: number } | { usuarioId: number };
+
+/**
+ * Las mascotas "de la contraparte": las de su refugio, o las PERSONALES de esa persona. Una
+ * mascota que alguien publicó a nombre de su refugio no es suya en una charla personal: es del
+ * refugio, igual que en `shared/ambito.ts`.
+ */
+function deLaContraparte(contraparte: Contraparte) {
+  return 'refugioId' in contraparte
+    ? { refugioId: contraparte.refugioId }
+    : { usuarioId: contraparte.usuarioId, refugioId: null };
+}
+
+/**
+ * Lo que pinta la tarjeta de una mascota compartida y la fila de la lista para elegirla: los
+ * datos principales, el estado vigente y la publicación activa (que es a donde lleva "Ver
+ * mascota").
+ */
+const MASCOTA_PARA_CHAT = {
+  id: true,
+  nombre: true,
+  fechaNacimiento: true,
+  genero: true,
+  tamanio: true,
+  imagenUrl: true,
+  raza: { select: { nombre: true, especie: { select: { nombre: true } } } },
+  historicoEstados: {
+    where: { fechaBaja: null },
+    orderBy: { fechaAlta: 'desc' },
+    take: 1,
+    select: { estadoMascota: { select: { nombre: true } } },
+  },
+  publicaciones: {
+    where: { fechaBaja: null },
+    orderBy: { fechaAlta: 'desc' },
+    take: 1,
+    select: { id: true, imagenUrl: true },
+  },
+} as const;
+
+/**
+ * Las mascotas que el usuario puede compartir en esta sala: las que tiene en favoritos y son
+ * de la contraparte, de la guardada más reciente a la más vieja (el orden de Favoritos).
+ *
+ * Los mismos filtros que el listado de favoritos: favorito activo y mascota no eliminada.
+ */
+export function listarMascotasCompartibles(usuarioId: number, contraparte: Contraparte) {
+  return prisma.favorito.findMany({
+    where: {
+      usuarioId,
+      fechaBaja: null,
+      mascota: { fechaBaja: null, ...deLaContraparte(contraparte) },
+    },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: { mascota: { select: MASCOTA_PARA_CHAT } },
+  });
+}
+
+/** ¿Esta mascota está en los favoritos del usuario y es de la contraparte? */
+export function buscarFavoritoCompartible(
+  usuarioId: number,
+  mascotaId: number,
+  contraparte: Contraparte,
+) {
+  return prisma.favorito.findFirst({
+    where: {
+      usuarioId,
+      mascotaId,
+      fechaBaja: null,
+      mascota: { fechaBaja: null, ...deLaContraparte(contraparte) },
+    },
+    select: { id: true },
+  });
+}
+
+/**
+ * Una mascota del refugio, no eliminada y con una publicación activa. Sólo las publicadas
+ * porque la tarjeta lleva a la publicación: una sin publicar no tendría a dónde llevar.
+ */
+function publicadaDelRefugio(refugioId: number) {
+  return { refugioId, fechaBaja: null, publicaciones: { some: { fechaBaja: null } } };
+}
+
+/**
+ * Las mascotas que el REFUGIO puede compartir en una charla con un adoptante: las suyas que
+ * están publicadas, de la más nueva a la más vieja.
+ */
+export function listarMascotasPublicadasDeRefugio(refugioId: number) {
+  return prisma.mascota.findMany({
+    where: publicadaDelRefugio(refugioId),
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    select: MASCOTA_PARA_CHAT,
+  });
+}
+
+/** ¿Esta mascota es del refugio y está publicada? */
+export function buscarMascotaPublicadaDeRefugio(refugioId: number, mascotaId: number) {
+  return prisma.mascota.findFirst({
+    where: { id: mascotaId, ...publicadaDelRefugio(refugioId) },
+    select: { id: true },
+  });
+}
+
+/**
+ * La mascota de una tarjeta, resuelta en el momento del pedido: si la adoptaron o se despublicó
+ * después de compartirla, la tarjeta lo muestra. Trae también las eliminadas —la tarjeta queda
+ * en la conversación, como la de un aviso eliminado—.
+ */
+export function buscarMascotaParaChat(mascotaId: number) {
+  return prisma.mascota.findUnique({
+    where: { id: mascotaId },
+    select: { ...MASCOTA_PARA_CHAT, fechaBaja: true },
+  });
+}
+
+/** Lo que pinta la tarjeta de la ubicación: sale del perfil del refugio, en cada pedido. */
+export function buscarRefugioParaUbicacion(refugioId: number) {
+  return prisma.refugio.findUnique({
+    where: { id: refugioId },
+    select: {
+      id: true,
+      nombre: true,
+      imagenUrl: true,
+      calleAltura: true,
+      localidad: true,
+      provincia: true,
+      mapaUrl: true,
+    },
   });
 }

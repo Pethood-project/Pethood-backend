@@ -38,6 +38,23 @@ export async function actualizarMe(req: Request, res: Response, next: NextFuncti
   }
 }
 
+export async function subirDocumentos(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError('NO_AUTENTICADO', 'Falta el token de autenticación', 401);
+    }
+    const archivos = (req.files ?? {}) as service.ArchivosDocumentos;
+    const documentos = await service.subirDocumentos(req.usuario.usuarioId, archivos);
+    res.json({ mensaje: 'Recibimos tu documentación. La revisamos a la brevedad.', documentos });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function actualizarUbicacion(
   req: Request,
   res: Response,
@@ -79,6 +96,19 @@ export async function cambiarPassword(
     }
     await service.cambiarPassword(req.usuario.usuarioId, req.body as CambiarPasswordBody);
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** Carga única del DNI (spec 027). */
+export async function cargarDni(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError('NO_AUTENTICADO', 'Falta el token de autenticación', 401);
+    }
+    const usuario = await service.cargarDni(req.usuario.usuarioId, req.body.dni, req.ambito!);
+    res.json({ usuario });
   } catch (error) {
     next(error);
   }

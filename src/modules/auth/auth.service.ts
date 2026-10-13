@@ -9,6 +9,7 @@ import { aRefugioDeSesion } from '../../shared/refugioSesion';
 import { estaBloqueado, limpiarIntentos, registrarFallo } from '../../shared/rateLimit';
 import { ESTADO_USUARIO, ROL_API, rolApiADb, rolesDbAApi } from '../../shared/roles';
 import { r2Habilitado, subirImagenPerfil, type ArchivoSubida } from '../../shared/r2';
+import * as notificaciones from '../notificaciones/notificaciones.service';
 import type {
   LoginBody,
   RecuperarBody,
@@ -287,6 +288,17 @@ export async function registrar(
     detalle: `rol=${body.rol}`,
   });
 
+  await notificaciones.notificar({
+    usuarioId: usuario.id,
+    tipo: 'CUENTA_BIENVENIDA',
+    mensaje: `¡Bienvenido a PetHood, ${usuario.nombre}! Empezá completando tu perfil.`,
+    asuntoMail: '¡Bienvenido a PetHood!',
+    entidadTipo: 'PERFIL',
+    entidadId: usuario.id,
+    canal: { mail: true },
+    usuarioAlta: usuario.id,
+  });
+
   return aRespuesta(usuario);
 }
 
@@ -407,6 +419,14 @@ export async function solicitarRecuperacion(body: RecuperarBody): Promise<Respue
     entidadId: usuario.id,
   });
 
+  // Solo mail (regla 2: seguridad) y sin persistir en bandeja — el código en sí es sensible
+  // y, a diferencia del resto de las notificaciones, no tiene sentido que quede guardado.
+  await notificaciones.enviarMailDirecto({
+    to: usuario.email,
+    asunto: 'Tu código para restablecer la contraseña',
+    texto: `Tu código es ${codigo}. Vence en poco tiempo. Si no lo pediste vos, ignorá este mensaje.`,
+  });
+
   if (env.NODE_ENV !== 'production') {
     console.info(`[auth] Código de recuperación para ${usuario.email}: ${codigo}`);
     return { mensaje: MENSAJE_RECUPERAR, codigo };
@@ -442,5 +462,16 @@ export async function resetearPassword(body: ResetearBody): Promise<void> {
     accion: 'RESETEAR_CONTRASENA',
     entidad: 'Usuario',
     entidadId: usuario.id,
+  });
+
+  await notificaciones.notificar({
+    usuarioId: usuario.id,
+    tipo: 'CONTRASENA_CAMBIADA',
+    mensaje: 'Tu contraseña se cambió. Si no fuiste vos, contactate con nosotros ya mismo.',
+    asuntoMail: 'Tu contraseña de PetHood cambió',
+    entidadTipo: 'PERFIL',
+    entidadId: usuario.id,
+    canal: { mail: true, push: true },
+    usuarioAlta: usuario.id,
   });
 }

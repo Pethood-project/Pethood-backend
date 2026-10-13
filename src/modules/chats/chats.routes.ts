@@ -1,11 +1,12 @@
 import { Router } from 'express';
+import { requiereAmbito } from '../../middlewares/ambito';
 import { autenticar } from '../../middlewares/auth';
 import { comprimirImagen } from '../../middlewares/comprimirImagen';
 import { uploadAdjuntosChatOpcional, validarTamanioAdjuntos } from '../../middlewares/uploadImagen';
 import { validar } from '../../middlewares/validar';
 import { LIMITES } from '../../shared/validation/limits';
 import * as controller from './chats.controller';
-import { enviarMensajeSchema } from './chats.dto';
+import { compartirMascotaSchema, enviarMensajeSchema } from './chats.dto';
 
 export const chatsRouter = Router();
 
@@ -50,6 +51,37 @@ chatsRouter.post(
   comprimirImagen,
   validar(enviarMensajeSchema),
   controller.enviarMensaje,
+);
+
+// Eliminar un mensaje propio (baja lógica): en la sala queda el aviso "Se eliminó este
+// mensaje". Que sea del autor lo verifica el service; el ámbito, como en el resto de la sala.
+chatsRouter.delete('/:chatId/mensajes/:mensajeId', delAmbito, controller.eliminarMensaje);
+
+// Tarjetas de la hoja "Enviar en el chat" que manda una persona (2026-10-12). Cada par es un
+// GET para el diálogo que pregunta antes y un POST que deja la tarjeta.
+//
+// Compartir una mascota se puede desde los dos perfiles, con reglas distintas que decide el
+// service mirando la sala: como persona, una favorita que sea de la contraparte; como refugio,
+// una propia publicada. Mandar la ubicación es sólo del REFUGIO, y el service además verifica
+// que la sala sea del refugio de quien la manda.
+chatsRouter.get('/:chatId/mascotas-compartibles', delAmbito, controller.listarMascotasCompartibles);
+chatsRouter.post(
+  '/:chatId/mascotas',
+  delAmbito,
+  validar(compartirMascotaSchema),
+  controller.compartirMascota,
+);
+chatsRouter.get(
+  '/:chatId/ubicacion-refugio',
+  delAmbito,
+  requiereAmbito('REFUGIO'),
+  controller.obtenerUbicacionRefugio,
+);
+chatsRouter.post(
+  '/:chatId/ubicacion-refugio',
+  delAmbito,
+  requiereAmbito('REFUGIO'),
+  controller.enviarUbicacionRefugio,
 );
 
 // HU-5.2: marcar la conversación como leída. Es POST y no PATCH porque no se edita un

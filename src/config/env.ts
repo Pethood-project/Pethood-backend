@@ -24,6 +24,12 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_CLIENT_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   GOOGLE_REDIRECT_URI: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  // Mercado Pago (spec 027). Sin las cuatro, el módulo queda apagado y todo es manual.
+  MP_CLIENT_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MP_CLIENT_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MP_REDIRECT_URI: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  // 32 bytes en base64: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+  MP_CLAVE_CIFRADO: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   FRONTEND_WEB_URL: z.string().url().default('http://localhost:3001'),
   // Cloudflare R2: con R2_ENABLED=false el registro ignora la foto y no usa R2.
   // Con R2_ENABLED=true se exige el resto de keys; la foto se sube y se guarda el link.
@@ -33,6 +39,25 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   R2_BUCKET_NAME: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   R2_PUBLIC_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+
+  // Cola de notificaciones (spec 004): Redis para BullMQ. En dev apunta al `redis` de
+  // docker-compose; en producción, a Upstash (`rediss://...`).
+  REDIS_URL: z.string().default('redis://localhost:6379'),
+
+  // SMTP (mail transaccional). Sin usuario/contraseña, el envío de mail queda deshabilitado y
+  // solo se loguea — igual que R2, no debe tirar abajo el server en un ambiente sin configurar.
+  SMTP_HOST: z.string().default('smtp.gmail.com'),
+  SMTP_PORT: z.coerce.number().int().default(465),
+  SMTP_USER: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  SMTP_PASS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  // Mail al que se indica escribir en los avisos de cuenta (suspensión, baja).
+  MAIL_SOPORTE: z.string().email().default('pethood.mdz@gmail.com'),
+
+  // Expo Push. El "access token" solo hace falta si se activa Enhanced Security en el
+  // dashboard de Expo; sin él, el envío funciona igual.
+  EXPO_ACCESS_TOKEN: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+
   // Geocodificación de direcciones (node-geocoder). `openstreetmap` es gratis y no pide key;
   // `google` exige GEOCODER_API_KEY (lo verifica el refine de abajo).
   GEOCODER_PROVIDER: z.enum(['openstreetmap', 'google']).default('openstreetmap'),

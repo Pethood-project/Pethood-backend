@@ -37,13 +37,22 @@ enum GeneroMascota {
 // TEXTO es todo lo que escribe una persona, con o sin fotos. SOLICITUD es la tarjeta que
 // PetHood inserta en la sala cuando se envía una solicitud de adopción o tránsito: la emite
 // el usuario SISTEMA y lleva solicitud_id, para que el cliente pinte el estado y la mascota
-// sin pedir nada más.
+// sin pedir nada más. ANIMAL_PERDIDO es lo mismo con el aviso reclamado (HU-13.2).
+//
+// MASCOTA y UBICACION_REFUGIO (2026-10-12) son tarjetas que manda una PERSONA de la sala, no
+// SISTEMA: una mascota compartida (lleva mascota_id; una favorita de la contraparte, o una
+// publicada del propio refugio si la manda el refugio) y la ubicación del refugio, que manda
+// alguien del refugio (sale de chat.refugio_id, sin columna propia). Igual que las de sistema,
+// sus datos se resuelven en cada pedido.
 //
 // Es un enum de Prisma y no una tabla de catálogo porque son valores del dominio que el
 // código ramifica, como GeneroMascota, y no una lista que el administrador edite.
 enum TipoMensaje {
   TEXTO
   SOLICITUD
+  ANIMAL_PERDIDO
+  MASCOTA
+  UBICACION_REFUGIO
 
   @@map("tipo_mensaje")
 }
@@ -219,6 +228,25 @@ model EstadoCampania {
   @@map("estado_campania")
 }
 
+// Estado de una donación declarada (spec 026, HU-12.3): Pendiente hasta que el refugio la
+// aplica (Realizada, suma al progreso) o la rechaza (Cancelada, no suma).
+model EstadoDonacion {
+  id          Int     @id @default(autoincrement()) @map("estado_donacion_id")
+  nombre      String  @unique @map("estado_donacion_nombre")
+  descripcion String? @map("estado_donacion_descripcion")
+
+  usuarioAlta         Int       @map("estado_donacion_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("estado_donacion_fecha_alta")
+  usuarioModificacion Int?      @map("estado_donacion_usuario_modificacion")
+  fechaModificacion   DateTime? @map("estado_donacion_fecha_modificacion")
+  usuarioBaja         Int?      @map("estado_donacion_usuario_baja")
+  fechaBaja           DateTime? @map("estado_donacion_fecha_baja")
+
+  donaciones Donacion[]
+
+  @@map("estado_donacion")
+}
+
 model EstadoAnimalPerdido {
   id          Int     @id @default(autoincrement()) @map("estado_animal_perdido_id")
   nombre      String  @unique @map("estado_animal_perdido_nombre")
@@ -287,6 +315,9 @@ model Usuario {
   googleId        String?   @unique @map("usuario_google_id")
   verificado      Boolean   @default(false) @map("usuario_verificado")
   imagenUrl       String?   @map("usuario_imagen_url")
+  // Documentación de identidad (spec 002.1): foto del DNI y selfie. Privadas (URL firmada).
+  dniImagenUrl    String?   @map("usuario_dni_imagen_url")
+  selfieUrl       String?   @map("usuario_selfie_url")
   // Dirección estructurada del perfil, para geocodificar (node-geocoder). El texto que se
   // muestra es la concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
   provincia       String?   @map("usuario_provincia")
@@ -322,6 +353,7 @@ model Usuario {
   chats                UsuarioChat[]
   mensajes             Mensaje[]
   notificaciones       Notificacion[]
+  dispositivosPush     DispositivoPush[]
   hogares              Hogar[]
   donaciones           Donacion[]
   reportesPerdido      AnimalPerdido[]
@@ -386,6 +418,7 @@ model Refugio {
   usuarios             Usuario[]
   mascotas             Mascota[]
   campanias            Campania[]
+  conexionMercadoPago  ConexionMercadoPago?
   resenasComoReportado Resena[]   @relation("ResenaReportado")
   chats                Chat[]
 
@@ -430,6 +463,7 @@ model Mascota {
   favoritos        Favorito[]
   historiaClinica  HistoriaClinica[]
   reportesPerdido  AnimalPerdido[]
+  mensajes         Mensaje[]
 
   @@map("mascota")
 }
@@ -757,13 +791,22 @@ model Chat {
   // esta HU no salen de una solicitud.
   solicitudId Int? @map("solicitud_id")
 
+  // Aviso de animal perdido/encontrado que abrió la sala (HU-13.2). Mismo papel que
+  // `solicitudId`: es el ORIGEN de la conversación, no todo lo que se habló en ella.
+  //
+  // La sala es entre las partes, igual que la de una solicitud: si las dos personas ya se
+  // escribían, el reclamo cae en la conversación que tenían y esta columna queda en null.
+  // Lo que se habló vive en `Mensaje.animalPerdidoId`, una tarjeta por aviso.
+  animalPerdidoId Int? @map("animal_perdido_id")
+
   usuarioAlta Int       @map("chat_usuario_alta")
   fechaAlta   DateTime  @default(now()) @map("chat_fecha_alta")
   usuarioBaja Int?      @map("chat_usuario_baja")
   fechaBaja   DateTime? @map("chat_fecha_baja")
 
-  refugio   Refugio?   @relation(fields: [refugioId], references: [id])
-  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
+  refugio       Refugio?       @relation(fields: [refugioId], references: [id])
+  solicitud     Solicitud?     @relation(fields: [solicitudId], references: [id])
+  animalPerdido AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
 
   participantes UsuarioChat[]
   mensajes      Mensaje[]
@@ -806,14 +849,16 @@ model UsuarioChat {
   @@map("usuario_chat")
 }
 
-// Mensaje: solo alta, nunca baja ni modificación (MODELO_DATOS.md, excepción explícita).
+// Mensaje: alta y baja lógica, nunca modificación. La baja es la del autor al eliminar un
+// mensaje propio (decisión del 2026-10-12, ver MODELO_DATOS.md); antes era solo alta.
 //
 // La tabla no declara índices acá pero tiene dos en
 // `migrations/20260901120000_chat_indices_listado_conversaciones`:
 //
 // - `mensaje_chat_fecha_alta_idx` — (chat_id, fecha_alta DESC). Sostiene el DISTINCT ON que
 //   trae el último mensaje de todos los chats de un usuario en una sola query (HU-5.1) y el
-//   historial paginado de la sala (HU-5.2). No es parcial: no hay `fecha_baja` que filtrar.
+//   historial paginado de la sala (HU-5.2). No es parcial: un mensaje eliminado se sigue
+//   listando (como el aviso "Se eliminó este mensaje"), así que la baja no filtra filas.
 // - `mensaje_chat_usuario_no_leido_idx` — (chat_id, usuario_id) WHERE leido = false, para el
 //   contador de no leídos. Parcial porque las filas no leídas son una minoría que se achica
 //   sola a medida que se abren las salas.
@@ -840,15 +885,38 @@ model Mensaje {
   // Sólo en los mensajes de tipo SOLICITUD: la tarjeta que se pinta en la sala.
   solicitudId Int? @map("solicitud_id")
 
+  // Sólo en los de tipo ANIMAL_PERDIDO: la tarjeta del aviso reclamado (HU-13.2). Una sala
+  // puede acumular varias (dos avisos de la misma persona, o un aviso y una solicitud); un
+  // índice único parcial sobre (animal_perdido_id, chat_id) evita repetir la misma.
+  animalPerdidoId Int? @map("animal_perdido_id")
+
+  // Sólo en los de tipo MASCOTA: la mascota que alguien compartió en la sala, para la tarjeta
+  // con "Ver mascota". Se puede compartir la misma más de una vez: no hay índice único.
+  mascotaId Int? @map("mascota_id")
+
+  // El mensaje al que éste responde (deslizar para responder). Siempre de la misma sala y de
+  // tipo TEXTO: lo valida el service, que es el único que ve las dos filas.
+  mensajeRespondidoId Int? @map("mensaje_respondido_id")
+
   chatId    Int @map("chat_id")
   usuarioId Int @map("usuario_id")
 
   usuarioAlta Int      @map("mensaje_usuario_alta")
   fechaAlta   DateTime @default(now()) @map("mensaje_fecha_alta")
 
-  chat      Chat       @relation(fields: [chatId], references: [id])
-  usuario   Usuario    @relation(fields: [usuarioId], references: [id])
-  solicitud Solicitud? @relation(fields: [solicitudId], references: [id])
+  // El autor eliminó el mensaje. La fila y sus adjuntos se conservan —moderación los sigue
+  // viendo si alguien lo había reportado—, pero a la sala la API le manda sólo el aviso
+  // "Se eliminó este mensaje", sin contenido ni adjuntos.
+  usuarioBaja Int?      @map("mensaje_usuario_baja")
+  fechaBaja   DateTime? @map("mensaje_fecha_baja")
+
+  chat              Chat           @relation(fields: [chatId], references: [id])
+  usuario           Usuario        @relation(fields: [usuarioId], references: [id])
+  solicitud         Solicitud?     @relation(fields: [solicitudId], references: [id])
+  animalPerdido     AnimalPerdido? @relation(fields: [animalPerdidoId], references: [id])
+  mascota           Mascota?       @relation(fields: [mascotaId], references: [id])
+  mensajeRespondido Mensaje?       @relation("RespuestaMensaje", fields: [mensajeRespondidoId], references: [id])
+  respuestas        Mensaje[]      @relation("RespuestaMensaje")
 
   // Conteo de no leídos con el modelo nuevo: "mensajes de la sala que no emití yo y son
   // posteriores a mi última lectura". Los índices parciales de HU-5.1 siguen en SQL a mano.
@@ -859,11 +927,18 @@ model Mensaje {
 // ─────────────── NOTIFICACIONES ───────────────
 
 model Notificacion {
-  id        Int     @id @default(autoincrement()) @map("notificacion_id")
-  tipo      String  @map("notificacion_tipo")
-  mensaje   String  @map("notificacion_mensaje")
-  leido     Boolean @default(false) @map("notificacion_leido")
-  usuarioId Int     @map("usuario_id")
+  id      Int     @id @default(autoincrement()) @map("notificacion_id")
+  tipo    String  @map("notificacion_tipo")
+  mensaje String  @map("notificacion_mensaje")
+  leido   Boolean @default(false) @map("notificacion_leido")
+
+  // Navegación polimórfica (spec 004): a qué pantalla ir al tocarla. NO es una FK real —
+  // apunta a Solicitud, Chat, Seguimiento, Publicacion, Refugio, etc. según `entidadTipo`. Si
+  // la entidad ya no existe, el cliente lo muestra como "ya no disponible" en vez de romper.
+  entidadTipo String? @map("notificacion_entidad_tipo")
+  entidadId   Int?    @map("notificacion_entidad_id")
+
+  usuarioId Int @map("usuario_id")
 
   usuarioAlta         Int       @map("notificacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("notificacion_fecha_alta")
@@ -874,7 +949,35 @@ model Notificacion {
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
+  // Bandeja (GET /notificaciones): más recientes primero, solo las propias y no dadas de baja.
+  @@index([usuarioId, fechaBaja, fechaAlta])
+  // Upsert del mensaje de chat agrupado: "la notificación de CHAT sin leer de este chat".
+  @@index([usuarioId, entidadTipo, entidadId, leido])
   @@map("notificacion")
+}
+
+model DispositivoPush {
+  id             Int    @id @default(autoincrement()) @map("dispositivo_push_id")
+  expoPushToken  String @map("dispositivo_push_expo_push_token")
+  plataforma     String @map("dispositivo_push_plataforma") // 'ios' | 'android'
+  usuarioId      Int    @map("usuario_id")
+
+  usuarioAlta         Int       @map("dispositivo_push_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("dispositivo_push_fecha_alta")
+  usuarioModificacion Int?      @map("dispositivo_push_usuario_modificacion")
+  fechaModificacion   DateTime? @map("dispositivo_push_fecha_modificacion")
+  usuarioBaja         Int?      @map("dispositivo_push_usuario_baja")
+  fechaBaja           DateTime? @map("dispositivo_push_fecha_baja")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  // Mismo dispositivo físico puede haber tenido push de otro usuario antes (dispositivo
+  // compartido): la unicidad es por par, no por token solo. Reloguearse el mismo usuario en el
+  // mismo dispositivo actualiza esta fila (upsert) en vez de duplicarla.
+  @@unique([usuarioId, expoPushToken])
+  // Envío: "todos los dispositivos activos de este usuario".
+  @@index([usuarioId, fechaBaja])
+  @@map("dispositivo_push")
 }
 
 // ─────────────── HOGARES DE TRÁNSITO ───────────────
@@ -934,6 +1037,9 @@ model Campania {
   fechaInicio      DateTime @map("campania_fecha_inicio")
   fechaFin         DateTime @map("campania_fecha_fin")
   imagenUrl        String?  @map("campania_imagen_url")
+  // Datos para transferir (spec 026): al menos uno de los dos, lo exige el DTO.
+  alias            String?  @map("campania_alias")
+  cbu              String?  @map("campania_cbu")
   refugioId        Int      @map("refugio_id")
   estadoCampaniaId Int      @map("estado_campania_id")
 
@@ -949,6 +1055,7 @@ model Campania {
 
   donaciones Donacion[]
 
+  @@index([refugioId, estadoCampaniaId])
   @@map("campania")
 }
 
@@ -957,6 +1064,16 @@ model Donacion {
   monto      Decimal @map("donacion_monto") @db.Decimal(12, 2)
   campaniaId Int     @map("campania_id")
   usuarioId  Int     @map("usuario_id")
+
+  estadoDonacionId Int     @map("estado_donacion_id")
+  /// NO_RECIBIDA | MONTO_NO_COINCIDE. Sólo en una donación Cancelada.
+  motivoRechazo    String? @map("donacion_motivo_rechazo")
+  /// Id del pago de Mercado Pago que la confirmó sola (spec 027). Único: una transferencia
+  /// no confirma dos donaciones.
+  mpPagoId         String? @unique @map("donacion_mp_pago_id")
+  /// MERCADO_PAGO | OTRO_BANCO: desde dónde dijo el donante que transfirió (spec 027). Sólo las
+  /// de Mercado Pago se confirman solas. Nulo en las donaciones anteriores a este campo.
+  origen           String? @map("donacion_origen")
 
   usuarioAlta         Int       @map("donacion_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("donacion_fecha_alta")
@@ -968,7 +1085,34 @@ model Donacion {
   campania Campania @relation(fields: [campaniaId], references: [id])
   usuario  Usuario  @relation(fields: [usuarioId], references: [id])
 
+  estadoDonacion EstadoDonacion @relation(fields: [estadoDonacionId], references: [id])
+
+  @@index([campaniaId, estadoDonacionId])
   @@map("donacion")
+}
+
+// Conexión de un refugio con su cuenta de Mercado Pago por OAuth (spec 027). Una por
+// refugio: revincular reactiva la misma fila. Los tokens van cifrados (shared/cifrado.ts).
+model ConexionMercadoPago {
+  id           Int      @id @default(autoincrement()) @map("conexion_mp_id")
+  refugioId    Int      @unique @map("refugio_id")
+  mpUserId     String   @map("conexion_mp_user_id")
+  accessToken  String   @map("conexion_mp_access_token")
+  refreshToken String   @map("conexion_mp_refresh_token")
+  vence        DateTime @map("conexion_mp_vence")
+  /// VINCULADA | REVINCULAR
+  estado       String   @map("conexion_mp_estado")
+
+  usuarioAlta         Int       @map("conexion_mp_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("conexion_mp_fecha_alta")
+  usuarioModificacion Int?      @map("conexion_mp_usuario_modificacion")
+  fechaModificacion   DateTime? @map("conexion_mp_fecha_modificacion")
+  usuarioBaja         Int?      @map("conexion_mp_usuario_baja")
+  fechaBaja           DateTime? @map("conexion_mp_fecha_baja")
+
+  refugio Refugio @relation(fields: [refugioId], references: [id])
+
+  @@map("conexion_mercado_pago")
 }
 
 // ─────────────── MASCOTAS PERDIDAS Y ENCONTRADAS ───────────────
@@ -1037,6 +1181,10 @@ model AnimalPerdido {
   mascota             Mascota?            @relation(fields: [mascotaId], references: [id])
   especie             Especie?            @relation(fields: [especieId], references: [id])
   estadoAnimalPerdido EstadoAnimalPerdido @relation(fields: [estadoAnimalPerdidoId], references: [id])
+
+  // Las salas que abrió este aviso (HU-13.2) y las tarjetas que dejó en una conversación.
+  chats    Chat[]
+  mensajes Mensaje[]
 
   @@index([especieId])
   // Filtro por provincia y localidad del portal.

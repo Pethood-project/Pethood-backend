@@ -13,6 +13,12 @@ adminUsuariosRouter.use(autenticar, requiereRol(ROL_API.ADMIN));
 adminUsuariosRouter.get('/usuarios', controller.listarUsuarios);
 adminUsuariosRouter.get('/usuarios/:id', controller.obtenerUsuario);
 adminUsuariosRouter.patch('/usuarios/:id/verificar', controller.verificarUsuario);
+// Baja lógica de DNI/selfie de un usuario verificado: vuelve a Pendiente_Verificacion.
+adminUsuariosRouter.patch(
+  '/usuarios/:id/documentos/baja',
+  validar(motivoBodySchema),
+  controller.revocarVerificacion,
+);
 adminUsuariosRouter.patch(
   '/usuarios/:id/suspender',
   validar(motivoBodySchema),

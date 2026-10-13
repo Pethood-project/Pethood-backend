@@ -56,6 +56,25 @@ function mapearErrorUnico(error: unknown): never {
   throw error;
 }
 
+/** Cuentas activas, registradas hace 2 días o más, con foto, teléfono o localidad sin cargar
+ * (spec 004: recordatorio de "perfil incompleto"). El job de arriba decide si ya se avisó. */
+export function listarPerfilesIncompletos(desde: Date) {
+  return prisma.usuario.findMany({
+    where: {
+      fechaBaja: null,
+      fechaAlta: { lte: desde },
+      OR: [
+        { imagenUrl: null },
+        { telefono: null },
+        { provincia: null },
+        { localidad: null },
+        { calleAltura: null },
+      ],
+    },
+    select: { id: true, nombre: true },
+  });
+}
+
 export async function buscarPerfil(usuarioId: number): Promise<UsuarioPerfil | null> {
   return prisma.usuario.findFirst({
     where: { id: usuarioId, fechaBaja: null },
@@ -126,6 +145,36 @@ export async function actualizarPerfil(
     });
   } catch (error) {
     mapearErrorUnico(error);
+  }
+}
+
+/**
+ * Reemplaza el DNI y/o la selfie (spec 002.1). No toca `verificado` ni el estado.
+ *
+ * El estado se exige en el propio `where` y no sólo en el service: entre el chequeo y la
+ * escritura una cuenta puede pasar a Suspendido/Inactivo. Si ya no califica, Prisma lanza
+ * P2025 y se devuelve `null`.
+ */
+export async function actualizarDocumentos(
+  usuarioId: number,
+  datos: { dniImagenUrl?: string; selfieUrl?: string },
+  estadosPermitidos: string[],
+): Promise<UsuarioPerfil | null> {
+  try {
+    return await prisma.usuario.update({
+      where: { id: usuarioId, fechaBaja: null, estado: { nombre: { in: estadosPermitidos } } },
+      data: {
+        ...(datos.dniImagenUrl ? { dniImagenUrl: datos.dniImagenUrl } : {}),
+        ...(datos.selfieUrl ? { selfieUrl: datos.selfieUrl } : {}),
+        ...datosModificacion(usuarioId),
+      },
+      include: includePerfil,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -279,4 +328,13 @@ export function buscarPerfilPublico(id: number) {
       estado: { select: { nombre: true } },
     },
   });
+}
+
+/** Carga el DNI sólo si todavía no tiene (spec 027 §6.11). `false` si ya tenía. */
+export async function guardarDni(usuarioId: number, dni: string): Promise<boolean> {
+  const { count } = await prisma.usuario.updateMany({
+    where: { id: usuarioId, fechaBaja: null, dni: null },
+    data: { dni, ...datosModificacion(usuarioId) },
+  });
+  return count === 1;
 }

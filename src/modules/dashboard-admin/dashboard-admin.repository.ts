@@ -1,4 +1,5 @@
 import { prisma } from '../../shared/prisma';
+import { ESTADO_DONACION } from '../campanias/campanias.estados';
 
 /** Vigente = fila sin fechaBaja. Usuario/Refugio/Publicacion tienen estado directo o baja lógica propia. */
 
@@ -58,10 +59,13 @@ export function contarCampaniasActivas() {
   });
 }
 
-/** "Declarado": ver spec 009 §3 — Donacion no tiene campo de confirmación en el schema actual. */
+/**
+ * Sólo donaciones Realizada: las que el refugio confirmó (spec 026, regla transversal 11). El
+ * nombre y el campo `montoDonadoDeclarado` de la API se conservan para no romper web-admin.
+ */
 export async function sumarMontoDonadoDeclarado(): Promise<number> {
   const resultado = await prisma.donacion.aggregate({
-    where: { fechaBaja: null },
+    where: { fechaBaja: null, estadoDonacion: { nombre: ESTADO_DONACION.REALIZADA } },
     _sum: { monto: true },
   });
 

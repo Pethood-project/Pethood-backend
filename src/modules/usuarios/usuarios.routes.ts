@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { autenticar } from '../../middlewares/auth';
 import { comprimirImagen } from '../../middlewares/comprimirImagen';
-import { uploadImagenOpcional } from '../../middlewares/uploadImagen';
+import { uploadImagenCampos, uploadImagenOpcional } from '../../middlewares/uploadImagen';
 import { validar } from '../../middlewares/validar';
 import * as controller from './usuarios.controller';
 import {
   actualizarPerfilBodySchema,
+  cargarDniBodySchema,
   actualizarUbicacionBodySchema,
   cambiarPasswordBodySchema,
   previewUbicacionBodySchema,
@@ -22,6 +23,17 @@ usuariosRouter.patch(
   validar(actualizarPerfilBodySchema),
   controller.actualizarMe,
 );
+// Foto del DNI + selfie para la verificación de identidad (spec 002.1). Multipart:
+// `dni_imagen` y/o `selfie`; subir de nuevo reemplaza.
+usuariosRouter.post(
+  '/me/documentos',
+  autenticar,
+  uploadImagenCampos(['dni_imagen', 'selfie']),
+  comprimirImagen,
+  controller.subirDocumentos,
+);
+// Carga única del DNI (spec 027): con DNI ya cargado responde DNI_YA_CARGADO.
+usuariosRouter.patch('/me/dni', autenticar, validar(cargarDniBodySchema), controller.cargarDni);
 usuariosRouter.patch(
   '/me/password',
   autenticar,
