@@ -143,6 +143,67 @@ export async function eliminarMensaje(
   }
 }
 
+/** Las mascotas que se pueden compartir en la sala: favoritas y de la contraparte. */
+export async function listarMascotasCompartibles(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    res.json(await service.listarMascotasCompartibles(req.usuario!.usuarioId, chatId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Comparte una mascota: 201 con el mensaje de la tarjeta, igual que un envío. */
+export async function compartirMascota(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    const mensaje = await service.compartirMascota(
+      req.usuario!.usuarioId,
+      chatId,
+      req.body.mascotaId,
+    );
+    res.status(201).json(mensaje);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Lo que mandaría el refugio como ubicación, para el diálogo que pregunta antes. */
+export async function obtenerUbicacionRefugio(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    res.json(await service.obtenerUbicacionRefugio(req.usuario!.usuarioId, chatId));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Manda la ubicación del refugio: 201 con el mensaje de la tarjeta, igual que un envío. */
+export async function enviarUbicacionRefugio(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const chatId = exigirChatId(req);
+    res.status(201).json(await service.enviarUbicacionRefugio(req.usuario!.usuarioId, chatId));
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** HU-5.2. Marca leída la conversación al abrirla. Devuelve el contador para HU-5.1. */
 export async function marcarLeidos(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

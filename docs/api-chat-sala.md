@@ -51,6 +51,8 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
   "fechaLectura": null,
   "solicitud": null,
   "aviso": null,
+  "mascota": null,
+  "ubicacion": null,
   "eliminado": false,
   "respondeA": null,
   "fechaAlta": "2026-09-01T14:05:00.000Z"
@@ -66,12 +68,14 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
 | `imagenes` | **Todas** las fotos, en el orden en que se enviaron. Vacío si el mensaje es solo texto. Hasta 5. Puede contener la URL de un video |
 | `adjuntos` | Las **mismas** URLs de `imagenes`, cada una con su `tipo`: `{ url, tipo: "IMAGEN" \| "VIDEO" }`. Es el campo a usar de ahora en más |
 | `usuarioId` | **Id del emisor.** El cliente lo compara con su sesión para decidir el lado de la burbuja |
-| `tipo` | `"TEXTO"`, `"SOLICITUD"` o `"ANIMAL_PERDIDO"`. Ver "Mensajes de sistema" |
+| `tipo` | `"TEXTO"`, `"SOLICITUD"`, `"ANIMAL_PERDIDO"`, `"MASCOTA"` o `"UBICACION_REFUGIO"`. Ver "Mensajes de sistema" y «Tarjetas que manda una persona» |
 | `entregado` | Le llegó al destinatario, aunque no lo haya abierto → **segundo tilde** |
 | `leido` | El destinatario lo leyó → **doble tilde pintado**. Un mensaje leído está siempre entregado |
 | `fechaLectura` | Cuándo lo leyó, ISO 8601 crudo, o `null` si todavía no |
 | `solicitud` | Sólo en los de `tipo: "SOLICITUD"`. Ver "Mensajes de sistema" |
 | `aviso` | Sólo en los de `tipo: "ANIMAL_PERDIDO"` (HU-13.2). Ver "Mensajes de sistema" |
+| `mascota` | Sólo en los de `tipo: "MASCOTA"`. Ver «Tarjetas que manda una persona» |
+| `ubicacion` | Sólo en los de `tipo: "UBICACION_REFUGIO"`. Ver «Tarjetas que manda una persona» |
 | `eliminado` | Su autor lo eliminó. Sigue en el historial pero **viaja vacío**: `contenido: ""`, sin adjuntos y con `respondeA: null`. Ver «Responder y eliminar» |
 | `respondeA` | El mensaje al que responde, resumido para la cita, o `null`. Ver «Responder y eliminar» |
 | `fechaAlta` | ISO 8601 crudo |
@@ -641,7 +645,7 @@ volver a escribir ni a emitir.
 | 401 | `NO_AUTENTICADO` | — | Sin token |
 | 403 | `SIN_ACCESO_AL_CHAT` | No tenés acceso a esta conversación | No sos participante activo |
 | 403 | `AMBITO_NO_PERMITIDO` | Esta conversación es de tu otro perfil… | La sala es del otro perfil (switch refugio/adoptante) |
-| 403 | `MENSAJE_AJENO` | Sólo podés eliminar los mensajes que enviaste vos | El mensaje es del otro, o es una tarjeta de sistema. Un mensaje ajeno se reporta |
+| 403 | `MENSAJE_AJENO` | Sólo podés eliminar los mensajes que enviaste vos | El mensaje es del otro, o es una tarjeta de sistema. Un mensaje ajeno se reporta. Las tarjetas que manda una persona (mascota, ubicación) sí las puede eliminar su autor |
 | 404 | `MENSAJE_NO_ENCONTRADO` | El mensaje no existe | No existe, es de **otra** sala, o el `:mensajeId` no es un número |
 
 **No depende de que el contacto siga activo**: retirar lo que uno dijo no es escribirle.
@@ -656,6 +660,122 @@ volver a escribir ni a emitir.
 - **Un mensaje eliminado ya no se puede reportar** (para quien reporta, ya no existe), pero un
   reporte anterior sigue: el admin lo ve con estado `DE_BAJA` y el contexto del reporte trae
   `fechaBaja` en cada mensaje.
+
+---
+
+## Tarjetas que manda una persona: mascota y ubicación del refugio
+
+Dos opciones de la hoja "Enviar en el chat" que dejan una **tarjeta** en vez de una burbuja.
+Las pidió el equipo el 2026-10-12, sin HU (ver la nota del Módulo 5 en `REQUISITOS.md`).
+
+A diferencia de `SOLICITUD` y `ANIMAL_PERDIDO`, **no las emite SISTEMA: las manda una persona**
+de la sala. Por eso van de su lado, llevan acuse como un texto y su autor las puede eliminar
+(`DELETE /chats/:chatId/mensajes/:mensajeId`). No se responden ni se reportan. Su `contenido` va
+vacío y, como las de sistema, **sus datos se resuelven en cada pedido**.
+
+Las dos devuelven `201` con el objeto `Mensaje` completo, emiten `chat:mensaje-nuevo` y avisan
+al otro por bandeja/push igual que un texto ("Te compartió a Greta", "Te mandó la ubicación del
+refugio").
+
+### Compartir una mascota — los dos perfiles, con reglas distintas
+
+La regla depende de **quién comparte**, y la decide el service mirando la sala (no la cabecera):
+
+- **Como persona:** sólo una mascota que **tiene en favoritos** y que **es de su contacto** — de
+  ese refugio, o una mascota personal de esa persona (una que alguien publicó a nombre de su
+  refugio no es "suya" en una charla personal). Sirve para decir "me interesa esta tuya", no
+  para recomendar mascotas de terceros.
+- **Como refugio** (la sala es de su refugio): sólo una **mascota propia del refugio que está
+  publicada**. Sirve para mostrarle al adoptante otra mascota que podría adoptar; el refugio
+  no tiene favoritos. Sólo las publicadas porque la tarjeta lleva a la publicación.
+
+#### `GET /api/v1/chats/:chatId/mascotas-compartibles`
+
+La lista para elegir. Como persona, de la favorita más reciente a la más vieja (el orden de
+Favoritos); como refugio, de la mascota más nueva a la más vieja:
+
+```json
+{
+  "mascotas": [
+    {
+      "id": 5,
+      "nombre": "Greta",
+      "especie": "Perro",
+      "raza": "Mestiza",
+      "genero": "HEMBRA",
+      "tamanio": "MEDIANO",
+      "fechaNacimiento": "2023-04-10",
+      "imagenUrl": "/api/v1/archivos/publicaciones/greta.jpg",
+      "estado": "Disponible",
+      "publicacionId": 90
+    }
+  ]
+}
+```
+
+Vacía si no hay ninguna que cumpla la regla: es un estado normal, no un error.
+
+#### `POST /api/v1/chats/:chatId/mascotas`
+
+```json
+{ "mascotaId": 5 }
+```
+
+El mensaje que vuelve trae la mascota en `mascota`, con la misma forma que la lista:
+
+| Campo de `mascota` | Qué es |
+|---|---|
+| `nombre` | Puede ser `null`: mostrar la especie en su lugar |
+| `fechaNacimiento` | Sólo el día, o `null`. La edad la calcula el cliente |
+| `imagenUrl` | La foto de la publicación, o la de la mascota si aquélla no tiene |
+| `estado` | Estado **vigente** de la mascota, o `null` |
+| `publicacionId` | La publicación activa: es a donde lleva "Ver mascota". `null` si ya no está publicada (o la mascota se eliminó): el cliente esconde el botón |
+
+| HTTP | `codigo` | Cuándo |
+|---|---|---|
+| 409 | `MASCOTA_NO_COMPARTIBLE` | Como persona: la mascota no está en tus favoritos o no es de tu contacto (el mensaje lo nombra: "…que sean de Huellitas del Sur"). Como refugio: no es del refugio o no está publicada |
+| 409 | `CONTACTO_INACTIVO` | El contacto se dio de baja, igual que al escribir |
+| 400 | `VALIDACION` | `mascotaId` no es un id |
+
+Se puede compartir la misma mascota más de una vez: no hay índice único.
+
+### Ubicación del refugio — sólo vista de refugio
+
+La manda alguien del refugio de la sala. Sale **del perfil del refugio**: la dirección
+(«calle y altura, localidad - provincia») y el link de Google Maps. Las dos rutas responden
+`403 AMBITO_NO_PERMITIDO` desde el perfil personal, y además el service mira el dato: la sala
+tiene que ser **de su refugio** (`SOLO_REFUGIO`), no de otro refugio con el que habla como
+adoptante.
+
+#### `GET /api/v1/chats/:chatId/ubicacion-refugio`
+
+Lo que se va a mandar, para el diálogo que pregunta antes. Es la misma forma que el campo
+`ubicacion` del mensaje:
+
+```json
+{
+  "refugioId": 3,
+  "nombre": "Huellitas del Sur",
+  "imagenUrl": "/api/v1/archivos/refugios/huellitas.jpg",
+  "ubicacion": "San Martín 1200, Godoy Cruz - Mendoza",
+  "mapaUrl": "https://maps.app.goo.gl/huellitas"
+}
+```
+
+`ubicacion` o `mapaUrl` pueden venir en `null`, pero nunca los dos: sin ninguno responde
+`REFUGIO_SIN_UBICACION` y el cliente explica dónde cargarla.
+
+#### `POST /api/v1/chats/:chatId/ubicacion-refugio`
+
+Sin body. El mensaje que vuelve trae la ubicación en `ubicacion`. **Se resuelve en cada
+pedido**: si el refugio cambia su dirección, las tarjetas viejas muestran la nueva.
+
+| HTTP | `codigo` | Cuándo |
+|---|---|---|
+| 403 | `AMBITO_NO_PERMITIDO` | Desde el perfil personal |
+| 403 | `SOLO_REFUGIO` | La sala no es del refugio de quien la manda (o es entre personas) |
+| 409 | `REFUGIO_SIN_UBICACION` | El perfil del refugio no tiene ni dirección ni link de Maps |
+| 409 | `CONTACTO_INACTIVO` | El contacto se dio de baja |
 
 ---
 
