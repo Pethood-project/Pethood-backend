@@ -34,7 +34,10 @@ describe('validarPasswordNueva', () => {
     ['sin número', 'Secretaaa!!'],
     ['sin símbolo', 'Secreta1234'],
   ])('rechaza %s', (_motivo, password) => {
-    expect(validarPasswordNueva(password)).toEqual({ valido: false, error: MENSAJE_PASSWORD_NUEVA });
+    expect(validarPasswordNueva(password)).toEqual({
+      valido: false,
+      error: MENSAJE_PASSWORD_NUEVA,
+    });
   });
 
   it('el espacio no cuenta como símbolo', () => {
