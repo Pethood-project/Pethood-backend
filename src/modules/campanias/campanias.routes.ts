@@ -42,7 +42,17 @@ campaniasRefugioRouter.post(
   controller.crear,
 );
 
-// HU-12.5 / HU-12.6: finalizar o cancelar.
+// Spec 028: editar (imagen opcional en `imagen`) y eliminar (baja lógica, sin donaciones).
+campaniasRefugioRouter.patch(
+  '/campanias/:id',
+  ...soloRefugio,
+  uploadImagen('imagen'),
+  comprimirImagen,
+  controller.editar,
+);
+campaniasRefugioRouter.delete('/campanias/:id', ...soloRefugio, controller.eliminar);
+
+// HU-12.6 y spec 028: finalizar, pausar o reactivar.
 campaniasRefugioRouter.patch('/campanias/:id/estado', ...soloRefugio, controller.cambiarEstado);
 
 // HU-12.3: bandeja de revisión y aplicar/rechazar.

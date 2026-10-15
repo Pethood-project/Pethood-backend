@@ -724,7 +724,7 @@ lo pide todavía.
 
 ## 35. La quota de campañas no es atómica — Baja
 
-**Qué pasa.** El alta de campaña cuenta las Inactiva + Activa del refugio y después crea
+**Qué pasa.** El alta de campaña cuenta las Inactiva + Activa + Pausada del refugio y después crea
 (spec 026 §6.3). Dos altas simultáneas del mismo refugio pueden pasar las dos el conteo y
 dejar 6 campañas vigentes. Es el mismo criterio que el resto de las quotas del proyecto.
 

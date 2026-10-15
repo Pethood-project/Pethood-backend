@@ -25,7 +25,7 @@ interface DefCampania {
   titulo: string;
   descripcion: string;
   refugio: 'patitas' | 'huellitas';
-  estado: 'Activa' | 'Finalizada' | 'Cancelada' | 'Inactiva';
+  estado: 'Activa' | 'Finalizada' | 'Pausada' | 'Inactiva';
   objetivo: number;
   inicioHaceMeses: number;
   finEnDias: number;
@@ -96,12 +96,12 @@ const CAMPANIAS: DefCampania[] = [
   {
     titulo: 'Rifa solidaria de fin de año',
     descripcion:
-      'Rifa con premios donados por comercios de la zona. Se suspendió por falta de premios.',
+      'Rifa con premios donados por comercios de la zona. La pausamos hasta juntar más premios.',
     refugio: 'patitas',
-    estado: 'Cancelada',
+    estado: 'Pausada',
     objetivo: 90000,
-    inicioHaceMeses: 8,
-    finEnDias: -200,
+    inicioHaceMeses: 1,
+    finEnDias: 45,
     alias: 'patitas.rifa.mp',
     donaciones: [],
   },

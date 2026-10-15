@@ -1,6 +1,6 @@
 # Contrato de API — Campañas de donación
 
-Endpoints de **HU-12.1 a HU-12.7 (Campañas de Recaudación)**, listos para consumir desde `pethood-frontend`. Están implementados, testeados y verificados contra el servidor local con las campañas del seed. Alcance, reglas y criterios de aceptación: [spec 026](specs/026-campanias.md).
+Endpoints de **HU-12.1 a HU-12.7 (Campañas de Recaudación)**, listos para consumir desde `pethood-frontend`. Están implementados, testeados y verificados contra el servidor local con las campañas del seed. Alcance, reglas y criterios de aceptación: [spec 026](specs/026-campanias.md). Editar, pausar y eliminar: [spec 028](specs/028-editar-campanias.md).
 
 > Este documento describe **solo lo que el backend expone**. Los textos de UI y las reglas de la pantalla salen de `REQUISITOS.md` y de la spec.
 
@@ -25,7 +25,7 @@ X-Ambito: PERSONAL | REFUGIO
 **Formato de error**, siempre el mismo:
 
 ```json
-{ "error": { "codigo": "LIMITE_CAMPANIAS", "mensaje": "Alcanzaste el límite de 5 campañas activas. Finalizá o cancelá una para crear otra" } }
+{ "error": { "codigo": "LIMITE_CAMPANIAS", "mensaje": "Alcanzaste el límite de 5 campañas activas. Finalizá o eliminá una para crear otra" } }
 ```
 
 El `mensaje` viene en español con voseo y **se puede mostrar tal cual en el toast**.
@@ -69,9 +69,9 @@ Igual en el portal, en el detalle y en «Mis Campañas»:
 | `alias` / `cbu` | Al menos uno viene cargado (salvo campañas sembradas antes de la spec 026). |
 | `imagenUrl` | Ruta relativa: pasarla por `urlAbsoluta`. `null` sólo en campañas viejas del seed. |
 
-En «Mis Campañas» cada campaña suma **`pendientes`**: cuántas donaciones esperan revisión.
+En «Mis Campañas» cada campaña suma **`pendientes`** (cuántas donaciones esperan revisión) y **`tieneDonaciones`** (alguien avisó que donó, en cualquier estado: si es `true`, no se puede eliminar).
 
-Estados (`estado.nombre`): `Inactiva` (todavía no empezó), `Activa`, `Finalizada`, `Cancelada`.
+Estados (`estado.nombre`): `Inactiva` (todavía no empezó), `Activa`, `Pausada` (no se muestra en el portal ni recibe donaciones), `Finalizada`. `Cancelada` dejó de existir (spec 028): las que había pasaron a `Finalizada`.
 
 ## La donación
 
@@ -163,23 +163,60 @@ Al menos uno de `alias` o `cbu`.
 | `VALIDACION` | 400 | «Cargá el alias o el CBU/CVU para que puedan donarte», «La fecha de fin tiene que ser posterior a la de inicio», «La fecha de inicio no puede ser anterior a hoy», «El objetivo debe ser un número entero, sin puntos ni comas», etc. |
 | `IMAGEN_REQUERIDA` | 400 | «Agregá una imagen para la campaña» |
 | `REFUGIO_NO_HABILITADO` | 403 | «Tu refugio tiene que estar verificado y activo para crear campañas» |
-| `LIMITE_CAMPANIAS` | 409 | «Alcanzaste el límite de 5 campañas activas. Finalizá o cancelá una para crear otra» (cuentan Inactiva + Activa) |
+| `LIMITE_CAMPANIAS` | 409 | «Alcanzaste el límite de 5 campañas activas. Finalizá o eliminá una para crear otra» (cuentan Inactiva + Activa + Pausada) |
 
-## `PATCH /api/v1/refugio/campanias/:id/estado` — Finalizar o cancelar (HU-12.5, HU-12.6)
+## `PATCH /api/v1/refugio/campanias/:id` — Editar (spec 028)
 
-Perfil **REFUGIO**. **Body:** `{ "estado": "Finalizada" }` o `{ "estado": "Cancelada" }`.
+Perfil **REFUGIO**. Sólo campañas **Inactiva**, **Activa** o **Pausada**.
 
-- Finalizar: sólo desde **Activa**.
-- Cancelar (dar de baja): desde **Inactiva** o **Activa**. No llena `fecha_baja`: la campaña sigue apareciendo con el filtro «Cancelada».
-- Finalizada y Cancelada son finales.
+**Body (multipart), todo opcional** (lo que no llega no cambia):
 
-**Respuesta 200:** la campaña actualizada (con `pendientes`). Las donaciones pendientes se pueden seguir revisando.
+| Campo | Regla |
+| --- | --- |
+| `titulo` | 3 a 50 caracteres, trim |
+| `descripcion` | Hasta 300 caracteres, trim |
+| `objetivo` | Sólo números, de 10000 a 2500000, y **no menor a `recaudado`** |
+| `fechaFin` | `AAAA-MM-DD`, **posterior a hoy** y posterior a `fechaInicio` |
+| `imagen` | Archivo jpg/png/webp, ≤5 MB. Reemplaza a la anterior |
+
+`alias`, `cbu` y `fechaInicio` no se pueden modificar: mandarlos es un 400.
+
+**Respuesta 200:** la campaña actualizada (como en «Mis Campañas»). Si la nueva meta es igual a lo recaudado, la campaña llegó a su meta y vuelve **Finalizada**.
 
 | Código | HTTP | Mensaje |
 | --- | --- | --- |
-| `VALIDACION` | 400 | «El estado tiene que ser "Finalizada" o "Cancelada"» |
+| `VALIDACION` | 400 | «La fecha de fin debe ser posterior a hoy», «La fecha de fin tiene que ser posterior a la de inicio», «El alias no se puede modificar», «El CBU/CVU no se puede modificar», «La fecha de inicio no se puede modificar», etc. |
+| `SIN_CAMBIOS` | 400 | «No hay cambios para guardar» |
+| `CAMPANIA_NO_ENCONTRADA` | 404 | No existe, es de otro refugio o fue eliminada |
+| `CAMPANIA_NO_EDITABLE` | 409 | «Una campaña finalizada no se puede editar» (también si la finalizaron mientras se editaba) |
+| `OBJETIVO_MENOR_A_RECAUDADO` | 409 | «La meta no puede ser menor a lo que ya recaudaste ($57.000)» |
+
+## `DELETE /api/v1/refugio/campanias/:id` — Eliminar (spec 028)
+
+Perfil **REFUGIO**. Baja lógica, en cualquier estado, sólo si la campaña **no tiene ninguna donación** (ni pendiente, ni aplicada, ni rechazada). Desaparece de «Mis Campañas» y el detalle pasa a responder 404.
+
+**Respuesta 204** sin cuerpo.
+
+| Código | HTTP | Mensaje |
+| --- | --- | --- |
+| `CAMPANIA_NO_ENCONTRADA` | 404 | No existe, es de otro refugio o ya fue eliminada |
+| `CAMPANIA_CON_DONACIONES` | 409 | «No podés eliminar una campaña que ya recibió donaciones. Podés finalizarla» |
+
+## `PATCH /api/v1/refugio/campanias/:id/estado` — Finalizar, pausar o reactivar (HU-12.6, spec 028)
+
+Perfil **REFUGIO**. **Body:** `{ "estado": "Finalizada" | "Pausada" | "Activa" }`.
+
+- Finalizar: desde **Inactiva**, **Activa** o **Pausada**. Finalizada es final.
+- Pausar: sólo desde **Activa**.
+- Reactivar (`Activa`): sólo desde **Pausada**. Si ya venció o llegó a la meta, en la misma operación queda **Finalizada**.
+
+**Respuesta 200:** la campaña actualizada (con `pendientes` y `tieneDonaciones`). Las donaciones pendientes se pueden seguir revisando.
+
+| Código | HTTP | Mensaje |
+| --- | --- | --- |
+| `VALIDACION` | 400 | «El estado tiene que ser "Finalizada", "Pausada" o "Activa"» |
 | `CAMPANIA_NO_ENCONTRADA` | 404 | No existe o es de otro refugio |
-| `TRANSICION_INVALIDA` | 409 | «La campaña está «Cancelada»: no se puede finalizar», o «La campaña cambió de estado recién. Actualizá la lista e intentalo de nuevo» (otro miembro o el cron llegaron primero) |
+| `TRANSICION_INVALIDA` | 409 | «La campaña está «Finalizada»: no se puede reactivar», o «La campaña cambió de estado recién. Actualizá la lista e intentalo de nuevo» (otro miembro o el cron llegaron primero) |
 
 ## `GET /api/v1/refugio/campanias/:id/donaciones` — Bandeja de revisión (HU-12.3)
 
@@ -195,7 +232,7 @@ Perfil **REFUGIO**. Donaciones de la campaña, de la más reciente a la más vie
 
 Perfil **REFUGIO**. **Body:** `{ "estado": "Realizada" }` o `{ "estado": "Cancelada", "motivo": "NO_RECIBIDA" | "MONTO_NO_COINCIDE" }`.
 
-- **Realizada** suma el monto al `recaudado`. Si con eso la campaña Activa llega al objetivo, se finaliza en el acto.
+- **Realizada** suma el monto al `recaudado`. Si con eso la campaña Activa o Pausada llega al objetivo, se finaliza en el acto.
 - Sólo se resuelve una donación **Pendiente**. Vale aunque la campaña ya haya cerrado.
 
 **Respuesta 200:** la donación actualizada.
@@ -217,7 +254,7 @@ Cualquier perfil. **Respuesta 200:** `[{ "id": 1, "nombre": "Inactiva" }, { "id"
 No es un endpoint: corre desde el cron del sistema (una vez por día) con el usuario SISTEMA.
 
 - Inactiva → Activa cuando llega `fechaInicio`.
-- Activa → Finalizada cuando pasa `fechaFin` (cuenta hasta el final de ese día) o `recaudado` ≥ `objetivo`.
+- Activa o Pausada → Finalizada cuando pasa `fechaFin` (cuenta hasta el final de ese día) o `recaudado` ≥ `objetivo`.
 
 ```
 5 0 * * * cd /ruta/al/repo && node dist/jobs/transicion-estados-campana.job.js
@@ -226,14 +263,13 @@ No es un endpoint: corre desde el cron del sistema (una vez por día) con el usu
 ## Decisiones tomadas y por qué
 
 - **La donación se declara después de transferir.** No hay pasarela de pago: el adoptante transfiere por fuera del sistema y avisa. La confianza la cierra el refugio, que verifica el ingreso real antes de aplicarla.
-- **Cancelar no es `fecha_baja`.** La HU-12.5 «da de baja» la campaña, pero el filtro por estado tiene que poder mostrar las canceladas.
-- **Quota sobre Inactiva + Activa.** Contar sólo las Activa dejaría crear campañas programadas sin límite.
+- **Eliminar es baja lógica y sólo sin donaciones** (spec 028). Reemplazó a «Cancelar»: una campaña con donaciones tiene historial que el refugio y los donantes tienen que poder ver, así que se finaliza.
+- **Quota sobre Inactiva + Activa + Pausada.** Contar sólo las Activa dejaría crear campañas programadas sin límite; la Pausada cuenta porque se puede reactivar.
 - **404 y no 403 entre refugios.** No revela que la campaña o la donación existen.
 - **`montoDonadoDeclarado` del dashboard de admin** conserva el nombre para no romper web-admin, pero ahora suma sólo las Realizada.
 
 ## Pendiente para otros módulos
 
-- **Editar una campaña:** fuera de alcance de la spec 026 (el botón «Editar» de GUI-36 queda deshabilitado).
 - **«Mis donaciones» del adoptante:** historial y estado de lo que donó.
 - **Confirmación automática con Mercado Pago:** spike y luego spec 027. El modelo ya la admite (otro camino a Realizada con usuario SISTEMA).
 - **GUI-36 en `web-admin`:** sigue con datos de ejemplo.

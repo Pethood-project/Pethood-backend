@@ -31,7 +31,7 @@ const ESTADOS_CAMPANIA = [
   { id: 1, nombre: 'Inactiva' },
   { id: 2, nombre: 'Activa' },
   { id: 3, nombre: 'Finalizada' },
-  { id: 4, nombre: 'Cancelada' },
+  { id: 4, nombre: 'Pausada' },
 ];
 const ESTADOS_DONACION = [
   { id: 11, nombre: 'Pendiente' },
@@ -99,7 +99,7 @@ function donacion(
 
 function resumen(entradas: [number, Partial<repo.ResumenDonaciones>][]) {
   return new Map(
-    entradas.map(([id, r]) => [id, { recaudado: 0, donantes: 0, pendientes: 0, ...r }]),
+    entradas.map(([id, r]) => [id, { recaudado: 0, donantes: 0, pendientes: 0, total: 0, ...r }]),
   );
 }
 
@@ -264,18 +264,62 @@ describe('cambiarEstadoCampania', () => {
     );
   });
 
-  it('cancela una Inactiva', async () => {
+  it('finaliza una Inactiva (spec 028)', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { estado: 'Inactiva' }));
 
-    await service.cambiarEstadoCampania(8, 'Cancelada', USUARIO);
+    await service.cambiarEstadoCampania(8, 'Finalizada', USUARIO);
 
-    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(8, 1, 4, USUARIO);
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(8, 1, 3, USUARIO);
   });
 
-  it('no finaliza una Inactiva', async () => {
+  it('pausa una Activa', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8));
+
+    await service.cambiarEstadoCampania(8, 'Pausada', USUARIO);
+
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(8, 2, 4, USUARIO);
+    expect(registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({ detalle: 'Activa -> Pausada' }),
+    );
+  });
+
+  it('no pausa una Inactiva', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { estado: 'Inactiva' }));
 
-    expect(await codigoDeError(service.cambiarEstadoCampania(8, 'Finalizada', USUARIO))).toBe(
+    expect(await codigoDeError(service.cambiarEstadoCampania(8, 'Pausada', USUARIO))).toBe(
+      'TRANSICION_INVALIDA',
+    );
+  });
+
+  it('reactiva una Pausada vigente', async () => {
+    vi.mocked(repo.buscarPorId)
+      .mockResolvedValueOnce(campania(8, { estado: 'Pausada' }))
+      .mockResolvedValue(campania(8, { estado: 'Activa' }));
+
+    const reactivada = await service.cambiarEstadoCampania(8, 'Activa', USUARIO);
+
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledTimes(1);
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(8, 4, 2, USUARIO);
+    expect(reactivada.estado.nombre).toBe('Activa');
+  });
+
+  it('reactivar una Pausada vencida la finaliza en el acto, como SISTEMA', async () => {
+    vi.mocked(repo.buscarPorId)
+      .mockResolvedValueOnce(campania(8, { estado: 'Pausada', fechaFin: enDias(-1) }))
+      .mockResolvedValueOnce(campania(8, { estado: 'Activa', fechaFin: enDias(-1) }))
+      .mockResolvedValue(campania(8, { estado: 'Finalizada', fechaFin: enDias(-1) }));
+
+    const reactivada = await service.cambiarEstadoCampania(8, 'Activa', USUARIO);
+
+    expect(repo.cambiarEstadoSi).toHaveBeenNthCalledWith(1, 8, 4, 2, USUARIO);
+    expect(repo.cambiarEstadoSi).toHaveBeenNthCalledWith(2, 8, 2, 3, USUARIO_SISTEMA_ID);
+    expect(reactivada.estado.nombre).toBe('Finalizada');
+  });
+
+  it('no reactiva una Finalizada', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { estado: 'Finalizada' }));
+
+    expect(await codigoDeError(service.cambiarEstadoCampania(8, 'Activa', USUARIO))).toBe(
       'TRANSICION_INVALIDA',
     );
   });
@@ -283,7 +327,7 @@ describe('cambiarEstadoCampania', () => {
   it('una campaña de otro refugio es 404', async () => {
     vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { refugioId: OTRO_REFUGIO }));
 
-    expect(await codigoDeError(service.cambiarEstadoCampania(8, 'Cancelada', USUARIO))).toBe(
+    expect(await codigoDeError(service.cambiarEstadoCampania(8, 'Pausada', USUARIO))).toBe(
       'CAMPANIA_NO_ENCONTRADA',
     );
   });
@@ -298,12 +342,170 @@ describe('cambiarEstadoCampania', () => {
   });
 });
 
+describe('editarCampania', () => {
+  const URL_NUEVA = '/api/v1/archivos/campanias/nueva.webp';
+
+  beforeEach(() => {
+    vi.mocked(repo.editarSi).mockResolvedValue(true);
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8));
+  });
+
+  it('cambia sólo lo que llega y audita los campos', async () => {
+    await service.editarCampania(
+      8,
+      { titulo: 'Castraciones de otoño', objetivo: 150000 },
+      { usuarioId: USUARIO },
+    );
+
+    expect(repo.editarSi).toHaveBeenCalledWith(
+      8,
+      [1, 2, 4],
+      { titulo: 'Castraciones de otoño', objetivo: 150000 },
+      USUARIO,
+    );
+    expect(guardarImagen).not.toHaveBeenCalled();
+    expect(registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accion: 'EDITAR',
+        entidadId: 8,
+        detalle: 'campos=titulo,objetivo',
+      }),
+    );
+  });
+
+  it('con imagen nueva la guarda y borra la anterior', async () => {
+    vi.mocked(guardarImagen).mockResolvedValue(URL_NUEVA);
+
+    await service.editarCampania(8, {}, { usuarioId: USUARIO, archivo: ARCHIVO });
+
+    expect(repo.editarSi).toHaveBeenCalledWith(8, [1, 2, 4], { imagenUrl: URL_NUEVA }, USUARIO);
+    expect(borrarImagen).toHaveBeenCalledWith(URL_IMAGEN);
+    expect(borrarImagen).not.toHaveBeenCalledWith(URL_NUEVA);
+  });
+
+  it('se puede editar una Pausada', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { estado: 'Pausada' }));
+
+    await service.editarCampania(8, { descripcion: 'Nueva' }, { usuarioId: USUARIO });
+
+    expect(repo.editarSi).toHaveBeenCalled();
+  });
+
+  it('una Finalizada no se edita', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { estado: 'Finalizada' }));
+
+    expect(
+      await codigoDeError(
+        service.editarCampania(8, { titulo: 'Otro' }, { usuarioId: USUARIO, archivo: ARCHIVO }),
+      ),
+    ).toBe('CAMPANIA_NO_EDITABLE');
+    expect(guardarImagen).not.toHaveBeenCalled();
+  });
+
+  it('sin nada para cambiar, 400', async () => {
+    expect(await codigoDeError(service.editarCampania(8, {}, { usuarioId: USUARIO }))).toBe(
+      'SIN_CAMBIOS',
+    );
+  });
+
+  it('la meta no puede bajar de lo recaudado', async () => {
+    vi.mocked(repo.resumirDonaciones).mockResolvedValue(resumen([[8, { recaudado: 60000 }]]));
+
+    expect(
+      await codigoDeError(
+        service.editarCampania(8, { objetivo: 50000 }, { usuarioId: USUARIO, archivo: ARCHIVO }),
+      ),
+    ).toBe('OBJETIVO_MENOR_A_RECAUDADO');
+    expect(guardarImagen).not.toHaveBeenCalled();
+    expect(repo.editarSi).not.toHaveBeenCalled();
+  });
+
+  it('una meta igual a lo recaudado finaliza la campaña en el acto', async () => {
+    vi.mocked(repo.resumirDonaciones).mockResolvedValue(resumen([[8, { recaudado: 60000 }]]));
+    vi.mocked(repo.buscarPorId)
+      .mockResolvedValueOnce(campania(8))
+      .mockResolvedValueOnce(campania(8, { objetivo: 60000 }))
+      .mockResolvedValue(campania(8, { estado: 'Finalizada', objetivo: 60000 }));
+
+    const editada = await service.editarCampania(8, { objetivo: 60000 }, { usuarioId: USUARIO });
+
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(8, 2, 3, USUARIO_SISTEMA_ID);
+    expect(editada.estado.nombre).toBe('Finalizada');
+  });
+
+  it('la fecha de fin tiene que ser posterior a la de inicio', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(
+      campania(8, { estado: 'Inactiva', fechaInicio: enDias(5) }),
+    );
+
+    expect(
+      await codigoDeError(
+        service.editarCampania(8, { fechaFin: enDias(5) }, { usuarioId: USUARIO }),
+      ),
+    ).toBe('VALIDACION');
+  });
+
+  it('carrera: si la finalizaron en el medio, 409 y borra la imagen nueva', async () => {
+    vi.mocked(guardarImagen).mockResolvedValue(URL_NUEVA);
+    vi.mocked(repo.editarSi).mockResolvedValue(false);
+
+    expect(
+      await codigoDeError(service.editarCampania(8, {}, { usuarioId: USUARIO, archivo: ARCHIVO })),
+    ).toBe('CAMPANIA_NO_EDITABLE');
+    expect(borrarImagen).toHaveBeenCalledWith(URL_NUEVA);
+    expect(borrarImagen).not.toHaveBeenCalledWith(URL_IMAGEN);
+  });
+
+  it('una campaña de otro refugio es 404', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { refugioId: OTRO_REFUGIO }));
+
+    expect(
+      await codigoDeError(service.editarCampania(8, { titulo: 'Otro' }, { usuarioId: USUARIO })),
+    ).toBe('CAMPANIA_NO_ENCONTRADA');
+  });
+});
+
+describe('eliminarCampania', () => {
+  beforeEach(() => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8));
+  });
+
+  it('sin donaciones la da de baja y audita', async () => {
+    vi.mocked(repo.darDeBajaSiSinDonaciones).mockResolvedValue(true);
+
+    await service.eliminarCampania(8, USUARIO);
+
+    expect(repo.darDeBajaSiSinDonaciones).toHaveBeenCalledWith(8, USUARIO);
+    expect(registrarAuditoria).toHaveBeenCalledWith(
+      expect.objectContaining({ accion: 'ELIMINAR', entidad: 'Campania', entidadId: 8 }),
+    );
+  });
+
+  it('con donaciones, 409 y no audita', async () => {
+    vi.mocked(repo.darDeBajaSiSinDonaciones).mockResolvedValue(false);
+
+    expect(await codigoDeError(service.eliminarCampania(8, USUARIO))).toBe(
+      'CAMPANIA_CON_DONACIONES',
+    );
+    expect(registrarAuditoria).not.toHaveBeenCalled();
+  });
+
+  it('una campaña de otro refugio es 404', async () => {
+    vi.mocked(repo.buscarPorId).mockResolvedValue(campania(8, { refugioId: OTRO_REFUGIO }));
+
+    expect(await codigoDeError(service.eliminarCampania(8, USUARIO))).toBe(
+      'CAMPANIA_NO_ENCONTRADA',
+    );
+    expect(repo.darDeBajaSiSinDonaciones).not.toHaveBeenCalled();
+  });
+});
+
 describe('listarCampaniasDelRefugio', () => {
   it('pagina y suma el progreso de cada campaña', async () => {
     vi.mocked(repo.listarDelRefugio).mockResolvedValue([campania(9), campania(8), campania(7)]);
     vi.mocked(repo.resumirDonaciones).mockResolvedValue(
       resumen([
-        [9, { recaudado: 57000, donantes: 3, pendientes: 2 }],
+        [9, { recaudado: 57000, donantes: 3, pendientes: 2, total: 6 }],
         [8, {}],
       ]),
     );
@@ -319,7 +521,9 @@ describe('listarCampaniasDelRefugio', () => {
       porcentaje: 57,
       donantes: 3,
       pendientes: 2,
+      tieneDonaciones: true,
     });
+    expect(lista.campanias[1]).toMatchObject({ id: 8, tieneDonaciones: false });
   });
 
   it('un cursor inexistente corta con 400', async () => {

@@ -253,7 +253,7 @@ export const LIMITES = {
     alias: { min: 6, max: 20 },
     /** CBU o CVU: siempre 22 dígitos. */
     cbu: { largo: 22 },
-    /** Campañas Inactiva + Activa por refugio (regla transversal 7, spec 026 §6.3). */
+    /** Campañas Inactiva + Activa + Pausada por refugio (regla transversal 7, spec 026 §6.3). */
     vigentesPorRefugio: 5,
     /** Tamaño de página de los listados (paginación por cursor). */
     pagina: { porDefecto: 20, maximo: 50 },

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cambiarEstadoCampaniaSchema,
   crearCampaniaSchema,
   donarSchema,
+  editarCampaniaSchema,
   resolverDonacionSchema,
 } from '../../../src/modules/campanias/campanias.dto';
 
@@ -62,6 +64,64 @@ describe('crearCampaniaSchema', () => {
     expect(crearCampaniaSchema.safeParse({ ...VALIDA, objetivo: '2500001' }).success).toBe(false);
     expect(crearCampaniaSchema.safeParse({ ...VALIDA, descripcion: 'a'.repeat(301) }).success).toBe(
       false,
+    );
+  });
+});
+
+describe('editarCampaniaSchema (spec 028)', () => {
+  it('todo es opcional: vacío no cambia nada', () => {
+    expect(editarCampaniaSchema.parse({})).toEqual({});
+  });
+
+  it('valida y normaliza lo que llega', () => {
+    const resultado = editarCampaniaSchema.parse({
+      titulo: '  Castraciones de otoño  ',
+      objetivo: '150000',
+      fechaFin: enDias(10),
+    });
+    expect(resultado.titulo).toBe('Castraciones de otoño');
+    expect(resultado.objetivo).toBe(150000);
+    expect(resultado.fechaFin).toBeInstanceOf(Date);
+  });
+
+  it('la fecha de fin tiene que ser posterior a hoy', () => {
+    expect(primerError(editarCampaniaSchema.safeParse({ fechaFin: enDias(0) }))).toBe(
+      'La fecha de fin debe ser posterior a hoy',
+    );
+    expect(editarCampaniaSchema.safeParse({ fechaFin: enDias(1) }).success).toBe(true);
+  });
+
+  it('respeta los límites de la meta del alta', () => {
+    expect(editarCampaniaSchema.safeParse({ objetivo: '5000' }).success).toBe(false);
+  });
+
+  it('no deja vaciar el título', () => {
+    expect(editarCampaniaSchema.safeParse({ titulo: '   ' }).success).toBe(false);
+  });
+
+  it('alias, CBU y fecha de inicio no se pueden modificar', () => {
+    expect(primerError(editarCampaniaSchema.safeParse({ alias: 'otro.alias' }))).toBe(
+      'El alias no se puede modificar',
+    );
+    expect(primerError(editarCampaniaSchema.safeParse({ cbu: '0'.repeat(22) }))).toBe(
+      'El CBU/CVU no se puede modificar',
+    );
+    expect(primerError(editarCampaniaSchema.safeParse({ fechaInicio: enDias(3) }))).toBe(
+      'La fecha de inicio no se puede modificar',
+    );
+  });
+});
+
+describe('cambiarEstadoCampaniaSchema', () => {
+  it('acepta finalizar, pausar y reactivar', () => {
+    for (const estado of ['Finalizada', 'Pausada', 'Activa']) {
+      expect(cambiarEstadoCampaniaSchema.safeParse({ estado }).success).toBe(true);
+    }
+  });
+
+  it('Cancelada ya no existe (spec 028)', () => {
+    expect(primerError(cambiarEstadoCampaniaSchema.safeParse({ estado: 'Cancelada' }))).toBe(
+      'El estado tiene que ser "Finalizada", "Pausada" o "Activa"',
     );
   });
 });

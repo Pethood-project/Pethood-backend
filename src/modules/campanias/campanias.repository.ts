@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
-import { datosAlta, datosModificacion } from '../../shared/auditoria';
+import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { finDelDia, inicioDelDia } from '../../shared/validation/dates';
 import {
   ESTADO_CAMPANIA,
@@ -57,10 +57,12 @@ export interface ResumenDonaciones {
   recaudado: number;
   donantes: number;
   pendientes: number;
+  /** Todas, en cualquier estado: con alguna, la campaña ya no se puede eliminar (spec 028). */
+  total: number;
 }
 
 /**
- * Recaudado, donantes y pendientes de varias campañas en tres queries agrupadas, sin N+1.
+ * Recaudado, donantes, pendientes y total de varias campañas en cuatro queries agrupadas, sin N+1.
  * Sólo las Realizada suman (regla transversal 11). Toda campaña pedida tiene entrada, en 0 si
  * no tiene donaciones.
  */
@@ -68,14 +70,14 @@ export async function resumirDonaciones(
   campaniaIds: number[],
 ): Promise<Map<number, ResumenDonaciones>> {
   const resumen = new Map<number, ResumenDonaciones>(
-    campaniaIds.map((id) => [id, { recaudado: 0, donantes: 0, pendientes: 0 }]),
+    campaniaIds.map((id) => [id, { recaudado: 0, donantes: 0, pendientes: 0, total: 0 }]),
   );
   if (campaniaIds.length === 0) return resumen;
 
   const base = { campaniaId: { in: campaniaIds }, fechaBaja: null };
   const realizadas = { ...base, estadoDonacion: { nombre: ESTADO_DONACION.REALIZADA } };
 
-  const [montos, donantes, pendientes] = await Promise.all([
+  const [montos, donantes, pendientes, totales] = await Promise.all([
     prisma.donacion.groupBy({ by: ['campaniaId'], where: realizadas, _sum: { monto: true } }),
     prisma.donacion.groupBy({ by: ['campaniaId', 'usuarioId'], where: realizadas }),
     prisma.donacion.groupBy({
@@ -83,6 +85,7 @@ export async function resumirDonaciones(
       where: { ...base, estadoDonacion: { nombre: ESTADO_DONACION.PENDIENTE } },
       _count: { _all: true },
     }),
+    prisma.donacion.groupBy({ by: ['campaniaId'], where: base, _count: { _all: true } }),
   ]);
 
   for (const fila of montos) {
@@ -93,6 +96,9 @@ export async function resumirDonaciones(
   }
   for (const fila of pendientes) {
     resumen.get(fila.campaniaId)!.pendientes = fila._count._all;
+  }
+  for (const fila of totales) {
+    resumen.get(fila.campaniaId)!.total = fila._count._all;
   }
 
   return resumen;
@@ -132,7 +138,7 @@ export function buscarEstadosDonacion() {
   });
 }
 
-/** Para la quota (§6.3): Inactiva + Activa del refugio. */
+/** Para la quota (spec 026 §6.3): Inactiva + Activa + Pausada del refugio. */
 export function contarVigentes(refugioId: number) {
   return prisma.campania.count({
     where: {
@@ -164,7 +170,7 @@ export function crear(
   });
 }
 
-/** Una campaña no dada de baja. Cancelar NO la da de baja (§6.4): sigue apareciendo. */
+/** Una campaña no dada de baja: una eliminada (spec 028) ya no existe para nadie. */
 export function buscarPorId(id: number) {
   return prisma.campania.findFirst({
     where: { id, fechaBaja: null },
@@ -240,6 +246,42 @@ export async function cambiarEstadoSi(
   const { count } = await prisma.campania.updateMany({
     where: { id, estadoCampaniaId: desdeEstadoId, fechaBaja: null },
     data: { estadoCampaniaId: haciaEstadoId, ...datosModificacion(usuarioId) },
+  });
+  return count === 1;
+}
+
+/**
+ * Edición (spec 028), sólo si la campaña sigue en uno de `estadosEditables`: si el cron o otro
+ * miembro la finalizó en el medio, no se toca y devuelve `false`.
+ */
+export async function editarSi(
+  id: number,
+  estadosEditables: number[],
+  datos: {
+    titulo?: string;
+    descripcion?: string;
+    objetivo?: number;
+    fechaFin?: Date;
+    imagenUrl?: string;
+  },
+  usuarioId: number,
+): Promise<boolean> {
+  const { count } = await prisma.campania.updateMany({
+    where: { id, estadoCampaniaId: { in: estadosEditables }, fechaBaja: null },
+    data: { ...datos, ...datosModificacion(usuarioId) },
+  });
+  return count === 1;
+}
+
+/**
+ * «Eliminar» (spec 028): baja lógica, sólo si nadie avisó nunca que donó. La condición va en el
+ * mismo UPDATE, así una donación que entra en el medio no queda colgada de una campaña dada de
+ * baja. Devuelve si la dio de baja.
+ */
+export async function darDeBajaSiSinDonaciones(id: number, usuarioId: number): Promise<boolean> {
+  const { count } = await prisma.campania.updateMany({
+    where: { id, fechaBaja: null, donaciones: { none: { fechaBaja: null } } },
+    data: datosBaja(usuarioId),
   });
   return count === 1;
 }

@@ -227,7 +227,8 @@ export async function seedCatalogos(): Promise<number> {
   );
   await upsertPorNombre(
     'estadoCampania',
-    ['Inactiva', 'Activa', 'Finalizada', 'Cancelada'],
+    // «Cancelada» dejó de existir (spec 028): en una base vieja la da de baja la migración.
+    ['Inactiva', 'Activa', 'Finalizada', 'Pausada'],
     sistemaId,
   );
   await upsertPorNombre('estadoDonacion', ['Pendiente', 'Realizada', 'Cancelada'], sistemaId);
