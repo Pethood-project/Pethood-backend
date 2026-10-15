@@ -147,6 +147,14 @@ export function fechaNoPasadaSchema(etiqueta: string) {
   });
 }
 
+/**
+ * Campo que una edición no acepta (ej. el CBU de una campaña). Mandarlo es un error del
+ * cliente y no se ignora en silencio: la respuesta sería 200 sin haberlo cambiado.
+ */
+export function noModificableSchema(etiqueta: string) {
+  return z.undefined({ errorMap: () => ({ message: `${etiqueta} no se puede modificar` }) });
+}
+
 /** Alias para transferir. Vacío o ausente → `null`. */
 export function aliasOpcionalSchema() {
   return z.unknown().transform((valor, ctx) => {

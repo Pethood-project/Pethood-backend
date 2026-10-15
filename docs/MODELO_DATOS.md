@@ -28,7 +28,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 - **Estado_Usuario** (`estado_usuario_id PK`).
 - **Estado_Refugio** (`estado_refugio_id PK`).
 - **Estado_Solicitud** (`estado_solicitud_id PK`).
-- **Estado_Campaña** (`estado_campaña_id PK`) — valores: Inactiva, Activa, Finalizada, Cancelada.
+- **Estado_Campaña** (`estado_campaña_id PK`) — valores: Inactiva, Activa, Pausada, Finalizada (spec 028; «Cancelada» quedó dada de baja).
 - **Estado_Donacion** (`estado_donacion_id PK`) — valores: Pendiente, Realizada, Cancelada. Agregado fuera del diagrama de clases (spec 026).
 - **Estado_Animal_Perdido** (`estado_animal_perdido_id PK`) — incluye "Encontrado/Perdido/Resuelto".
 - **Tipo_Solicitud** (`tipo_solicitud_id PK`) — incluye `tipo_solicitud_secuencia_dias` (usado para ventanas de tiempo, ej. la cancelación automática a los 6 meses).
@@ -276,11 +276,13 @@ Representa el hogar de tránsito de un usuario/adoptante — no es una entidad d
 
 Validaciones (HU-12.1): descripción ≤300 caracteres; objetivo numérico entre $10.000 y $2.500.000; fecha_inicio ≥ hoy; fecha_fin > fecha_inicio; imagen jpg/png/webp; máximo 5 campañas activas por refugio.
 
-Transiciones automáticas (cron, usuario "SISTEMA"): Inactiva→Activa al llegar fecha_inicio; →Finalizada al llegar fecha_fin o alcanzar el monto objetivo acumulado.
+Transiciones automáticas (cron, usuario "SISTEMA"): Inactiva→Activa al llegar fecha_inicio; Activa o Pausada→Finalizada al llegar fecha_fin o alcanzar el monto objetivo acumulado.
+
+Edición y baja (spec 028): se editan título, descripción, imagen, objetivo (nunca por debajo de lo recaudado) y fecha_fin (posterior a hoy); alias, CBU y fecha_inicio quedan fijos. «Eliminar» es baja lógica (`campaña_fecha_baja`) y sólo vale si la campaña no tiene ninguna donación.
 
 ### Estado_Campaña
 
-Ver catálogos. Valores: Inactiva, Activa, Finalizada, Cancelada.
+Ver catálogos. Valores: Inactiva, Activa, Pausada, Finalizada. «Pausada» (spec 028) no se muestra en el portal ni recibe donaciones. «Cancelada» quedó dada de baja: la migración `20261015120000_campania_estado_pausada` pasó esas campañas a Finalizada.
 
 ### Estado_Donacion
 

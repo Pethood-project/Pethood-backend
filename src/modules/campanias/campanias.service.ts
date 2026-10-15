@@ -1,9 +1,10 @@
 /**
- * Campañas de donación (spec 026, HU-12.1 a HU-12.7).
+ * Campañas de donación (spec 026, HU-12.1 a HU-12.7, y spec 028: editar, pausar y eliminar).
  *
  * Dos lados del mostrador:
- * - El REFUGIO (perfil Refugio) crea sus campañas, las finaliza o cancela, y revisa las
- *   donaciones que le avisan: las aplica (suman al progreso) o las rechaza con motivo.
+ * - El REFUGIO (perfil Refugio) crea sus campañas, las edita, las pausa, reactiva, finaliza o
+ *   elimina, y revisa las donaciones que le avisan: las aplica (suman al progreso) o las
+ *   rechaza con motivo.
  * - El ADOPTANTE (perfil Personal) recorre las campañas Activa, transfiere por fuera del
  *   sistema y avisa cuánto donó. Esa donación nace Pendiente y NO suma hasta que el refugio la
  *   aplica (regla transversal 11).
@@ -15,13 +16,14 @@ import { AppError } from '../../middlewares/errorHandler';
 import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
 import { registrarAuditoria } from '../../shared/logAuditoria';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
-import { aFechaISO } from '../../shared/validation/dates';
+import { aFechaISO, inicioDelDia } from '../../shared/validation/dates';
 import { LIMITES } from '../../shared/validation/limits';
 import type {
   CampaniaDto,
   CampaniaRefugioDto,
   CrearCampaniaDto,
   DonacionDto,
+  EditarCampaniaDto,
   DonarDto,
   FiltrosDonacionesDto,
   FiltrosMisCampaniasDto,
@@ -34,6 +36,7 @@ import {
   calcularPorcentaje,
   ESTADO_CAMPANIA,
   ESTADO_DONACION,
+  ESTADOS_VIGENTES,
   siguienteEstadoAutomatico,
   transicionManualPermitida,
   type EstadoManual,
@@ -52,11 +55,20 @@ import { programarReintentos } from './campanias.reintentos';
 
 const SUBCARPETA_IMAGENES = 'campanias';
 
-const SIN_DONACIONES: repo.ResumenDonaciones = { recaudado: 0, donantes: 0, pendientes: 0 };
+const SIN_DONACIONES: repo.ResumenDonaciones = {
+  recaudado: 0,
+  donantes: 0,
+  pendientes: 0,
+  total: 0,
+};
 
 export type ArchivoImagen = Parameters<typeof guardarImagen>[0];
 
-const VERBO: Record<EstadoManual, string> = { Finalizada: 'finalizar', Cancelada: 'cancelar' };
+const VERBO: Record<EstadoManual, string> = {
+  Finalizada: 'finalizar',
+  Pausada: 'pausar',
+  Activa: 'reactivar',
+};
 
 // ─────────────── CATÁLOGOS ───────────────
 
@@ -136,7 +148,11 @@ function aDtoRefugio(
   campania: repo.CampaniaConRelaciones,
   resumen: repo.ResumenDonaciones,
 ): CampaniaRefugioDto {
-  return { ...aDto(campania, resumen), pendientes: resumen.pendientes };
+  return {
+    ...aDto(campania, resumen),
+    pendientes: resumen.pendientes,
+    tieneDonaciones: resumen.total > 0,
+  };
 }
 
 function aDtoDonacion(donacion: repo.DonacionConRelaciones): DonacionDto {
@@ -304,7 +320,7 @@ export async function crearCampania(
   if ((await repo.contarVigentes(refugioId)) >= tope) {
     throw new AppError(
       'LIMITE_CAMPANIAS',
-      `Alcanzaste el límite de ${tope} campañas activas. Finalizá o cancelá una para crear otra`,
+      `Alcanzaste el límite de ${tope} campañas activas. Finalizá o eliminá una para crear otra`,
       409,
     );
   }
@@ -375,7 +391,10 @@ export async function listarCampaniasDelRefugio(
   };
 }
 
-/** HU-12.5 (cancelar) y HU-12.6 (finalizar), con las reglas de HU-12.7. */
+/**
+ * HU-12.6 (finalizar) y spec 028 (pausar y reactivar), con las reglas de HU-12.7. Reactivar una
+ * Pausada que ya venció o llegó a la meta la finaliza en el acto, con la regla del cron.
+ */
 export async function cambiarEstadoCampania(
   campaniaId: number,
   hacia: EstadoManual,
@@ -417,8 +436,128 @@ export async function cambiarEstadoCampania(
     detalle: `${desde} -> ${hacia}`,
   });
 
+  const resumen = await resumenDe(campania.id);
+  let actualizada = (await repo.buscarPorId(campania.id)) ?? campania;
+  if (hacia === ESTADO_CAMPANIA.ACTIVA) {
+    actualizada =
+      (await aplicarReglaAutomatica(actualizada, resumen.recaudado, estados)) ?? actualizada;
+  }
+  return aDtoRefugio(actualizada, resumen);
+}
+
+function noEditable(): AppError {
+  return new AppError('CAMPANIA_NO_EDITABLE', 'Una campaña finalizada no se puede editar', 409);
+}
+
+/**
+ * Spec 028: título, descripción, imagen, meta y fecha de fin. La meta no puede quedar por
+ * debajo de lo recaudado; si queda igual, la campaña llegó a su meta y se finaliza en el acto
+ * con la regla del cron.
+ */
+export async function editarCampania(
+  campaniaId: number,
+  datos: EditarCampaniaDto,
+  contexto: { usuarioId: number; archivo?: ArchivoImagen },
+): Promise<CampaniaRefugioDto> {
+  const refugioId = await refugioDe(contexto.usuarioId);
+  const campania = await campaniaDelRefugio(campaniaId, refugioId);
+
+  if (!ESTADOS_VIGENTES.includes(campania.estadoCampania.nombre as NombreEstadoCampania)) {
+    throw noEditable();
+  }
+
+  const cambios = {
+    ...(datos.titulo !== undefined ? { titulo: datos.titulo } : {}),
+    ...(datos.descripcion !== undefined ? { descripcion: datos.descripcion } : {}),
+    ...(datos.objetivo !== undefined ? { objetivo: datos.objetivo } : {}),
+    ...(datos.fechaFin !== undefined ? { fechaFin: datos.fechaFin } : {}),
+  };
+
+  if (Object.keys(cambios).length === 0 && !contexto.archivo) {
+    throw new AppError('SIN_CAMBIOS', 'No hay cambios para guardar', 400);
+  }
+
+  if (
+    cambios.fechaFin &&
+    inicioDelDia(cambios.fechaFin).getTime() <= inicioDelDia(campania.fechaInicio).getTime()
+  ) {
+    throw new AppError('VALIDACION', 'La fecha de fin tiene que ser posterior a la de inicio', 400);
+  }
+
+  const resumen = await resumenDe(campania.id);
+  if (cambios.objetivo !== undefined && cambios.objetivo < resumen.recaudado) {
+    const recaudado = resumen.recaudado.toLocaleString('es-AR');
+    throw new AppError(
+      'OBJETIVO_MENOR_A_RECAUDADO',
+      `La meta no puede ser menor a lo que ya recaudaste ($${recaudado})`,
+      409,
+    );
+  }
+
+  const estados = await idsEstadosCampania();
+  // Después de todas las validaciones: no dejar archivos huérfanos por una edición rechazada.
+  const imagenUrl = contexto.archivo
+    ? await guardarImagen(contexto.archivo, SUBCARPETA_IMAGENES)
+    : undefined;
+
+  let editada: boolean;
+  try {
+    editada = await repo.editarSi(
+      campania.id,
+      ESTADOS_VIGENTES.map((nombre) => estados[nombre]),
+      { ...cambios, ...(imagenUrl ? { imagenUrl } : {}) },
+      contexto.usuarioId,
+    );
+  } catch (err) {
+    if (imagenUrl) await borrarImagen(imagenUrl);
+    throw err;
+  }
+
+  // La finalizó el cron u otro miembro entre la lectura y la escritura.
+  if (!editada) {
+    if (imagenUrl) await borrarImagen(imagenUrl);
+    throw noEditable();
+  }
+
+  // La anterior ya no la referencia nadie. Las campañas sembradas pueden no tener imagen.
+  if (imagenUrl && campania.imagenUrl) await borrarImagen(campania.imagenUrl);
+
+  await registrarAuditoria({
+    usuarioId: contexto.usuarioId,
+    accion: 'EDITAR',
+    entidad: 'Campania',
+    entidadId: campania.id,
+    detalle: `campos=${[...Object.keys(cambios), ...(imagenUrl ? ['imagen'] : [])].join(',')}`,
+  });
+
   const actualizada = (await repo.buscarPorId(campania.id)) ?? campania;
-  return aDtoRefugio(actualizada, await resumenDe(campania.id));
+  const final =
+    (await aplicarReglaAutomatica(actualizada, resumen.recaudado, estados)) ?? actualizada;
+  return aDtoRefugio(final, resumen);
+}
+
+/**
+ * «Eliminar» (spec 028): baja lógica, en cualquier estado, sólo si nadie avisó nunca que donó.
+ * Con donaciones queda «Finalizar». Desaparece de «Mis Campañas» y del detalle.
+ */
+export async function eliminarCampania(campaniaId: number, usuarioId: number): Promise<void> {
+  const refugioId = await refugioDe(usuarioId);
+  const campania = await campaniaDelRefugio(campaniaId, refugioId);
+
+  if (!(await repo.darDeBajaSiSinDonaciones(campania.id, usuarioId))) {
+    throw new AppError(
+      'CAMPANIA_CON_DONACIONES',
+      'No podés eliminar una campaña que ya recibió donaciones. Podés finalizarla',
+      409,
+    );
+  }
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'ELIMINAR',
+    entidad: 'Campania',
+    entidadId: campania.id,
+  });
 }
 
 /** HU-12.3: bandeja de revisión de una campaña del refugio. */
@@ -449,10 +588,16 @@ function yaRevisada(): AppError {
   return new AppError('TRANSICION_INVALIDA', 'Esta donación ya fue revisada', 409);
 }
 
-/** Si la campaña sigue Activa y la donación la completó, la cierra en el acto (§6.7). */
+/**
+ * Si la campaña sigue Activa o Pausada y la donación la completó, la cierra en el acto (§6.7).
+ * Una Pausada no recibe donaciones nuevas, pero sí se le aplican las que ya estaban pendientes.
+ */
 async function cerrarSiCompleta(campaniaId: number): Promise<void> {
   const campania = await repo.buscarPorId(campaniaId);
-  if (!campania || campania.estadoCampania.nombre !== ESTADO_CAMPANIA.ACTIVA) return;
+  const nombre = campania?.estadoCampania.nombre;
+  if (!campania || (nombre !== ESTADO_CAMPANIA.ACTIVA && nombre !== ESTADO_CAMPANIA.PAUSADA)) {
+    return;
+  }
 
   const { recaudado } = await resumenDe(campaniaId);
   await aplicarReglaAutomatica(campania, recaudado, await idsEstadosCampania());

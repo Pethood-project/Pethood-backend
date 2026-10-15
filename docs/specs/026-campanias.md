@@ -60,6 +60,8 @@ por monto alcanzado.
 
 `Estado_Campaña` no cambia: **Inactiva, Activa, Finalizada, Cancelada** (§6, máquina de estados).
 
+> **Spec 028 (2026-10-15):** «Cancelada» se reemplazó por «Eliminar» (baja lógica, sólo sin donaciones) y se sumó «Pausada». La máquina de estados del §6.4 vale como la redefine la spec 028 §6.1.
+
 ## 4. API (contrato backend)
 
 | Método | Ruta | Auth | HU | Descripción |

@@ -6,6 +6,7 @@ import {
   cambiarEstadoCampaniaSchema,
   crearCampaniaSchema,
   donarSchema,
+  editarCampaniaSchema,
   filtrosDonacionesSchema,
   filtrosMisCampaniasSchema,
   paginaCampaniasSchema,
@@ -95,7 +96,31 @@ export async function crear(req: Request, res: Response, next: NextFunction): Pr
   }
 }
 
-/** HU-12.5 / HU-12.6. */
+/** Spec 028. Multipart como el alta: la imagen nueva, si la hay, viene en `imagen`. */
+export async function editar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const campania = await service.editarCampania(
+      idCampania(req),
+      parsearOFallar(editarCampaniaSchema, req.body),
+      { usuarioId: req.usuario!.usuarioId, archivo: req.file },
+    );
+    res.json(campania);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** Spec 028: «Eliminar» (baja lógica). */
+export async function eliminar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    await service.eliminarCampania(idCampania(req), req.usuario!.usuarioId);
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** HU-12.6 (finalizar) y spec 028 (pausar y reactivar). */
 export async function cambiarEstado(
   req: Request,
   res: Response,

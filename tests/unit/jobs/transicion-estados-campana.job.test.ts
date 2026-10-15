@@ -16,7 +16,7 @@ const ESTADOS = [
   { id: 1, nombre: 'Inactiva' },
   { id: 2, nombre: 'Activa' },
   { id: 3, nombre: 'Finalizada' },
-  { id: 4, nombre: 'Cancelada' },
+  { id: 4, nombre: 'Pausada' },
 ];
 
 function dia(offset: number): Date {
@@ -38,7 +38,8 @@ beforeEach(() => {
   vi.mocked(repo.buscarEstadosCampania).mockResolvedValue(ESTADOS);
   vi.mocked(repo.cambiarEstadoSi).mockResolvedValue(true);
   vi.mocked(repo.resumirDonaciones).mockImplementation(
-    async (ids) => new Map(ids.map((id) => [id, { recaudado: 0, donantes: 0, pendientes: 0 }])),
+    async (ids) =>
+      new Map(ids.map((id) => [id, { recaudado: 0, donantes: 0, pendientes: 0, total: 0 }])),
   );
 });
 
@@ -47,7 +48,7 @@ it('tira si falta un estado en el catálogo', async () => {
   vi.mocked(repo.listarVigentesParaCron).mockResolvedValue([]);
 
   await expect(transicionarEstadosCampanias(AHORA)).rejects.toThrow(
-    'Falta el estado "Cancelada" en el catálogo EstadoCampania',
+    'Falta el estado "Pausada" en el catálogo EstadoCampania',
   );
 });
 
@@ -73,10 +74,21 @@ describe('transiciones', () => {
   it('finaliza la que alcanzó el objetivo', async () => {
     vi.mocked(repo.listarVigentesParaCron).mockResolvedValue([fila(5, 'Activa', dia(-3), dia(30))]);
     vi.mocked(repo.resumirDonaciones).mockResolvedValue(
-      new Map([[5, { recaudado: 100000, donantes: 4, pendientes: 0 }]]),
+      new Map([[5, { recaudado: 100000, donantes: 4, pendientes: 0, total: 4 }]]),
     );
 
     expect(await transicionarEstadosCampanias(AHORA)).toEqual({ activadas: 0, finalizadas: 1 });
+  });
+
+  it('finaliza una Pausada vencida y deja quieta una Pausada vigente (spec 028)', async () => {
+    vi.mocked(repo.listarVigentesParaCron).mockResolvedValue([
+      fila(6, 'Pausada', dia(-30), dia(-1)),
+      fila(7, 'Pausada', dia(-30), dia(30)),
+    ]);
+
+    expect(await transicionarEstadosCampanias(AHORA)).toEqual({ activadas: 0, finalizadas: 1 });
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledWith(6, 4, 3, USUARIO_SISTEMA_ID);
+    expect(repo.cambiarEstadoSi).toHaveBeenCalledTimes(1);
   });
 
   it('carrera con el refugio: si ya cambió, la saltea sin error ni auditoría', async () => {

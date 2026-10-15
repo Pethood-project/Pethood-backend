@@ -9,10 +9,12 @@ import {
   cbuOpcionalSchema,
   decimalSchema,
   fechaFiltroSchema,
+  fechaFuturaSchema,
   fechaNoPasadaSchema,
   idSchema,
   limitePaginaSchema,
   listaDeIdsSchema,
+  noModificableSchema,
   textoSchema,
 } from '../../shared/validation/schemas';
 import {
@@ -52,6 +54,26 @@ export const crearCampaniaSchema = z
   );
 
 export type CrearCampaniaDto = z.infer<typeof crearCampaniaSchema>;
+
+/**
+ * Edición (spec 028). Multipart, todo opcional: lo ausente no cambia y la imagen nueva viaja
+ * aparte en `imagen`. Alias, CBU y fecha de inicio quedan fijos. Que la meta no baje de lo
+ * recaudado y que el fin sea posterior al inicio dependen de la campaña: los valida el servicio.
+ */
+export const editarCampaniaSchema = z.object({
+  titulo: textoSchema({ ...campania.titulo, etiqueta: 'El título' }).optional(),
+  descripcion: textoSchema({
+    max: campania.descripcion.max,
+    etiqueta: 'La descripción',
+  }).optional(),
+  objetivo: decimalSchema({ ...campania.objetivo, etiqueta: 'El objetivo' }).optional(),
+  fechaFin: fechaFuturaSchema('La fecha de fin').optional(),
+  alias: noModificableSchema('El alias'),
+  cbu: noModificableSchema('El CBU/CVU'),
+  fechaInicio: noModificableSchema('La fecha de inicio'),
+});
+
+export type EditarCampaniaDto = z.infer<typeof editarCampaniaSchema>;
 
 /** Portal del adoptante: sólo paginación. */
 export const paginaCampaniasSchema = z.object({
@@ -95,10 +117,12 @@ export const donarSchema = z.object({
 
 export type DonarDto = z.infer<typeof donarSchema>;
 
-/** Finalizar (HU-12.6) o cancelar (HU-12.5). */
+/** Finalizar (HU-12.6), pausar o reactivar (spec 028). */
 export const cambiarEstadoCampaniaSchema = z.object({
   estado: z.enum(ESTADOS_MANUALES, {
-    errorMap: () => ({ message: 'El estado tiene que ser "Finalizada" o "Cancelada"' }),
+    errorMap: () => ({
+      message: 'El estado tiene que ser "Finalizada", "Pausada" o "Activa"',
+    }),
   }),
 });
 
@@ -162,6 +186,8 @@ export interface CampaniaDto {
 /** En «Mis Campañas», además, cuántas donaciones esperan revisión. */
 export interface CampaniaRefugioDto extends CampaniaDto {
   pendientes: number;
+  /** Alguien avisó que donó, en cualquier estado: si es así, ya no se puede eliminar (spec 028). */
+  tieneDonaciones: boolean;
 }
 
 export interface ListaCampaniasDto<T extends CampaniaDto> {

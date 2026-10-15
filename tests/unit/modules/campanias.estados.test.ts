@@ -57,27 +57,51 @@ describe('siguienteEstadoAutomatico', () => {
     ).toBe('Finalizada');
   });
 
-  it('no toca estados finales', () => {
+  it('no toca una Finalizada', () => {
     expect(
-      siguienteEstadoAutomatico(campania({ estado: 'Finalizada', fechaFin: dia(-1) }), AHORA),
+      siguienteEstadoAutomatico(
+        campania({ estado: 'Finalizada', fechaFin: dia(-1), recaudado: 999999 }),
+        AHORA,
+      ),
     ).toBeNull();
+  });
+
+  it('finaliza una Pausada cuya fecha de fin ya pasó (spec 028)', () => {
     expect(
-      siguienteEstadoAutomatico(campania({ estado: 'Cancelada', recaudado: 999999 }), AHORA),
-    ).toBeNull();
+      siguienteEstadoAutomatico(campania({ estado: 'Pausada', fechaFin: dia(-1) }), AHORA),
+    ).toBe('Finalizada');
+  });
+
+  it('finaliza una Pausada que alcanzó el objetivo', () => {
+    expect(
+      siguienteEstadoAutomatico(campania({ estado: 'Pausada', recaudado: 100000 }), AHORA),
+    ).toBe('Finalizada');
+  });
+
+  it('deja Pausada una vigente: el cron no la reactiva', () => {
+    expect(siguienteEstadoAutomatico(campania({ estado: 'Pausada' }), AHORA)).toBeNull();
   });
 });
 
 describe('transicionManualPermitida', () => {
-  it('finalizar sólo desde Activa', () => {
+  it('finalizar desde Inactiva, Activa o Pausada', () => {
+    expect(transicionManualPermitida('Inactiva', 'Finalizada')).toBe(true);
     expect(transicionManualPermitida('Activa', 'Finalizada')).toBe(true);
-    expect(transicionManualPermitida('Inactiva', 'Finalizada')).toBe(false);
-    expect(transicionManualPermitida('Cancelada', 'Finalizada')).toBe(false);
+    expect(transicionManualPermitida('Pausada', 'Finalizada')).toBe(true);
+    expect(transicionManualPermitida('Finalizada', 'Finalizada')).toBe(false);
   });
 
-  it('cancelar desde Inactiva o Activa', () => {
-    expect(transicionManualPermitida('Inactiva', 'Cancelada')).toBe(true);
-    expect(transicionManualPermitida('Activa', 'Cancelada')).toBe(true);
-    expect(transicionManualPermitida('Finalizada', 'Cancelada')).toBe(false);
+  it('pausar sólo desde Activa', () => {
+    expect(transicionManualPermitida('Activa', 'Pausada')).toBe(true);
+    expect(transicionManualPermitida('Inactiva', 'Pausada')).toBe(false);
+    expect(transicionManualPermitida('Pausada', 'Pausada')).toBe(false);
+    expect(transicionManualPermitida('Finalizada', 'Pausada')).toBe(false);
+  });
+
+  it('reactivar sólo desde Pausada', () => {
+    expect(transicionManualPermitida('Pausada', 'Activa')).toBe(true);
+    expect(transicionManualPermitida('Inactiva', 'Activa')).toBe(false);
+    expect(transicionManualPermitida('Finalizada', 'Activa')).toBe(false);
   });
 });
 
