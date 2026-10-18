@@ -84,7 +84,7 @@ Es la forma de cada aviso, tanto en el listado del portal como en la respuesta d
 | `provincia`, `localidad` | Las del catálogo de georef que eligió quien publicó. `null` en avisos viejos |
 | `referencia` | El aclaratorio libre ("frente a la plaza"), o `null` si no lo cargó |
 | `distanciaKm` | Kilómetros, con un decimal, desde el usuario hasta el lugar del aviso. Sólo si el pedido trajo `latitud` y `longitud` **y** el lugar se pudo ubicar en el mapa (ver "Geocodificación del lugar"); si no, `null`. En el alta se mide desde el teléfono de quien publica |
-| `mapaUrl` | Link a Google Maps del lugar: con el punto exacto si se pudo geocodificar, o una búsqueda del texto del lugar si no. `null` sólo en avisos viejos sin localidad. **Nunca** apunta a las coordenadas del teléfono de quien reportó |
+| `mapaUrl` | Link a Google Maps del lugar: con el punto exacto si se pudo geocodificar, o una búsqueda del texto del lugar si no. `null` en avisos viejos sin localidad y en los **resueltos** (un caso cerrado no ofrece "Ver en Google Maps", 2026-10-18). **Nunca** apunta a las coordenadas del teléfono de quien reportó |
 | `estado` | Perdido, Encontrado o Resuelto, para el badge |
 | `especie` | `null` sólo en avisos cargados antes de HU-13.1 |
 | `fechaSuceso` | Día en que se perdió o se encontró, `AAAA-MM-DD` (sin hora, como `fechaNacimiento` de mascota). No es la fecha de publicación. `null` sólo en avisos cargados antes de este campo |
@@ -543,7 +543,7 @@ Los mismos campos del alta, con estas diferencias:
 | Campo | Diferencia con el alta |
 |---|---|
 | `latitud`, `longitud` | **No van**: son las del teléfono al publicar y no cambian |
-| `estadoId` | Perdido o Encontrado (se puede pasar de uno a otro). A Resuelto no: tiene su propio endpoint. En un aviso **ya resuelto** tiene que ser el de Resuelto: el estado no cambia, pero el resto sí se edita |
+| `estadoId` | Perdido o Encontrado (se puede pasar de uno a otro). A Resuelto no: tiene su propio endpoint |
 | `imagenes` | **Nuevo, repetido.** La galería final en orden: la ruta de cada foto que el aviso ya tenía (tal como la devolvió la API) o `nueva` en el lugar de cada archivo nuevo de `fotos`. De 1 a 5. Mismo formato que `PUT /publicaciones/:id` |
 | `fotos` | Sólo las nuevas, en el orden de sus marcas `nueva` |
 | `lugarLatitud`, `lugarLongitud` | El pin que el usuario vio en el mapa. Sin ellas: si el lugar no cambió queda el pin que tenía; si cambió, se vuelve a geocodificar |
@@ -573,7 +573,7 @@ Los de validación del alta, más:
 | 400 | `ESTADO_INVALIDO` | El aviso tiene que ser de una mascota perdida o encontrada. Para cerrar el caso, marcalo como resuelto. |
 | 403 | `SIN_PERMISO` | Sólo quien publicó el aviso puede editarlo |
 | 404 | `NO_ENCONTRADO` | No encontramos ese aviso (tampoco si se eliminó) |
-| 409 | `AVISO_RESUELTO` | Este caso ya está resuelto: no se puede cambiar su estado |
+| 409 | `AVISO_RESUELTO` | No podés editar un aviso resuelto: queda como registro de que la mascota volvió con su dueño. |
 
 ---
 
@@ -591,7 +591,7 @@ Sólo quien lo publicó. **Baja lógica**: el aviso sale del portal, de las opci
 |---|---|---|---|
 | 403 | `SIN_PERMISO` | Sólo quien publicó el aviso puede eliminarlo | |
 | 404 | `NO_ENCONTRADO` | No encontramos ese aviso | No existe o ya se eliminó |
-| 409 | `AVISO_RESUELTO` | No podés eliminar un aviso resuelto: queda como registro de que la mascota volvió con su dueño. | El caso está resuelto. El front lo explica antes de llamar |
+| 409 | `AVISO_RESUELTO` | No podés eliminar un aviso resuelto: queda como registro de que la mascota volvió con su dueño. | El caso está resuelto. El front ni ofrece el botón |
 
 ---
 
@@ -608,8 +608,8 @@ Sólo quien lo publicó. **Baja lógica**: el aviso sale del portal, de las opci
 7. **Pantalla de filtros:** fecha "desde" (obligatoria para filtrar por fecha) y "hasta" (opcional); estados de `GET /estados-animal-perdido`; especies de `GET /especies`, las dos de selección múltiple; provincias y localidades (varias de cada una, en desplegables) de `GET /animales-perdidos/ubicaciones`; y un radio en km para la cercanía.
 8. **Estados de la pantalla:** cargando / vacío / error. El vacío es `avisos: []`, no un error.
 9. **Ubicación del usuario:** mandar `latitud` y `longitud` siempre que se tengan, aunque no haya radio: así cada tarjeta trae `distanciaKm`. Sin permiso de ubicación el portal funciona igual, sin distancias ni filtro por cercanía.
-10. **Detalle:** `ubicacion` ya viene armada para mostrar; `mapaUrl` alimenta el botón "Ver en Google Maps".
-11. **Aviso propio** (HU-13.3): además de "Marcar como resuelto", "Editar" y "Eliminar". Eliminar pide confirmación; en uno resuelto no llama al backend y explica por qué no se puede.
+10. **Detalle:** `ubicacion` ya viene armada para mostrar; `mapaUrl` alimenta el botón "Ver en Google Maps", que en un aviso resuelto no se muestra (`mapaUrl` viene `null`).
+11. **Aviso propio** (HU-13.3): además de "Marcar como resuelto", "Editar" y "Eliminar". Eliminar pide confirmación. En uno resuelto no hay ni "Editar" ni "Eliminar" (2026-10-18).
 
 ### Mis publicaciones (HU-13.3)
 
@@ -671,7 +671,8 @@ Sólo quien lo publicó. **Baja lógica**: el aviso sale del portal, de las opci
 | **Editar reemplaza el formulario entero, con la galería por marcas** | Es el mismo formulario del alta y el mismo patrón que la edición de una publicación (spec 018): no hay que inventar un formato de "cambios parciales" para la galería. |
 | **Al editar, el pin sólo se vuelve a geocodificar si el lugar cambió** | Si el usuario había corregido el pin a mano, geocodificar de nuevo lo movería sin que lo pidiera. |
 | **Perdido ↔ Encontrado se puede editar; Resuelto no** | Quien cargó el aviso pudo equivocarse de estado. Resolver tiene su botón y su confirmación (HU-13.2), y un caso resuelto es terminal. |
-| **Un aviso resuelto no se elimina** | Es el registro de que la mascota volvió, y "Volvió con su dueño" es lo que la HU pide mostrar. Decisión del equipo del 2026-10-04. |
+| **Un aviso resuelto no se elimina ni se edita** | Es el registro de que la mascota volvió, y "Volvió con su dueño" es lo que la HU pide mostrar. No eliminarlo es decisión del equipo del 2026-10-04; no editarlo, del 2026-10-18 (antes se podía corregir todo menos el estado). |
+| **Un aviso resuelto no trae `mapaUrl`** | Ya no hay a dónde ir a buscar al animal, así que el detalle no ofrece "Ver en Google Maps" a nadie (2026-10-18). Lo decide la API y no cada cliente. |
 | **Eliminar no toca las conversaciones ni las fotos** | La tarjeta del chat es lo que se habló: si desapareciera, el mensaje "es éste" quedaría colgado. El detalle responde `AVISO_ELIMINADO` para que el cliente diga qué pasó. |
 | **`AVISO_ELIMINADO` aparte de `NO_ENCONTRADO`** | "No existe" y "lo eliminaron" se dicen distinto: el segundo es el caso normal desde una tarjeta del chat. Es 404 igual, porque para la API el aviso ya no está. |
 | **SQL a mano sólo para el radio** | Prisma no calcula distancias: el filtro por cercanía usa un `$queryRaw` con Haversine, igual que `idsPublicacionCerca` de publicaciones, y después el listado con cursor se restringe a esos ids. Las opciones del filtro se traen con Prisma (`distinct`) y se agrupan en el servicio. |

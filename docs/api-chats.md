@@ -261,7 +261,7 @@ Se puede resolver **en el cliente** filtrando por `contacto.nombre` sobre la lis
 
 ### Creación de salas — ✅ implementada (solicitudes y reclamos)
 
-Las salas ya no las crea sólo el seed: **al enviarse una solicitud de adopción o tránsito se abre la conversación**, con la tarjeta del pedido adentro (ver "Mensajes de sistema" en `api-chat-sala.md`). Vive en `chats.service.ts → asegurarChatDeSolicitud`, y la llama el módulo de solicitudes después de persistir.
+Las salas ya no las crea sólo el seed: **al enviarse una solicitud de adopción o tránsito se abre la conversación**, con la tarjeta del pedido adentro (ver "Mensajes de sistema" en `api-chat-sala.md`). Vive en `chats.service.ts → asegurarChatDeSolicitud`, y la llama el módulo de solicitudes después de persistir. El id de la sala vuelve como `chatId` en la respuesta de `POST /solicitudes`, y la app navega directo a ella.
 
 Las cinco condiciones que este documento anotaba se cumplieron:
 

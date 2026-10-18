@@ -256,7 +256,8 @@ export interface AvisoDto {
   distanciaKm: number | null;
   /**
    * Link a Google Maps del lugar: con las coordenadas geocodificadas o, si no las hay, buscando
-   * el texto del lugar. `null` sólo si el aviso no tiene lugar.
+   * el texto del lugar. `null` si el aviso no tiene lugar o si ya está resuelto: un caso
+   * cerrado no ofrece "Ver en Google Maps" (2026-10-18).
    */
   mapaUrl: string | null;
   /**

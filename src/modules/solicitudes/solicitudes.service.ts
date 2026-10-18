@@ -33,6 +33,7 @@ import type {
   ListaSolicitudesRecibidasDto,
   PeriodoTransitoDto,
   ResolverSolicitudDto,
+  SolicitudCreadaDto,
   SolicitudDetalleDto,
   SolicitudResumenDto,
 } from './solicitudes.dto';
@@ -362,7 +363,7 @@ const COMENTARIO_RECHAZO_POR_ADOPCION = 'La mascota fue adoptada por otra person
 export async function crearSolicitud(
   datos: CrearSolicitudDto,
   usuarioId: number,
-): Promise<SolicitudDetalleDto> {
+): Promise<SolicitudCreadaDto> {
   await exigirPuedeSolicitar(usuarioId, datos.publicacionId);
 
   const publicacion = await repo.buscarPublicacionParaSolicitar(datos.publicacionId);
@@ -426,18 +427,20 @@ export async function crearSolicitud(
   });
 
   // CONSTITUTION §7: la solicitud ES la interacción previa que habilita el chat, así que la
-  // sala se abre acá y con la tarjeta del pedido ya adentro.
+  // sala se abre acá y con la tarjeta del pedido ya adentro. Su id vuelve en la respuesta:
+  // la app lleva al solicitante directo a esa conversación.
   //
-  // No se espera ni se propaga el error: la solicitud está creada y confirmada al usuario;
-  // que la sala no se haya podido abrir no puede convertir eso en un 500. Si falla, el chat
-  // simplemente no existe todavía y se puede abrir en el próximo intento.
-  await chats.asegurarChatDeSolicitud(creada.id).catch((err: unknown) => {
+  // No se propaga el error: la solicitud está creada y confirmada al usuario; que la sala no
+  // se haya podido abrir no puede convertir eso en un 500. Si falla, `chatId` va `null`, el
+  // chat simplemente no existe todavía y se puede abrir en el próximo intento.
+  const chatId = await chats.asegurarChatDeSolicitud(creada.id).catch((err: unknown) => {
     console.error('No se pudo abrir el chat de la solicitud', creada.id, err);
+    return null;
   });
 
   await avisarSolicitudNueva(creada);
 
-  return aDetalleDto(creada);
+  return { ...aDetalleDto(creada), chatId };
 }
 
 /**

@@ -127,6 +127,13 @@ describe('obtenerAviso', () => {
 
     expect(await codigo(obtenerAviso(7, OTRO, null))).toBe('NO_ENCONTRADO');
   });
+
+  it('un caso resuelto no trae el link al mapa, para nadie', async () => {
+    mockedRepo.buscarPorId.mockResolvedValue(aviso({ estadoAnimalPerdido: ESTADOS.Resuelto }));
+
+    expect((await obtenerAviso(7, OTRO, null)).mapaUrl).toBeNull();
+    expect((await obtenerAviso(7, DUENO, null)).mapaUrl).toBeNull();
+  });
 });
 
 describe('listarMisAvisos', () => {
@@ -275,31 +282,23 @@ describe('editarAviso', () => {
     ).toBe('ESTADO_INVALIDO');
   });
 
-  it('en un caso resuelto se puede editar el resto, pero no el estado', async () => {
+  it('un caso resuelto no se edita, y el mensaje explica por qué', async () => {
     mockedRepo.buscarPorId.mockResolvedValue(aviso({ estadoAnimalPerdido: ESTADOS.Resuelto }));
 
-    await editarAviso(
-      7,
-      { ...SIN_CAMBIOS, estadoId: ESTADOS.Resuelto.id },
-      {
-        usuarioId: DUENO,
-        archivos: [],
-      },
-    );
-    expect(mockedRepo.actualizar).toHaveBeenCalled();
-
-    expect(
-      await codigo(
-        editarAviso(
-          7,
-          { ...SIN_CAMBIOS, estadoId: ESTADOS.Perdido.id },
-          {
-            usuarioId: DUENO,
-            archivos: [],
-          },
-        ),
+    await expect(
+      editarAviso(
+        7,
+        { ...SIN_CAMBIOS, estadoId: ESTADOS.Resuelto.id },
+        {
+          usuarioId: DUENO,
+          archivos: [],
+        },
       ),
-    ).toBe('AVISO_RESUELTO');
+    ).rejects.toMatchObject({
+      codigo: 'AVISO_RESUELTO',
+      mensaje: expect.stringContaining('volvió con su dueño'),
+    });
+    expect(mockedRepo.actualizar).not.toHaveBeenCalled();
   });
 
   it('sólo lo edita quien lo publicó', async () => {
