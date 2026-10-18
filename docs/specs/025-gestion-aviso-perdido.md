@@ -14,7 +14,8 @@ Resuelto.
 
 - **Incluye:**
   - Los avisos propios en "Mis publicaciones", junto con las publicaciones de adopción.
-  - Editar el aviso: todo lo que carga el formulario del alta, fotos incluidas.
+  - Editar el aviso: todo lo que carga el formulario del alta, fotos incluidas, salvo que esté
+    resuelto.
   - Eliminar el aviso (baja lógica), salvo que esté resuelto.
   - El detalle de un aviso por id, para abrir su popup desde la tarjeta del chat.
 - **NO incluye:**
@@ -47,9 +48,11 @@ el pin que el aviso ya tenía.
   etiqueta "Mascotas perdidas" y el badge del aviso. El diseño no trae esta variante: sigue el de
   la tarjeta de publicación, que no cambia.
 - **Popup del aviso** (el mismo del portal): en un aviso propio, "Marcar como resuelto" (HU-13.2),
-  "Editar" y "Eliminar". Eliminar pide confirmación; en uno resuelto explica por qué no se puede.
+  "Editar" y "Eliminar". Eliminar pide confirmación. En uno resuelto no hay ninguno de los tres,
+  ni "Ver en Google Maps" para nadie.
 - **Editar aviso:** el formulario del alta, con lo que el aviso ya tiene. No pide la ubicación del
-  teléfono. En un caso resuelto no ofrece Perdida / Encontrada.
+  teléfono. Si se llega con un caso resuelto (un link, o lo resolvieron desde otro teléfono),
+  dice que no se puede editar.
 - **Tarjeta del aviso en el chat:** "Ver el aviso" abre el popup ahí mismo. Si el aviso se
   eliminó, dice "Se eliminó esta publicación".
 
@@ -58,11 +61,12 @@ el pin que el aviso ya tenía.
 1. Sólo quien publicó el aviso lo edita o lo elimina → 403 `SIN_PERMISO`. (backend)
 2. Editar reemplaza todo el formulario, con las mismas reglas que el alta (nombre obligatorio en
    un aviso Perdido, de 1 a 5 fotos, lugar obligatorio, fecha no futura). (backend y front)
-3. Al editar se puede pasar de Perdido a Encontrado y al revés, pero no a Resuelto. Un aviso
-   resuelto se edita sin cambiar su estado. (backend y front)
+3. Al editar se puede pasar de Perdido a Encontrado y al revés, pero no a Resuelto. (backend y
+   front)
 4. Al editar, el pin del lugar es el que mande el cliente; si no manda ninguno, se vuelve a
    geocodificar sólo si el lugar cambió. (backend)
-5. Un aviso resuelto no se elimina → 409 `AVISO_RESUELTO`, con el motivo. (backend y front)
+5. Un aviso resuelto no se elimina ni se edita → 409 `AVISO_RESUELTO`, con el motivo. La app ni
+   ofrece los botones. (backend y front)
 6. Eliminar no toca las conversaciones ni las fotos: la tarjeta del aviso queda en el chat. Su
    detalle responde 404 `AVISO_ELIMINADO`. (backend)
 7. Los avisos propios se listan sólo desde el perfil personal: el aviso es de la persona.
@@ -75,7 +79,8 @@ el pin que el aviso ya tenía.
 - [x] Editar el aviso ajeno → 403.
 - [x] Pasar a Resuelto editando → 400 `ESTADO_INVALIDO`.
 - [x] Eliminar lo saca del portal, de las opciones del filtro y de Mis publicaciones.
-- [x] Eliminar uno resuelto → 409 `AVISO_RESUELTO`, y la app lo explica antes de llamar.
+- [x] Eliminar o editar uno resuelto → 409 `AVISO_RESUELTO`, y la app no ofrece los botones.
+- [x] Un aviso resuelto no trae `mapaUrl`: nadie ve "Ver en Google Maps".
 - [x] Después de eliminarlo, la tarjeta sigue en el chat y al tocarla dice que se eliminó.
 
 Cubiertos por `tests/unit/modules/animales-perdidos.gestion.test.ts` y verificados contra el
@@ -98,6 +103,10 @@ Pedidas por el equipo el 2026-10-04, al probar HU-13.2:
 2. **Un aviso resuelto no se elimina**, y la app explica por qué.
 3. **Eliminar deja la tarjeta en el chat**, y al tocarla dice "Se eliminó esta publicación".
 4. **"Ver el aviso" desde el chat abre el popup**, no el portal.
+
+Cambiada el 2026-10-18: **un aviso resuelto tampoco se edita** (antes se podía corregir todo
+menos el estado), y ya no se muestra "Eliminar" para explicar por qué no se puede: en un caso
+cerrado el popup no tiene ni "Editar" ni "Eliminar", ni "Ver en Google Maps" para nadie.
 
 Y una que tomó la implementación: **la edición es el formulario del alta**
 (`FormularioAviso` en mobile), no una pantalla aparte, para que las dos no se desincronicen.

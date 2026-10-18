@@ -298,6 +298,15 @@ export interface SolicitudDetalleDto extends SolicitudResumenDto {
   historial: EstadoSolicitudDto[];
 }
 
+/**
+ * Respuesta del alta (HU-7.1): el detalle más la conversación que se abrió con la tarjeta del
+ * pedido adentro, para que la app lleve al solicitante directo ahí (decisión del 2026-10-18).
+ * `null` si la sala no se pudo abrir: la solicitud está creada igual.
+ */
+export interface SolicitudCreadaDto extends SolicitudDetalleDto {
+  chatId: number | null;
+}
+
 export interface ListaSolicitudesRecibidasDto {
   /** Total que matchea el filtro, no el largo de esta página. */
   total: number;

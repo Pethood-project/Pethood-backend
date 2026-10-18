@@ -154,3 +154,36 @@ describe('crear una solicitud notifica al publicador (HU-4.2)', () => {
     expect(solicitudesRepo.listarIdsMiembrosDeRefugio).not.toHaveBeenCalled();
   });
 });
+
+// No es una notificación, pero es la misma alta y el mismo armado: la respuesta trae la sala
+// que se abrió, para que la app lleve al solicitante directo ahí (2026-10-18).
+describe('crearSolicitud — la conversación de la solicitud', () => {
+  beforeEach(() => {
+    vi.mocked(solicitudesRepo.buscarPublicacionParaSolicitar).mockResolvedValue({
+      mascota: {
+        usuarioId: PUBLICADOR,
+        refugioId: null,
+        historicoEstados: [{ estadoMascota: { nombre: 'Disponible' } }],
+      },
+      historicoEstados: [{ estadoPublicacion: { nombre: 'Activa' } }],
+    } as never);
+    vi.mocked(solicitudesRepo.crearConHogar).mockResolvedValue(solicitudCreada(null) as never);
+  });
+
+  it('devuelve el id de la sala donde quedó la tarjeta', async () => {
+    vi.mocked(chatsRepo.buscarMensajeDeSolicitud).mockResolvedValue({ chatId: 31 } as never);
+
+    const creada = await solicitudesService.crearSolicitud(NUEVA, SOLICITANTE);
+
+    expect(creada).toMatchObject({ id: 99, chatId: 31 });
+  });
+
+  it('si la sala no se pudo abrir, la solicitud sale igual con chatId null', async () => {
+    vi.mocked(chatsRepo.buscarMensajeDeSolicitud).mockRejectedValue(new Error('se cayó la base'));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const creada = await solicitudesService.crearSolicitud(NUEVA, SOLICITANTE);
+
+    expect(creada).toMatchObject({ id: 99, chatId: null });
+  });
+});

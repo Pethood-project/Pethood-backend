@@ -8,7 +8,8 @@
  * `refugioId`.
  *
  * Y lo que gestiona quien lo publicó (HU-13.3, desde "Mis publicaciones"): verlo, editarlo y
- * eliminarlo. Quedan afuera el histórico de estados y la reapertura de un caso resuelto.
+ * eliminarlo, mientras no esté resuelto. Quedan afuera el histórico de estados y la reapertura
+ * de un caso resuelto.
  */
 import { AppError } from '../../middlewares/errorHandler';
 import { distanciaKm, resolverCoordenadasDeMapsUrl, type Coordenadas } from '../../shared/geo';
@@ -84,6 +85,7 @@ function aDto(
   usuario: Coordenadas | null = null,
 ): AvisoDto {
   const lugar = lugarDe(aviso);
+  const resuelto = aviso.estadoAnimalPerdido.nombre === ESTADO_ANIMAL_PERDIDO_RESUELTO;
 
   return {
     id: aviso.id,
@@ -102,7 +104,8 @@ function aDto(
     localidad: aviso.localidad,
     referencia: aviso.referencia,
     distanciaKm: usuario && lugar ? Math.round(distanciaKm(usuario, lugar) * 10) / 10 : null,
-    mapaUrl: mapaUrlDe(aviso),
+    // Un caso resuelto no lleva al mapa: ya no hay a dónde ir a buscar al animal (2026-10-18).
+    mapaUrl: resuelto ? null : mapaUrlDe(aviso),
     lugar,
     estado: { id: aviso.estadoAnimalPerdido.id, nombre: aviso.estadoAnimalPerdido.nombre },
     especie: aviso.especie ? { id: aviso.especie.id, nombre: aviso.especie.nombre } : null,
@@ -506,24 +509,10 @@ async function exigirAvisoPropio(id: number, usuarioId: number, accion: string) 
 
 /**
  * El estado que queda después de editar. Entre Perdido y Encontrado se puede cambiar (quien lo
- * cargó pudo equivocarse); a Resuelto no, que tiene su propio botón y su confirmación; y uno
- * Resuelto no cambia, porque el caso está cerrado.
+ * cargó pudo equivocarse); a Resuelto no, que tiene su propio botón y su confirmación. Un aviso
+ * ya resuelto no llega acá: no se edita.
  */
-async function resolverEstadoEditado(
-  actual: { id: number; nombre: string },
-  estadoId: number,
-): Promise<{ id: number; nombre: string }> {
-  if (actual.nombre === ESTADO_ANIMAL_PERDIDO_RESUELTO) {
-    if (estadoId !== actual.id) {
-      throw new AppError(
-        'AVISO_RESUELTO',
-        'Este caso ya está resuelto: no se puede cambiar su estado',
-        409,
-      );
-    }
-    return actual;
-  }
-
+async function resolverEstadoEditado(estadoId: number): Promise<{ id: number; nombre: string }> {
   const estado = await repo.buscarEstado(estadoId);
 
   if (!estado) {
@@ -578,6 +567,9 @@ export interface ContextoEdicion {
  * cambió, se vuelve a geocodificar; si no cambió, queda el que tenía.
  *
  * Las fotos que se sacaron se borran del almacenamiento recién después de guardar.
+ *
+ * **Uno resuelto no se edita** (decisión del 2026-10-18), por lo mismo que no se elimina: queda
+ * como registro de que la mascota volvió con su dueño.
  */
 export async function editarAviso(
   id: number,
@@ -586,7 +578,16 @@ export async function editarAviso(
 ): Promise<AvisoDto> {
   const { usuarioId, archivos } = contexto;
   const aviso = await exigirAvisoPropio(id, usuarioId, 'editarlo');
-  const estado = await resolverEstadoEditado(aviso.estadoAnimalPerdido, datos.estadoId);
+
+  if (aviso.estadoAnimalPerdido.nombre === ESTADO_ANIMAL_PERDIDO_RESUELTO) {
+    throw new AppError(
+      'AVISO_RESUELTO',
+      'No podés editar un aviso resuelto: queda como registro de que la mascota volvió con su dueño.',
+      409,
+    );
+  }
+
+  const estado = await resolverEstadoEditado(datos.estadoId);
 
   if (estado.nombre === ESTADO_QUE_EXIGE_NOMBRE && !datos.nombre) {
     throw new AppError('VALIDACION', 'El nombre es obligatorio', 400);

@@ -68,8 +68,11 @@ POST /api/v1/solicitudes
 }
 → 201 { "id": 1042, "estado": { "id": 1, "nombre": "Pendiente" },
         "transito": { "fechaInicio": "2026-09-15", "fechaFin": "2026-12-15" },
-        "hogar": { "direccion": "Av. Santa Fe 3450, Palermo", ... }, ... }
+        "hogar": { "direccion": "Av. Santa Fe 3450, Palermo", ... }, ...,
+        "chatId": 87 }
 ```
+
+La respuesta es el detalle de la solicitud más `chatId`: la conversación con el refugio o la persona que publicó, que se abre (o se reusa) con la tarjeta del pedido adentro. La app lleva al solicitante directo ahí (2026-10-18). Es `null` si la sala no se pudo abrir: la solicitud queda creada igual.
 
 En una adopción, `tipoSolicitud` es `"Adopcion"` y las dos fechas se omiten; si llegan igual, se descartan en vez de rechazar el request (el formulario que pasa de tránsito a adopción deja de mostrar esos campos y no puede quedar trabado por ellos). Las fechas viajan como `AAAA-MM-DD` en los dos sentidos: son días de calendario, no instantes.
 
