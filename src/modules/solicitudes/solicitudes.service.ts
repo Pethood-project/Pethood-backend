@@ -515,7 +515,8 @@ function filtrarPorEstadoYFecha<
     // Mismo criterio que el panel «Solicitudes demoradas» del dashboard del refugio.
     if (
       filtros.demoradas &&
-      (!fila || !esSolicitudDemorada({ nombre: fila.estadoSolicitud.nombre, desde: fila.fechaAlta }, hoy))
+      (!fila ||
+        !esSolicitudDemorada({ nombre: fila.estadoSolicitud.nombre, desde: fila.fechaAlta }, hoy))
     ) {
       return false;
     }

@@ -189,7 +189,10 @@ function aSolicitudesDemoradas(
       const vigente = s.historicoEstados[0];
       if (
         !vigente ||
-        !esSolicitudDemorada({ nombre: vigente.estadoSolicitud.nombre, desde: vigente.fechaAlta }, hoy)
+        !esSolicitudDemorada(
+          { nombre: vigente.estadoSolicitud.nombre, desde: vigente.fechaAlta },
+          hoy,
+        )
       ) {
         return [];
       }
