@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
 import {
+  booleanoSchema,
   coordenadaOpcionalSchema,
   fechaOpcionalSchema,
   idSchema,
@@ -42,11 +43,6 @@ function listaSchema(maximoPorItem: number, etiqueta: string) {
     .transform((valores) => valores.map((valor) => valor.trim()).filter(Boolean));
 }
 
-const booleanoSchema = z
-  .union([z.boolean(), z.string()])
-  .optional()
-  .transform((valor) => valor === true || valor === 'true');
-
 /**
  * Lo que se carga al publicar y se puede editar después, con las mismas reglas en los dos
  * casos. La mascota queda afuera: se elige al crear y no se cambia.
@@ -67,7 +63,7 @@ const camposEditables = {
   longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
   requisitos: listaSchema(LIMITES.publicacion.requisito.max, 'Cada requisito'),
   personalidad: listaSchema(LIMITES.publicacion.personalidad.max, 'Cada rasgo'),
-  desparasitado: booleanoSchema,
+  desparasitado: booleanoSchema(),
 };
 
 export const crearPublicacionSchema = z.object({
@@ -309,10 +305,12 @@ export interface EstadoPublicacionDto {
 
 /**
  * Filtro de "Mis publicaciones": `?estados=1,3` (ids de `Estado_Publicacion`). Sin el
- * parámetro, o vacío, trae todas.
+ * parámetro, o vacío, trae todas. `?antiguas=true` deja solo las «demasiado antiguas» del
+ * dashboard del refugio (shared/alertasRefugio.ts); se suma a `estados` si llegan los dos.
  */
 export const filtrosMisPublicacionesSchema = z.object({
   estados: listaDeIdsSchema('El estado de publicación'),
+  antiguas: booleanoSchema(),
 });
 
 export type FiltrosMisPublicacionesDto = z.infer<typeof filtrosMisPublicacionesSchema>;
@@ -320,6 +318,9 @@ export type FiltrosMisPublicacionesDto = z.infer<typeof filtrosMisPublicacionesS
 /** Tarjeta de "Mis publicaciones": lo mínimo para la grilla, la ficha se pide aparte. */
 export interface PublicacionPropiaDto {
   id: number;
+  titulo: string;
+  /** Solicitudes vigentes (sin baja) que recibió, en cualquier estado. */
+  cantidadSolicitudes: number;
   /** Portada: la primera foto de la publicación, o la de la mascota si no subió propias. */
   imagenUrl: string | null;
   fechaPublicacion: string;

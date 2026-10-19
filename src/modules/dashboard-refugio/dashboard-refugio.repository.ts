@@ -1,3 +1,4 @@
+import { ESTADOS_PUBLICACION_GESTIONABLE } from '../../shared/alertasRefugio';
 import { prisma } from '../../shared/prisma';
 import { ESTADO_DONACION } from '../campanias/campanias.estados';
 
@@ -42,14 +43,21 @@ export function contarMascotasPorEstado(refugioId: number) {
 }
 
 /**
- * Publicaciones vigentes (sin baja) de mascotas del refugio, con la fecha en que se publicaron
- * — el service calcula hace cuántos días están publicadas a partir de esto.
+ * Publicaciones vigentes (sin baja) y todavía gestionables (Activa o Pausada) de mascotas del
+ * refugio, con la fecha en que se publicaron — el service calcula hace cuántos días están
+ * publicadas a partir de esto. Las Finalizadas no cuentan: no hay nada que renovar en ellas.
  */
 export function listarPublicacionesActivas(refugioId: number) {
   return prisma.publicacion.findMany({
     where: {
       fechaBaja: null,
       mascota: { refugioId, fechaBaja: null },
+      historicoEstados: {
+        some: {
+          fechaBaja: null,
+          estadoPublicacion: { nombre: { in: [...ESTADOS_PUBLICACION_GESTIONABLE] } },
+        },
+      },
     },
     select: { id: true, fechaAlta: true, mascota: { select: { nombre: true } } },
   });

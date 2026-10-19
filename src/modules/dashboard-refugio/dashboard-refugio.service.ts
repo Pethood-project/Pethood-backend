@@ -1,17 +1,19 @@
 import { AppError } from '../../middlewares/errorHandler';
+import {
+  diasDesde,
+  esSolicitudDemorada,
+  UMBRAL_PUBLICACION_ANTIGUA_DIAS,
+} from '../../shared/alertasRefugio';
 import { etiquetaUbicacion } from '../../shared/ubicacion';
 import { finDeMes, inicioDeMes, parsearMesISO } from '../../shared/validation/dates';
 import type { EntidadExportableRefugio, PeriodoDashboardInput } from './dashboard-refugio.dto';
 import * as repo from './dashboard-refugio.repository';
 
-/** Solicitud sin resolver todavía (mismo criterio que "abiertas" en el repository). */
-const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'];
-/** A partir de cuántos días sin resolver una solicitud abierta se considera demorada. */
-const UMBRAL_DEMORA_DIAS = 5;
+// Los umbrales de «demoradas» y «antiguas» viven en shared/alertasRefugio.ts: los comparten
+// los filtros de los listados a los que lleva cada panel.
+
 /** Cuántas solicitudes demoradas se listan en el detalle (las más antiguas primero). */
 const TOPE_DETALLE_DEMORADAS = 5;
-/** A partir de cuántos días publicada una publicación se considera "demasiado antigua". */
-const UMBRAL_PUBLICACION_ANTIGUA_DIAS = 60;
 /** Cuántas publicaciones demasiado antiguas se listan en el detalle (las más antiguas primero). */
 const TOPE_DETALLE_PUBLICACIONES_ANTIGUAS = 10;
 
@@ -125,10 +127,6 @@ function aConteoPorNombre(
   return Object.fromEntries(catalogo.map((item) => [item.nombre, porId.get(item.id) ?? 0]));
 }
 
-function diasDesde(fecha: Date, hoy: Date): number {
-  return Math.max(0, Math.floor((hoy.getTime() - fecha.getTime()) / 86_400_000));
-}
-
 const BUCKETS_ANTIGUEDAD_PUBLICACION = [
   '0-15 días',
   '15-30 días',
@@ -177,7 +175,7 @@ function aPublicacionesPorAntiguedad(
   return { porBucket, demasiadoAntiguas };
 }
 
-/** Solicitudes abiertas (sin resolver) hace más de UMBRAL_DEMORA_DIAS, más antiguas primero. */
+/** Solicitudes demoradas (ver shared/alertasRefugio.ts), más antiguas primero. */
 function aSolicitudesDemoradas(
   solicitudes: {
     id: number;
@@ -189,12 +187,14 @@ function aSolicitudesDemoradas(
   return solicitudes
     .flatMap((s) => {
       const vigente = s.historicoEstados[0];
-      if (!vigente || !ESTADOS_SOLICITUD_ABIERTA.includes(vigente.estadoSolicitud.nombre)) {
+      if (
+        !vigente ||
+        !esSolicitudDemorada({ nombre: vigente.estadoSolicitud.nombre, desde: vigente.fechaAlta }, hoy)
+      ) {
         return [];
       }
-      const dias = diasDesde(vigente.fechaAlta, hoy);
       const mascota = s.publicacion.mascota.nombre ?? '';
-      return dias >= UMBRAL_DEMORA_DIAS ? [{ id: s.id, mascota, dias }] : [];
+      return [{ id: s.id, mascota, dias: diasDesde(vigente.fechaAlta, hoy) }];
     })
     .sort((a, b) => b.dias - a.dias);
 }

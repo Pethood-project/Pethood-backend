@@ -1,4 +1,5 @@
 import { AppError } from '../../middlewares/errorHandler';
+import { esPublicacionAntigua } from '../../shared/alertasRefugio';
 import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { distanciaKm, resolverCoordenadasDeMapsUrl, type Coordenadas } from '../../shared/geo';
 import { registrarAuditoria } from '../../shared/logAuditoria';
@@ -722,7 +723,7 @@ export async function obtenerPublicacion(
 export async function listarMisPublicaciones(
   usuarioId: number,
   ambito: Ambito,
-  filtros: FiltrosMisPublicacionesDto = { estados: [] },
+  filtros: FiltrosMisPublicacionesDto = { estados: [], antiguas: false },
 ): Promise<PublicacionPropiaDto[]> {
   let filtro: { usuarioId: number } | { refugioId: number } = { usuarioId };
 
@@ -745,12 +746,20 @@ export async function listarMisPublicaciones(
     // mismo criterio que la ficha.
     const estado = estadoVigente(publicacion);
     if (!estado) return [];
+    if (
+      filtros.antiguas &&
+      !esPublicacionAntigua({ estado: estado.nombre, fechaAlta: publicacion.fechaAlta })
+    ) {
+      return [];
+    }
 
     const { mascota } = publicacion;
 
     return [
       {
         id: publicacion.id,
+        titulo: publicacion.titulo,
+        cantidadSolicitudes: publicacion._count.solicitudes,
         imagenUrl: imagenesDe(publicacion)[0] ?? null,
         fechaPublicacion: publicacion.fechaAlta.toISOString(),
         estado,

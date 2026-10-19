@@ -184,6 +184,8 @@ export const filtrosRecibidasSchema = z
     /** Filtran por `fechaAlta`, inclusive en las dos puntas. */
     fechaDesde: fechaFiltroSchema('fechaDesde'),
     fechaHasta: fechaFiltroSchema('fechaHasta'),
+    /** Solo las demoradas del dashboard del refugio (shared/alertasRefugio.ts). */
+    demoradas: booleanoSchema(),
     limite: z.coerce.number().int().positive().max(50).optional().default(20),
     desplazamiento: z.coerce.number().int().min(0).optional().default(0),
   })
