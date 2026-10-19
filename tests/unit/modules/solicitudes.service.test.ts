@@ -253,6 +253,28 @@ describe('listarRecibidas', () => {
     expect(solicitudes).toHaveLength(1);
     expect(solicitudes[0]!.id).toBe(2);
   });
+
+  it('demoradas: solo las abiertas que llevan 5 días o más en su estado vigente', async () => {
+    const hace = (dias: number) => new Date(Date.now() - dias * 86_400_000);
+    vi.mocked(repo.listarDelActor).mockResolvedValue(
+      [
+        solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: hace(6) }] }),
+        solicitudConDetalle({ historial: [{ estado: estado(1, 'Pendiente'), fecha: hace(2) }] }),
+        solicitudConDetalle({ historial: [{ estado: estado(2, 'En_Revision'), fecha: hace(5) }] }),
+        solicitudConDetalle({ historial: [{ estado: estado(3, 'Aprobada'), fecha: hace(30) }] }),
+      ].map((s, i) => ({ ...s, id: i + 1 })) as never,
+    );
+
+    const { total, solicitudes } = await service.listarRecibidas(MIEMBRO_REFUGIO, 'REFUGIO', {
+      estados: [],
+      demoradas: true,
+      limite: 20,
+      desplazamiento: 0,
+    });
+
+    expect(total).toBe(2);
+    expect(solicitudes.map((s) => s.id)).toEqual([1, 3]);
+  });
 });
 
 describe('obtenerDetalle', () => {

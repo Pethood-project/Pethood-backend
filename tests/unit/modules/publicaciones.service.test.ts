@@ -418,12 +418,15 @@ describe('listarMisPublicaciones — cada perfil ve solo las suyas', () => {
     const pausada = {
       ...publicacionActiva(USUARIO),
       historicoEstados: [{ estadoPublicacion: ESTADOS_PUBLICACION.Pausada }],
+      _count: { solicitudes: 3 },
     };
     vi.mocked(repo.listarDeAmbito).mockResolvedValue([pausada] as never);
 
     await expect(service.listarMisPublicaciones(USUARIO, 'PERSONAL')).resolves.toEqual([
       {
         id: PUBLICACION,
+        titulo: 'Toby busca hogar',
+        cantidadSolicitudes: 3,
         imagenUrl: '/api/v1/archivos/mascotas/toby.jpg',
         fechaPublicacion: '2026-08-19T15:00:00.000Z',
         estado: { id: 2, nombre: 'Pausada' },
@@ -442,6 +445,30 @@ describe('listarMisPublicaciones — cada perfil ve solo las suyas', () => {
     vi.mocked(repo.listarDeAmbito).mockResolvedValue([inconsistente] as never);
 
     await expect(service.listarMisPublicaciones(USUARIO, 'PERSONAL')).resolves.toEqual([]);
+  });
+
+  it('antiguas: solo las activas o pausadas con 60 días o más publicadas', async () => {
+    const hace = (dias: number) => new Date(Date.now() - dias * 86_400_000);
+    const con = (id: number, estadoPub: { id: number; nombre: string }, dias: number) => ({
+      ...publicacionActiva(USUARIO),
+      id,
+      fechaAlta: hace(dias),
+      historicoEstados: [{ estadoPublicacion: estadoPub }],
+      _count: { solicitudes: 0 },
+    });
+    vi.mocked(repo.listarDeAmbito).mockResolvedValue([
+      con(1, ESTADOS_PUBLICACION.Activa, 61),
+      con(2, ESTADOS_PUBLICACION.Pausada, 90),
+      con(3, ESTADOS_PUBLICACION.Activa, 10),
+      con(4, ESTADOS_PUBLICACION.Finalizada, 120),
+    ] as never);
+
+    const lista = await service.listarMisPublicaciones(USUARIO, 'PERSONAL', {
+      estados: [],
+      antiguas: true,
+    });
+
+    expect(lista.map((p) => p.id)).toEqual([1, 2]);
   });
 });
 

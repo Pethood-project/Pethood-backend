@@ -16,6 +16,7 @@
  */
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
+import { esSolicitudDemorada } from '../../shared/alertasRefugio';
 import * as chats from '../chats/chats.service';
 import * as favoritos from '../favoritos/favoritos.service';
 import * as notificaciones from '../notificaciones/notificaciones.service';
@@ -496,14 +497,27 @@ export async function listarMias(
  * la forma mínima que necesita el filtro, no de qué repo salió la lista.
  */
 function filtrarPorEstadoYFecha<
-  T extends { fechaAlta: Date; historicoEstados: { estadoSolicitud: { nombre: string } }[] },
+  T extends {
+    fechaAlta: Date;
+    historicoEstados: { fechaAlta: Date; estadoSolicitud: { nombre: string } }[];
+  },
 >(solicitudes: T[], filtros: FiltrosRecibidasDto | FiltrosMiasDto): T[] {
   // `estado` (uno) y `estados` (varios) se suman; sin ninguno, no se filtra por estado.
   const estados: string[] = filtros.estado ? [...filtros.estados, filtros.estado] : filtros.estados;
+  const hoy = new Date();
 
   return solicitudes.filter((s) => {
-    const vigente = s.historicoEstados[0]?.estadoSolicitud.nombre;
+    const fila = s.historicoEstados[0];
+    const vigente = fila?.estadoSolicitud.nombre;
     if (estados.length > 0 && (vigente === undefined || !estados.includes(vigente))) {
+      return false;
+    }
+    // Mismo criterio que el panel «Solicitudes demoradas» del dashboard del refugio.
+    if (
+      filtros.demoradas &&
+      (!fila ||
+        !esSolicitudDemorada({ nombre: fila.estadoSolicitud.nombre, desde: fila.fechaAlta }, hoy))
+    ) {
       return false;
     }
     if (filtros.fechaDesde && s.fechaAlta < filtros.fechaDesde) return false;

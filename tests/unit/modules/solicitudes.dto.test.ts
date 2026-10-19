@@ -67,12 +67,16 @@ describe('resolverSolicitudSchema', () => {
 describe('filtrosRecibidasSchema', () => {
   it('valores por defecto sin query params', () => {
     const resultado = filtrosRecibidasSchema.parse({});
-    expect(resultado).toEqual({ estados: [], limite: 20, desplazamiento: 0 });
+    expect(resultado).toEqual({ estados: [], demoradas: false, limite: 20, desplazamiento: 0 });
+  });
+
+  it('demoradas=true llega como booleano', () => {
+    expect(filtrosRecibidasSchema.parse({ demoradas: 'true' }).demoradas).toBe(true);
   });
 
   it('coerciona limite/desplazamiento desde query string', () => {
     const resultado = filtrosRecibidasSchema.parse({ limite: '5', desplazamiento: '10' });
-    expect(resultado).toEqual({ estados: [], limite: 5, desplazamiento: 10 });
+    expect(resultado).toEqual({ estados: [], demoradas: false, limite: 5, desplazamiento: 10 });
   });
 
   it('acepta un estado válido del catálogo', () => {

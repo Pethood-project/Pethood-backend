@@ -542,7 +542,11 @@ export function listarDeAmbito(
 
   return prisma.publicacion.findMany({
     where,
-    include: RELACIONES_FEED,
+    include: {
+      ...RELACIONES_FEED,
+      // Columna «Solicitudes» del panel web del refugio: las vigentes, en cualquier estado.
+      _count: { select: { solicitudes: { where: { fechaBaja: null } } } },
+    },
     orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
   });
 }
