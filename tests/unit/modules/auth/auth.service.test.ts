@@ -378,6 +378,85 @@ describe('auth.service', () => {
     expect(mockedRepo.crearUsuarioConRol).not.toHaveBeenCalled();
   });
 
+  describe('login con Google desde el panel (soloPanel)', () => {
+    const perfil = {
+      googleId: 'sub-google',
+      email: 'ana@mail.com',
+      nombre: 'Ana',
+      apellido: 'Perez',
+    };
+
+    function conRol(nombre: string, extras: Partial<UsuarioConRoles> = {}) {
+      const base = usuarioFake();
+      return usuarioFake({
+        roles: [{ ...base.roles[0]!, rol: { ...base.roles[0]!.rol, nombre } }],
+        ...extras,
+      });
+    }
+
+    function refugioConEstado(estado: string) {
+      return { id: 1, nombre: 'Patitas', fechaBaja: null, estado: { nombre: estado } };
+    }
+
+    beforeEach(() => {
+      mockedRepo.buscarPorGoogleId.mockResolvedValue(null);
+    });
+
+    it('no crea la cuenta si no existe', async () => {
+      mockedRepo.buscarPorEmail.mockResolvedValue(null);
+
+      await expect(loginConGoogle(perfil, { soloPanel: true })).rejects.toMatchObject({
+        codigo: 'USUARIO_NO_REGISTRADO',
+        httpStatus: 403,
+      });
+      expect(mockedRepo.crearUsuarioConRol).not.toHaveBeenCalled();
+    });
+
+    it('rechaza a un adoptante sin vincularle el googleId', async () => {
+      mockedRepo.buscarPorEmail.mockResolvedValue(usuarioFake());
+
+      await expect(loginConGoogle(perfil, { soloPanel: true })).rejects.toMatchObject({
+        codigo: 'SIN_PERMISOS_PANEL',
+        httpStatus: 403,
+      });
+      expect(mockedRepo.vincularGoogleId).not.toHaveBeenCalled();
+    });
+
+    it('rechaza a un miembro de un refugio sin verificar', async () => {
+      mockedRepo.buscarPorEmail.mockResolvedValue(
+        conRol(ROL_DB.MIEMBRO_REFUGIO, {
+          refugio: refugioConEstado('Pendiente'),
+        } as Partial<UsuarioConRoles>),
+      );
+
+      await expect(loginConGoogle(perfil, { soloPanel: true })).rejects.toMatchObject({
+        codigo: 'SIN_PERMISOS_PANEL',
+      });
+    });
+
+    it('deja entrar a un miembro de un refugio activo y vincula la cuenta', async () => {
+      const miembro = conRol(ROL_DB.MIEMBRO_REFUGIO, {
+        refugio: refugioConEstado('Activo'),
+      } as Partial<UsuarioConRoles>);
+      mockedRepo.buscarPorEmail.mockResolvedValue(miembro);
+      mockedRepo.vincularGoogleId.mockResolvedValue({ ...miembro, googleId: 'sub-google' });
+
+      const resultado = await loginConGoogle(perfil, { soloPanel: true });
+
+      expect(resultado.usuario.roles).toContain(ROL_API.MIEMBRO_REFUGIO);
+      expect(mockedRepo.vincularGoogleId).toHaveBeenCalledOnce();
+    });
+
+    it('deja entrar a un administrador', async () => {
+      const admin = conRol(ROL_DB.ADMIN, { googleId: 'sub-google' });
+      mockedRepo.buscarPorGoogleId.mockResolvedValue(admin);
+
+      const resultado = await loginConGoogle(perfil, { soloPanel: true });
+
+      expect(resultado.usuario.roles).toContain(ROL_API.ADMIN);
+    });
+  });
+
   it('registrar reactiva una cuenta dada de baja por el mismo usuario', async () => {
     const dadaDeBaja = usuarioDadoDeBaja({ contrasena: null, googleId: 'sub-google' });
     const reactivada = usuarioFake();

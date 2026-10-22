@@ -1,8 +1,11 @@
 import type { NextFunction, Request, Response } from 'express';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/errorHandler';
+import { consumirCanje, emitirCanje } from './auth.canjeStore';
 import * as authGoogle from './auth.google';
+import { nonceSchema } from './auth.dto';
 import type {
+  CanjeGoogleBody,
   GoogleIdTokenBody,
   LoginBody,
   RecuperarBody,
@@ -90,9 +93,16 @@ export async function loginGoogleIdToken(
   }
 }
 
-export function iniciarGoogle(_req: Request, res: Response, next: NextFunction): void {
+export function iniciarGoogle(req: Request, res: Response, next: NextFunction): void {
   try {
-    const url = authGoogle.crearUrlAutorizacionGoogle();
+    const soloPanel = req.query.destino === 'panel';
+    const nonce = nonceSchema.safeParse(req.query.nonce);
+    if (soloPanel && !nonce.success) {
+      redirectLogin(res, 'validacion');
+      return;
+    }
+
+    const url = authGoogle.crearUrlAutorizacionGoogle(soloPanel, nonce.data);
     res.redirect(url);
   } catch (error) {
     if (error instanceof AppError) {
@@ -122,16 +132,35 @@ export async function callbackGoogle(
       throw new AppError('VALIDACION', 'Falta el código de Google.', 400);
     }
 
-    authGoogle.validarStateOAuth(state);
+    const { soloPanel, nonce } = authGoogle.validarStateOAuth(state);
     const perfil = await authGoogle.intercambiarCodigoGoogle(code);
-    const resultado = await authService.loginConGoogle(perfil);
+    const resultado = await authService.loginConGoogle(perfil, { soloPanel });
 
+    // El panel recibe un código de un solo uso, no el JWT: la URL queda en historial y logs.
     const destino = new URL('/auth/callback', env.FRONTEND_WEB_URL);
-    destino.searchParams.set('token', resultado.token);
+    if (soloPanel && nonce) destino.searchParams.set('code', emitirCanje(resultado.token, nonce));
+    else destino.searchParams.set('token', resultado.token);
     res.redirect(destino.toString());
   } catch (error) {
     const codigo = error instanceof AppError ? error.codigo.toLowerCase() : 'google_error';
     redirectLogin(res, codigo);
+  }
+}
+
+export function canjearGoogle(req: Request, res: Response, next: NextFunction): void {
+  try {
+    const { code, nonce } = req.body as CanjeGoogleBody;
+    const token = consumirCanje(code, nonce);
+    if (!token) {
+      throw new AppError(
+        'CREDENCIALES_INVALIDAS',
+        'El ingreso con Google expiró. Volvé a intentarlo.',
+        401,
+      );
+    }
+    res.json({ token });
+  } catch (error) {
+    next(error);
   }
 }
 

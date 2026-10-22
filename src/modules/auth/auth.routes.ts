@@ -5,6 +5,7 @@ import { uploadImagenOpcional } from '../../middlewares/uploadImagen';
 import { validar } from '../../middlewares/validar';
 import * as authController from './auth.controller';
 import {
+  canjeGoogleBodySchema,
   googleIdTokenBodySchema,
   loginBodySchema,
   recuperarBodySchema,
@@ -35,5 +36,6 @@ authRouter.post('/recuperar', validar(recuperarBodySchema), authController.recup
 authRouter.post('/resetear', validar(resetearBodySchema), authController.resetear);
 
 authRouter.post('/google', validar(googleIdTokenBodySchema), authController.loginGoogleIdToken);
+authRouter.post('/google/canje', validar(canjeGoogleBodySchema), authController.canjearGoogle);
 authRouter.get('/google', authController.iniciarGoogle);
 authRouter.get('/google/callback', authController.callbackGoogle);
