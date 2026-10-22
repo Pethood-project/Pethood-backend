@@ -53,7 +53,7 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 23 | Las tarjetas de Inicio no muestran datos de campañas, y el refugio arma sus contadores con cuatro pedidos | Baja | frontend |
 | 24 | Módulo 11 usa GPS, contra el criterio original de "no GPS" (decisión de equipo) | Decisión de equipo | ambos |
 | 25 | Reseña no avisa al recibir una reseña (el reporte ya existe, spec 008) | Baja | ambos |
-| 26 | Las vacunas son un enum: el admin no puede agregarlas desde el panel | Baja | backend |
+| ~~26~~ | ~~Las vacunas son un enum: el admin no puede agregarlas desde el panel~~ | ✅ cerrada | — |
 | 27 | Moderación: las notificaciones no se pueden leer, no hay correo y no se avisa al reportado | Baja | backend |
 | ~~28~~ | ~~El dueño de un aviso de mascota perdida no puede retirarlo~~ | ✅ cerrada | — |
 | 29 | Campaña: el modelo no tiene alias ni CBU, ni confirmación de donaciones, ni baja | Media | backend |
@@ -565,7 +565,12 @@ al recibir una reseña (Módulo 4).
 **Cómo se arregla.** Cuando se haga el Módulo 4, enganchar el evento de alta de reseña al motor
 de notificaciones. Mismo trabajo que la #27.
 
-## 26. Las vacunas son un enum: el admin no puede agregarlas desde el panel — Baja
+## 26. Las vacunas son un enum: el admin no puede agregarlas desde el panel — ✅ **CERRADA**
+
+> Cerrada el 2026-10-22 por la spec 029: las vacunas son el catálogo `Vacuna` + `VacunaEspecie`,
+> con ABM desde el panel. `historia_clinica.vacuna_id` reemplazó al enum y `tipo` en la API sigue
+> siendo el código estable. Los colores de las medallas siguen en mobile (`vacuna_color` quedó
+> reservado). Lo que sigue abajo es el registro de cómo estaba.
 
 **Qué pasa.** `TipoVacuna` es un enum de `schema.prisma` y el plan de vacunación vive en
 `src/shared/vacunas.ts` (spec 019). Es a propósito: el código ramifica por el valor (qué
