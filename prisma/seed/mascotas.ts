@@ -5,14 +5,7 @@
 // "Adoptado"/"En_Transito" son las que tienen solicitud aprobada y seguimiento; las de Ana a
 // título personal son las de "Mis mascotas" con historia clínica. Los estados están variados
 // para que los dashboards tengan algo en cada bucket.
-import type {
-  GeneroMascota,
-  Mascota,
-  Publicacion,
-  TamanioMascota,
-  TipoVacuna,
-} from '@prisma/client';
-import { buscarVacuna } from '../../src/shared/vacunas';
+import type { GeneroMascota, Mascota, Publicacion, TamanioMascota } from '@prisma/client';
 import {
   foto,
   FOTOS_GATO,
@@ -48,7 +41,7 @@ interface DefHistoriaClinica {
   proximaEnDias?: number;
   requiereRevision?: boolean;
   /** Si el registro es una vacuna: el título tiene que ser el nombre de esa vacuna. */
-  tipoVacuna?: TipoVacuna;
+  tipoVacuna?: CodigoVacuna;
 }
 
 interface DefMascota {
@@ -70,7 +63,7 @@ interface DefMascota {
    * Plan de vacunación que ya tenía al cargarla, como en el alta desde la app (spec 019):
    * cada una se registra en la historia clínica a la edad del calendario.
    */
-  vacunas?: TipoVacuna[];
+  vacunas?: CodigoVacuna[];
   publicacion?: DefPublicacion;
   historiaClinica?: DefHistoriaClinica[];
 }
@@ -783,6 +776,9 @@ async function crearHistoriaClinica(
     if (existente) continue;
 
     const fechaVisita = haceDias(registro.diasAtras);
+    const vacuna = registro.tipoVacuna
+      ? await prisma.vacuna.findUniqueOrThrow({ where: { codigo: registro.tipoVacuna } })
+      : null;
     await prisma.historiaClinica.create({
       data: {
         mascotaId,
@@ -794,8 +790,8 @@ async function crearHistoriaClinica(
             ? null
             : new Date(fechaVisita.getTime() + registro.proximaEnDias * 86_400_000),
         requiereRevision: registro.requiereRevision ?? false,
-        vacunacion: registro.tipoVacuna !== undefined,
-        tipoVacuna: registro.tipoVacuna ?? null,
+        vacunacion: vacuna !== null,
+        vacunaId: vacuna?.id ?? null,
         usuarioAlta,
         fechaAlta: fechaVisita,
       },
@@ -803,8 +799,11 @@ async function crearHistoriaClinica(
   }
 }
 
-/** Edad típica de cada vacuna del calendario, en semanas (ver `src/shared/vacunas.ts`). */
-const SEMANAS_DEL_CALENDARIO: Record<TipoVacuna, number> = {
+/**
+ * Edad típica de cada vacuna del calendario, en semanas. Las claves son los `codigo` del
+ * catálogo que siembra `catalogos.ts` (spec 029).
+ */
+const SEMANAS_DEL_CALENDARIO = {
   PRIMOVACUNACION: 7,
   MULTIPLE: 10,
   REFUERZO_MULTIPLE: 15,
@@ -812,7 +811,18 @@ const SEMANAS_DEL_CALENDARIO: Record<TipoVacuna, number> = {
   REFUERZO_TRIVALENTE_LEUCEMIA: 12,
   REFUERZO_LEUCEMIA: 16,
   ANTIRRABICA: 16,
-};
+} as const;
+
+type CodigoVacuna = keyof typeof SEMANAS_DEL_CALENDARIO;
+
+/** La vacuna del catálogo con ese código para esa especie, o error: el seed está mal escrito. */
+async function buscarVacuna(codigo: CodigoVacuna, especie: string) {
+  const vacuna = await prisma.vacuna.findFirst({
+    where: { codigo, especies: { some: { especie: { nombre: especie } } } },
+  });
+  if (!vacuna) throw new Error(`La vacuna ${codigo} no es del plan de ${especie}`);
+  return vacuna;
+}
 
 /**
  * Vacunas que la mascota ya tenía al cargarla: un registro de historia clínica por cada una
@@ -822,16 +832,15 @@ async function crearVacunasIniciales(
   usuarioAlta: number,
   mascota: Mascota,
   especie: string,
-  tipos: TipoVacuna[],
+  tipos: CodigoVacuna[],
 ) {
   const hoy = new Date();
 
   for (const tipo of tipos) {
-    const vacuna = buscarVacuna(tipo, especie);
-    if (!vacuna) throw new Error(`La vacuna ${tipo} no es del plan de ${especie}`);
+    const vacuna = await buscarVacuna(tipo, especie);
 
     const existente = await prisma.historiaClinica.findFirst({
-      where: { mascotaId: mascota.id, tipoVacuna: tipo, fechaBaja: null },
+      where: { mascotaId: mascota.id, vacunaId: vacuna.id, fechaBaja: null },
     });
     if (existente) continue;
 
@@ -848,7 +857,7 @@ async function crearVacunasIniciales(
         descripcion: vacuna.descripcion,
         fechaVisita,
         vacunacion: true,
-        tipoVacuna: tipo,
+        vacunaId: vacuna.id,
         usuarioAlta,
         fechaAlta: fechaVisita,
       },

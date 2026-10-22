@@ -197,6 +197,81 @@ async function seedEspeciesYRazas(usuarioAlta: number) {
   }
 }
 
+/**
+ * Plan de vacunación (spec 019, catálogo desde la spec 029), en orden de calendario: el orden
+ * de los selectores es el de creación. Las mismas 7 que inserta la migración
+ * `20261022120000_vacunas_catalogo`; acá se completan en una base nueva, donde la migración
+ * corre antes de que existan las especies y no puede asociarlas.
+ */
+const VACUNAS: { codigo: string; nombre: string; descripcion: string; especies: string[] }[] = [
+  {
+    codigo: 'PRIMOVACUNACION',
+    nombre: 'Primovacunación',
+    descripcion: '6 a 8 semanas: Primovacunación con Puppy / Polivalente (Parvovirus y Moquillo).',
+    especies: ['Perro'],
+  },
+  {
+    codigo: 'MULTIPLE',
+    nombre: 'Vacuna Múltiple',
+    descripcion:
+      '9 a 12 semanas: Vacuna Múltiple o Séxtuple (Parvovirus, Moquillo, Hepatitis, ' +
+      'Parainfluenza y Leptospirosis).',
+    especies: ['Perro'],
+  },
+  {
+    codigo: 'REFUERZO_MULTIPLE',
+    nombre: 'Refuerzo Múltiple',
+    descripcion: '14 a 16 semanas: Refuerzo de la vacuna Múltiple/Óctuple.',
+    especies: ['Perro'],
+  },
+  {
+    codigo: 'ANTIRRABICA',
+    nombre: 'Antirrábica',
+    descripcion: 'A partir de los 3 a 4 meses: Vacuna Antirrábica (obligatoria por ley).',
+    especies: ['Perro', 'Gato'],
+  },
+  {
+    codigo: 'TRIVALENTE_FELINA',
+    nombre: 'Trivalente Felina',
+    descripcion:
+      '8 semanas: Vacuna Trivalente Felina (Panleucopenia, Calicivirus y Rinotraqueítis).',
+    especies: ['Gato'],
+  },
+  {
+    codigo: 'REFUERZO_TRIVALENTE_LEUCEMIA',
+    nombre: 'Refuerzo Trivalente + Leucemia',
+    descripcion:
+      '12 semanas: Refuerzo de la Trivalente Felina + Leucemia Felina (FeLV) (recomendada ' +
+      'si el gato tiene acceso al exterior o convivencia con otros gatos).',
+    especies: ['Gato'],
+  },
+  {
+    codigo: 'REFUERZO_LEUCEMIA',
+    nombre: 'Refuerzo Leucemia Felina',
+    descripcion: '16 semanas: Segundo refuerzo de Leucemia Felina (si aplica).',
+    especies: ['Gato'],
+  },
+];
+
+async function seedVacunas(usuarioAlta: number) {
+  for (const { especies, ...datos } of VACUNAS) {
+    const vacuna = await prisma.vacuna.upsert({
+      where: { codigo: datos.codigo },
+      update: {},
+      create: { ...datos, usuarioAlta },
+    });
+
+    for (const nombre of especies) {
+      const especie = await prisma.especie.findUniqueOrThrow({ where: { nombre } });
+      await prisma.vacunaEspecie.upsert({
+        where: { vacunaId_especieId: { vacunaId: vacuna.id, especieId: especie.id } },
+        update: {},
+        create: { vacunaId: vacuna.id, especieId: especie.id, usuarioAlta },
+      });
+    }
+  }
+}
+
 export async function seedCatalogos(): Promise<number> {
   await upsertPorNombre(
     'estadoUsuario',
@@ -237,6 +312,7 @@ export async function seedCatalogos(): Promise<number> {
   await seedTiposSolicitud(sistemaId);
   await seedPreguntasSeguimiento(sistemaId);
   await seedEspeciesYRazas(sistemaId);
+  await seedVacunas(sistemaId);
 
   return sistemaId;
 }
