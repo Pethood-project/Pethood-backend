@@ -131,6 +131,7 @@ export async function verificarIdTokenGoogle(idToken: string): Promise<PerfilGoo
     return mapearPerfil(ticket.getPayload() ?? {});
   } catch (error) {
     if (error instanceof AppError) throw error;
+    console.error('Google: falló verifyIdToken', error);
     throw new AppError('CREDENCIALES_INVALIDAS', 'No pudimos validar tu cuenta de Google.', 401);
   }
 }
@@ -150,6 +151,7 @@ export async function intercambiarCodigoGoogle(code: string): Promise<PerfilGoog
     return verificarIdTokenGoogle(tokens.id_token);
   } catch (error) {
     if (error instanceof AppError) throw error;
+    console.error('Google: falló el intercambio del code (getToken)', error);
     throw new AppError('CREDENCIALES_INVALIDAS', 'No pudimos completar el login con Google.', 401);
   }
 }
