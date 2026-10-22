@@ -1,6 +1,6 @@
 # Spec 029 — Vacunas como catálogo administrable
 
-**Estado:** APROBADA
+**Estado:** IMPLEMENTADA
 **Sprint:** 13 · **Responsable:** Grupo 09 · **Última actualización:** 2026-10-22
 
 ## 1. Objetivo
