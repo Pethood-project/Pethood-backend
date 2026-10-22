@@ -83,6 +83,14 @@ export const LIMITES = {
     secuenciaDias: { min: 1, max: 365 },
   },
 
+  /** Vacunas (spec 029). Sin contraparte en la app mobile: el código se elige, no se escribe. */
+  vacuna: {
+    /** Código estable: se genera del nombre (≤ `catalogo.nombre.max`) más un sufijo si se repite. */
+    codigo: { max: 60 },
+    /** Vacunas cargadas juntas en el alta de una mascota. Techo anti-abuso, no del plan. */
+    porMascota: { max: 30 },
+  },
+
   faqCategoria: {
     nombre: { min: 2, max: 50 },
     descripcion: { max: 200 },

@@ -75,7 +75,11 @@ export function buscar(id: number) {
     where: { id },
     include: {
       ...INCLUDE,
-      historiaClinica: { where: { fechaBaja: null }, orderBy: { fechaVisita: 'desc' } },
+      historiaClinica: {
+        where: { fechaBaja: null },
+        orderBy: { fechaVisita: 'desc' },
+        include: { vacuna: { select: { codigo: true } } },
+      },
     },
   });
 }

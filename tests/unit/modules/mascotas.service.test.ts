@@ -34,6 +34,20 @@ const DATOS_ADOPTANTE: CrearMascotaDto = {
   vacunas: [],
 };
 
+/** Plan del perro en el catálogo (spec 029), en orden de creación. */
+const PRIMOVACUNACION = {
+  id: 1,
+  codigo: 'PRIMOVACUNACION',
+  nombre: 'Primovacunación',
+  descripcion: '6 a 8 semanas: Primovacunación con Puppy / Polivalente (Parvovirus y Moquillo).',
+};
+const ANTIRRABICA = {
+  id: 4,
+  codigo: 'ANTIRRABICA',
+  nombre: 'Antirrábica',
+  descripcion: 'A partir de los 3 a 4 meses: Vacuna Antirrábica (obligatoria por ley).',
+};
+
 /** Arma lo que devolvería el repository tras crear, con el estado pedido. */
 function mascotaCreada(estado: { id: number; nombre: string }, refugioId: number | null = null) {
   return {
@@ -48,7 +62,7 @@ function mascotaCreada(estado: { id: number; nombre: string }, refugioId: number
     usuarioId: 2,
     raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
     historicoEstados: [{ estadoMascota: estado }],
-    historiaClinica: [] as { id?: number; tipoVacuna?: string; fechaVisita?: Date }[],
+    historiaClinica: [] as { id?: number; vacuna?: typeof PRIMOVACUNACION; fechaVisita?: Date }[],
   };
 }
 
@@ -486,6 +500,7 @@ describe('crearMascota — vacunas iniciales (spec 019)', () => {
   beforeEach(() => {
     vi.mocked(repo.buscarEstadoMascotaPorNombre).mockResolvedValue(ESTADOS.Disponible as never);
     vi.mocked(repo.crearConEstado).mockResolvedValue(mascotaCreada(ESTADOS.Disponible) as never);
+    vi.mocked(repo.listarVacunasDeEspecie).mockResolvedValue([PRIMOVACUNACION, ANTIRRABICA]);
   });
 
   it('las da de alta en la historia clínica con el nombre y la descripción del plan', async () => {
@@ -500,14 +515,15 @@ describe('crearMascota — vacunas iniciales (spec 019)', () => {
       { usuarioId: 2, archivo: ARCHIVO },
     );
 
+    expect(repo.listarVacunasDeEspecie).toHaveBeenCalledWith(1);
     const vacunas = vi.mocked(repo.crearConEstado).mock.calls[0]![0].vacunas;
     expect(vacunas).toEqual([
       expect.objectContaining({
-        tipoVacuna: 'PRIMOVACUNACION',
+        vacunaId: 1,
         fechaVisita: new Date(2022, 4, 1),
         titulo: 'Primovacunación',
       }),
-      expect.objectContaining({ tipoVacuna: 'ANTIRRABICA', titulo: 'Antirrábica' }),
+      expect.objectContaining({ vacunaId: 4, titulo: 'Antirrábica' }),
     ]);
     expect(vacunas[1]!.descripcion).toContain('obligatoria por ley');
   });
@@ -649,15 +665,15 @@ describe('obtenerMascota — ficha individual (HU-6.4)', () => {
     vi.mocked(repo.buscarPorIdConRelaciones).mockResolvedValue({
       ...mascotaCreada(ESTADOS.Disponible),
       historiaClinica: [
-        { tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2023, 7, 1) },
-        { tipoVacuna: 'PRIMOVACUNACION', fechaVisita: new Date(2022, 4, 1) },
-        { tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2024, 7, 1) },
+        { vacuna: ANTIRRABICA, fechaVisita: new Date(2023, 7, 1) },
+        { vacuna: PRIMOVACUNACION, fechaVisita: new Date(2022, 4, 1) },
+        { vacuna: ANTIRRABICA, fechaVisita: new Date(2024, 7, 1) },
       ],
     } as never);
 
     const ficha = await service.obtenerMascota(10, 2, 'PERSONAL');
 
-    // En el orden del calendario, no en el de carga.
+    // En el orden del catálogo (creación), no en el de carga.
     expect(ficha.vacunas).toEqual([
       expect.objectContaining({ tipo: 'PRIMOVACUNACION', fechaAplicacion: '2022-05-01' }),
       expect.objectContaining({ tipo: 'ANTIRRABICA', fechaAplicacion: '2024-08-01' }),

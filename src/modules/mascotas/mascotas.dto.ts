@@ -3,7 +3,7 @@
  * decimales) salen de `shared/validation`; acá solo se compone lo propio de Mascota.
  */
 import { z } from 'zod';
-import { TIPOS_VACUNA, type VacunaAplicadaDto } from '../../shared/vacunas';
+import type { VacunaAplicadaDto } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
@@ -29,7 +29,8 @@ export const DESTINOS = ['PROPIA', 'ADOPCION'] as const;
  * service, que es quien conoce la especie de la raza elegida.
  */
 const vacunaInicialSchema = z.object({
-  tipo: z.enum(TIPOS_VACUNA, { errorMap: () => ({ message: 'La vacuna no es válida' }) }),
+  /** `codigo` de la vacuna (spec 029); que exista y sea de la especie lo chequea el service. */
+  tipo: textoSchema({ min: 1, ...LIMITES.vacuna.codigo, etiqueta: 'La vacuna' }),
   fecha: fechaPasadaSchema('La fecha de la vacuna'),
 });
 
@@ -49,7 +50,7 @@ const camposBase = {
   }),
   /** JSON en el multipart: `[{ "tipo": "ANTIRRABICA", "fecha": "2026-05-10" }]`. Opcional. */
   vacunas: listaJsonSchema(vacunaInicialSchema, {
-    max: TIPOS_VACUNA.length,
+    ...LIMITES.vacuna.porMascota,
     etiqueta: 'Las vacunas',
   }),
 };

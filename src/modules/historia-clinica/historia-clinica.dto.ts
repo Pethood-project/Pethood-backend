@@ -2,9 +2,7 @@
  * Entrada y salida de historia clínica. Las reglas genéricas (trim, longitudes, fechas)
  * salen de `shared/validation`; acá solo se compone lo propio del módulo.
  */
-import type { TipoVacuna } from '@prisma/client';
 import { z } from 'zod';
-import { TIPOS_VACUNA } from '../../shared/vacunas';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoOpcionalSchema,
@@ -23,21 +21,15 @@ import { mensajeObligatorio } from '../../shared/validation/text';
  * - Con `tipoVacuna` es una vacuna: el título es el nombre de la vacuna (lo pone el service)
  *   y la descripción, si no viene, es la del plan de vacunación.
  * Fecha próxima y requiere revisión son opcionales en los dos casos. El tipo de vacuna solo
- * se fija acá — HU-8.3 no lo lista entre los campos editables.
+ * se fija acá — HU-8.3 no lo lista entre los campos editables. Es el `codigo` de la vacuna
+ * (spec 029): que exista y sea de la especie lo chequea el service contra el catálogo.
  */
 export const crearHistoriaClinicaSchema = z
   .object({
     fechaVisita: fechaPasadaSchema('La fecha de visita'),
     fechaProxima: fechaFuturaOpcionalSchema('La fecha próxima'),
     requiereRevision: booleanoSchema(),
-    tipoVacuna: z
-      .preprocess(
-        (valor) => (valor === '' || valor === null ? undefined : valor),
-        z
-          .enum(TIPOS_VACUNA, { errorMap: () => ({ message: 'La vacuna no es válida' }) })
-          .optional(),
-      )
-      .transform((valor): TipoVacuna | null => valor ?? null),
+    tipoVacuna: textoOpcionalSchema({ ...LIMITES.vacuna.codigo, etiqueta: 'La vacuna' }),
     titulo: textoOpcionalSchema({
       max: LIMITES.historiaClinica.titulo.max,
       etiqueta: 'El título',
@@ -88,8 +80,8 @@ export interface HistoriaClinicaDto {
   fechaProxima: string | null;
   requiereRevision: boolean;
   vacunacion: boolean;
-  /** Qué vacuna es, para pintar su medalla; null si no es vacuna (spec 019). */
-  tipoVacuna: TipoVacuna | null;
+  /** Código de la vacuna, para pintar su medalla; null si no es vacuna (spec 019). */
+  tipoVacuna: string | null;
   titulo: string;
   descripcion: string;
   documentoUrl: string | null;

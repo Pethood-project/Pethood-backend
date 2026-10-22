@@ -22,6 +22,15 @@ export function listarRazasDeEspecie(especieId: number) {
   });
 }
 
+/** Plan de vacunación de una especie (spec 029): vacunas activas, en orden de creación. */
+export function listarVacunasDeEspecie(especieId: number) {
+  return prisma.vacuna.findMany({
+    where: { fechaBaja: null, especies: { some: { especieId, fechaBaja: null } } },
+    select: { id: true, codigo: true, nombre: true, descripcion: true },
+    orderBy: { id: 'asc' },
+  });
+}
+
 export function listarEstadosPublicacion() {
   return prisma.estadoPublicacion.findMany({
     where: { fechaBaja: null },

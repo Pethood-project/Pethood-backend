@@ -60,7 +60,7 @@ export async function obtener(id: number) {
       titulo: h.titulo,
       descripcion: h.descripcion,
       vacunacion: h.vacunacion,
-      tipoVacuna: h.tipoVacuna,
+      tipoVacuna: h.vacuna?.codigo ?? null,
       documentoUrl: h.documentoUrl,
     })),
   };

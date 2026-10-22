@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { distanciaKm, resolverCoordenadasDeMapsUrl } from '../../shared/geo';
+import { SELECT_VACUNA } from '../../shared/vacunas';
 import { restarAnios, finDelDia } from '../../shared/validation/dates';
 import {
   ESTADO_PUBLICACION,
@@ -238,8 +239,8 @@ const RELACIONES_FEED = {
       },
       // Las vacunas vigentes de la mascota, para las medallas de la ficha (spec 019).
       historiaClinica: {
-        where: { fechaBaja: null, tipoVacuna: { not: null } },
-        select: { tipoVacuna: true, fechaVisita: true },
+        where: { fechaBaja: null, vacunaId: { not: null } },
+        select: { fechaVisita: true, vacuna: { select: SELECT_VACUNA } },
       },
     },
   },
