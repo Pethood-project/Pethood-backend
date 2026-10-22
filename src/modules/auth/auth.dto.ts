@@ -113,6 +113,17 @@ export const googleIdTokenBodySchema = z.object({
   idToken: z.string().min(1, 'Falta el token de Google.'),
 });
 
+export const nonceSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{32,128}$/, 'El nonce de Google no es válido.');
+
+export const canjeGoogleBodySchema = z.object({
+  code: z.string().min(1, 'Falta el código de Google.'),
+  nonce: nonceSchema,
+});
+
+export type CanjeGoogleBody = z.infer<typeof canjeGoogleBodySchema>;
+
 export const recuperarBodySchema = z.object({
   email: emailSchema,
 });

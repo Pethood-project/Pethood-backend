@@ -12,7 +12,14 @@ export interface PerfilGoogle {
 }
 
 const ESTADOS_OAUTH_TTL_MS = 10 * 60 * 1000;
-const estadosPendientes = new Map<string, number>();
+// `soloPanel`: el login nació en el panel web, que no crea cuentas (ver `loginConGoogle`).
+// `nonce`: lo genera el panel y lo guarda en una cookie; ata el flujo a ese navegador.
+interface EstadoPendiente {
+  vence: number;
+  soloPanel: boolean;
+  nonce?: string;
+}
+const estadosPendientes = new Map<string, EstadoPendiente>();
 
 function exigirClientIdGoogle(): string {
   if (!env.GOOGLE_CLIENT_ID) {
@@ -84,10 +91,10 @@ export function googleEstaConfigurado(): boolean {
   return Boolean(env.GOOGLE_CLIENT_ID);
 }
 
-export function crearUrlAutorizacionGoogle(): string {
+export function crearUrlAutorizacionGoogle(soloPanel = false, nonce?: string): string {
   const client = clienteOAuth();
   const state = randomBytes(24).toString('hex');
-  estadosPendientes.set(state, Date.now() + ESTADOS_OAUTH_TTL_MS);
+  estadosPendientes.set(state, { vence: Date.now() + ESTADOS_OAUTH_TTL_MS, soloPanel, nonce });
 
   return client.generateAuthUrl({
     access_type: 'online',
@@ -97,17 +104,22 @@ export function crearUrlAutorizacionGoogle(): string {
   });
 }
 
-export function validarStateOAuth(state: string | undefined): void {
+export function validarStateOAuth(state: string | undefined): {
+  soloPanel: boolean;
+  nonce?: string;
+} {
   if (!state) {
     throw new AppError('VALIDACION', 'Falta el parámetro state de Google.', 400);
   }
 
-  const vence = estadosPendientes.get(state);
+  const pendiente = estadosPendientes.get(state);
   estadosPendientes.delete(state);
 
-  if (!vence || Date.now() > vence) {
+  if (!pendiente || Date.now() > pendiente.vence) {
     throw new AppError('VALIDACION', 'El login con Google expiró. Volvé a intentarlo.', 400);
   }
+
+  return { soloPanel: pendiente.soloPanel, nonce: pendiente.nonce };
 }
 
 export async function verificarIdTokenGoogle(idToken: string): Promise<PerfilGoogle> {

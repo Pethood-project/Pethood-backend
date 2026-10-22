@@ -27,6 +27,7 @@ import { consumirCodigoReset, generarCodigoReset, guardarCodigoReset } from './a
 
 const BCRYPT_COST = 10;
 const EMAIL_SISTEMA = 'sistema@pethood.internal';
+const ESTADO_REFUGIO_ACTIVO = 'Activo';
 
 function nombresDeRol(usuario: UsuarioConRoles): string[] {
   return usuario.roles
@@ -337,16 +338,39 @@ export async function login(body: LoginBody): Promise<RespuestaAuth> {
   return aRespuesta(vigente);
 }
 
-export async function loginConGoogle(perfil: PerfilGoogle): Promise<RespuestaAuth> {
+/**
+ * El panel web es para admins y refugios activos: no registra cuentas nuevas y exige permisos
+ * antes de vincular el `googleId`, así un adoptante no deja rastro por intentar entrar.
+ */
+function exigirAccesoPanel(usuario: UsuarioConRoles): void {
+  const roles = rolesDbAApi(nombresDeRol(usuario));
+  const esAdmin = roles.includes(ROL_API.ADMIN);
+  const refugioActivo = aRefugioDeSesion(usuario.refugio)?.estado === ESTADO_REFUGIO_ACTIVO;
+
+  if (!esAdmin && !(roles.includes(ROL_API.MIEMBRO_REFUGIO) && refugioActivo)) {
+    throw new AppError(
+      'SIN_PERMISOS_PANEL',
+      'Tu cuenta no tiene acceso al panel. Es para administradores y refugios verificados.',
+      403,
+    );
+  }
+}
+
+export async function loginConGoogle(
+  perfil: PerfilGoogle,
+  { soloPanel = false }: { soloPanel?: boolean } = {},
+): Promise<RespuestaAuth> {
   const porGoogle = await authRepo.buscarPorGoogleId(perfil.googleId);
   if (porGoogle) {
     const vigente = await asegurarUsuarioActivo(porGoogle);
+    if (soloPanel) exigirAccesoPanel(vigente);
     return aRespuesta(vigente);
   }
 
   const porEmail = await authRepo.buscarPorEmail(perfil.email);
   if (porEmail) {
     const vigente = await asegurarUsuarioActivo(porEmail);
+    if (soloPanel) exigirAccesoPanel(vigente);
     const vinculado = await authRepo.vincularGoogleId(
       vigente.id,
       perfil.googleId,
@@ -359,6 +383,14 @@ export async function loginConGoogle(perfil: PerfilGoogle): Promise<RespuestaAut
       entidadId: vinculado.id,
     });
     return aRespuesta(vinculado);
+  }
+
+  if (soloPanel) {
+    throw new AppError(
+      'USUARIO_NO_REGISTRADO',
+      'No encontramos una cuenta con ese correo. Registrate primero desde la app.',
+      403,
+    );
   }
 
   const { estado, rol } = await exigirCatalogos(ROL_API.ADOPTANTE);
