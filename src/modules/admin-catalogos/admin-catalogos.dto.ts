@@ -41,13 +41,13 @@ const SOLO_EDICION: Permisos = { alta: false, edicion: true, baja: false };
 
 /**
  * Los estados y los tipos de solicitud son parte de la lógica de negocio (el código los
- * busca por nombre): solo se les edita la descripción. Las vacunas son un enum de
- * `schema.prisma` + `shared/vacunas.ts`, no una tabla: solo lectura.
+ * busca por nombre): solo se les edita la descripción. Las vacunas son ABM completo desde
+ * la spec 029.
  */
 export const PERMISOS: Record<NombreCatalogo, Permisos> = {
   especies: { alta: true, edicion: true, baja: true },
   razas: { alta: true, edicion: true, baja: true },
-  vacunas: { alta: false, edicion: false, baja: false },
+  vacunas: { alta: true, edicion: true, baja: true },
   'estados-mascota': SOLO_EDICION,
   'estados-publicacion': SOLO_EDICION,
   'estados-solicitud': SOLO_EDICION,
@@ -78,14 +78,30 @@ export interface DatosCatalogo {
   descripcion?: string | null;
   especieId?: number;
   secuenciaDias?: number;
+  /** Solo vacunas: especies que la admiten (al menos una). */
+  especieIds?: number[];
 }
 
 const ALTA_ESPECIE = z.object({ nombre, descripcion });
 const ALTA_RAZA = z.object({ nombre, especieId: idSchema('La especie') });
+/** El `codigo` no se recibe: lo genera el service (spec 029 §6). Edición = mismo body. */
+const ALTA_VACUNA = z.object({
+  nombre,
+  // Obligatoria: la app la precarga en la historia clínica y la muestra en la medalla.
+  descripcion: textoSchema({
+    min: 1,
+    max: LIMITES.catalogo.descripcion.max,
+    etiqueta: 'La descripción',
+  }),
+  especieIds: z
+    .array(idSchema('La especie'), { invalid_type_error: 'Las especies no son válidas' })
+    .min(1, 'Elegí al menos una especie'),
+});
 
 const EDICION_POR_CATALOGO: Partial<Record<NombreCatalogo, z.ZodTypeAny>> = {
   especies: ALTA_ESPECIE,
   razas: z.object({ nombre }),
+  vacunas: ALTA_VACUNA,
   'tipos-solicitud': z.object({
     descripcion,
     secuenciaDias: enteroSchema({ ...LIMITES.catalogo.secuenciaDias, etiqueta: 'La secuencia' }),
@@ -102,6 +118,7 @@ export function schemaAlta(
 ): z.ZodType<DatosCatalogo, z.ZodTypeDef, unknown> | undefined {
   if (catalogo === 'especies') return ALTA_ESPECIE;
   if (catalogo === 'razas') return ALTA_RAZA;
+  if (catalogo === 'vacunas') return ALTA_VACUNA;
   return undefined;
 }
 
