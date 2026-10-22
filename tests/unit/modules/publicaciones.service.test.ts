@@ -35,7 +35,12 @@ function mascota(usuarioId: number, refugioId: number | null = null) {
     raza: { id: 2, nombre: 'Labrador', especie: { id: 1, nombre: 'Perro' } },
     refugio: refugioId ? { id: refugioId, nombre: 'Refugio Patitas', direccion: 'Calle 1' } : null,
     historicoEstados: [{ estadoMascota: { id: 1, nombre: 'Disponible' } }],
-    historiaClinica: [{ tipoVacuna: 'ANTIRRABICA', fechaVisita: new Date(2025, 4, 1) }],
+    historiaClinica: [
+      {
+        vacuna: { id: 4, codigo: 'ANTIRRABICA', nombre: 'Antirrábica', descripcion: '...' },
+        fechaVisita: new Date(2025, 4, 1),
+      },
+    ],
   };
 }
 

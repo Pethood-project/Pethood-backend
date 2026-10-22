@@ -10,6 +10,9 @@ export interface FilaCatalogo {
   secuenciaDias?: number;
   especieId?: number;
   especie?: { id: number; nombre: string };
+  /** Solo vacunas. */
+  codigo?: string;
+  especies?: { especie: { id: number; nombre: string } }[];
   fechaAlta: Date;
   fechaBaja: Date | null;
   _count: Record<string, number>;
@@ -44,6 +47,12 @@ const CONFIG: Partial<Record<NombreCatalogo, Config>> = {
     orden: 'nombre',
   },
   razas: { delegado: prisma.raza as unknown as Delegado, usos: ['mascotas'], orden: 'nombre' },
+  // Orden de creación (spec 029). Los usos se informan, pero no bloquean la baja (ver service).
+  vacunas: {
+    delegado: prisma.vacuna as unknown as Delegado,
+    usos: ['historiasClinicas'],
+    orden: 'id',
+  },
   'estados-mascota': {
     delegado: prisma.estadoMascota as unknown as Delegado,
     usos: ['historicos'],
@@ -83,10 +92,18 @@ const CONFIG: Partial<Record<NombreCatalogo, Config>> = {
 
 function config(catalogo: NombreCatalogo): Config {
   const c = CONFIG[catalogo];
-  // `vacunas` no es una tabla: el service lo resuelve antes de llegar acá.
   if (!c) throw new Error(`El catálogo ${catalogo} no tiene tabla`);
   return c;
 }
+
+/** Especies vigentes de una vacuna, para la respuesta del ABM. */
+const ESPECIES_DE_VACUNA = {
+  especies: {
+    where: { fechaBaja: null },
+    select: { especie: { select: { id: true, nombre: true } } },
+    orderBy: { especieId: 'asc' },
+  },
+} as const;
 
 function include(catalogo: NombreCatalogo, c: Config) {
   return {
@@ -94,6 +111,7 @@ function include(catalogo: NombreCatalogo, c: Config) {
       select: Object.fromEntries(c.usos.map((rel) => [rel, { where: { fechaBaja: null } }])),
     },
     ...(catalogo === 'razas' ? { especie: { select: { id: true, nombre: true } } } : {}),
+    ...(catalogo === 'vacunas' ? ESPECIES_DE_VACUNA : {}),
   };
 }
 
@@ -175,4 +193,88 @@ export function reactivar(catalogo: NombreCatalogo, id: number, adminId: number)
 
 export function buscarEspecieActiva(id: number) {
   return prisma.especie.findFirst({ where: { id, fechaBaja: null } });
+}
+
+// ─────────────── Vacunas (spec 029) ───────────────
+
+export function contarEspeciesActivas(ids: number[]) {
+  return prisma.especie.count({ where: { id: { in: ids }, fechaBaja: null } });
+}
+
+/** Códigos que ya empiezan con `base`, incluidos los de baja: el código es único para siempre. */
+export async function codigosQueEmpiezanCon(base: string): Promise<string[]> {
+  const filas = await prisma.vacuna.findMany({
+    where: { codigo: { startsWith: base } },
+    select: { codigo: true },
+  });
+  return filas.map((f) => f.codigo);
+}
+
+/** Especies vigentes y activas de una vacuna (para reactivarla). */
+export function contarEspeciesActivasDeVacuna(vacunaId: number) {
+  return prisma.vacunaEspecie.count({
+    where: { vacunaId, fechaBaja: null, especie: { fechaBaja: null } },
+  });
+}
+
+interface DatosVacuna {
+  nombre: string;
+  descripcion: string;
+}
+
+export function crearVacuna(
+  datos: DatosVacuna & { codigo: string },
+  especieIds: number[],
+  adminId: number,
+) {
+  const c = config('vacunas');
+  return prisma.vacuna.create({
+    data: {
+      ...datos,
+      ...datosAlta(adminId),
+      especies: { create: especieIds.map((especieId) => ({ especieId, ...datosAlta(adminId) })) },
+    },
+    include: include('vacunas', c),
+  }) as unknown as Promise<FilaCatalogo>;
+}
+
+/**
+ * Edita una vacuna y deja sus especies iguales a `especieIds`, sin borrar filas: la que se
+ * quita se da de baja y la que vuelve se reactiva (spec 029 §3).
+ */
+export function actualizarVacuna(
+  id: number,
+  datos: DatosVacuna,
+  especieIds: number[],
+  adminId: number,
+) {
+  const c = config('vacunas');
+  return prisma.$transaction(async (tx) => {
+    const actuales = await tx.vacunaEspecie.findMany({ where: { vacunaId: id } });
+
+    for (const fila of actuales) {
+      const queda = especieIds.includes(fila.especieId);
+      if (queda && fila.fechaBaja) {
+        await tx.vacunaEspecie.update({
+          where: { id: fila.id },
+          data: { usuarioBaja: null, fechaBaja: null, ...datosModificacion(adminId) },
+        });
+      } else if (!queda && !fila.fechaBaja) {
+        await tx.vacunaEspecie.update({ where: { id: fila.id }, data: datosBaja(adminId) });
+      }
+    }
+
+    const nuevas = especieIds.filter((e) => !actuales.some((f) => f.especieId === e));
+    if (nuevas.length > 0) {
+      await tx.vacunaEspecie.createMany({
+        data: nuevas.map((especieId) => ({ vacunaId: id, especieId, ...datosAlta(adminId) })),
+      });
+    }
+
+    return tx.vacuna.update({
+      where: { id },
+      data: { ...datos, ...datosModificacion(adminId) },
+      include: include('vacunas', c),
+    }) as unknown as Promise<FilaCatalogo>;
+  });
 }

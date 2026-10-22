@@ -63,25 +63,6 @@ enum TamanioMascota {
   GRANDE
 }
 
-// Vacuna de un registro de historia clínica (spec 019). El plan de vacunación de perros y
-// gatos es fijo y el código ramifica por el valor (especie que la admite, color de la
-// medalla en la app), por eso es enum y no un catálogo editable. El nombre visible, la
-// especie y la descripción de cada una viven en `src/shared/vacunas.ts`.
-//
-// ANTIRRABICA es una sola para las dos especies: es la misma vacuna y la medalla tiene
-// que verse igual en un perro que en un gato.
-enum TipoVacuna {
-  PRIMOVACUNACION
-  MULTIPLE
-  REFUERZO_MULTIPLE
-  TRIVALENTE_FELINA
-  REFUERZO_TRIVALENTE_LEUCEMIA
-  REFUERZO_LEUCEMIA
-  ANTIRRABICA
-
-  @@map("tipo_vacuna")
-}
-
 // ─────────────── CATÁLOGOS ───────────────
 // Todas gestionables desde el panel admin (MODELO_DATOS.md, nota de cierre).
 
@@ -99,8 +80,54 @@ model Especie {
 
   razas            Raza[]
   animalesPerdidos AnimalPerdido[]
+  vacunas          VacunaEspecie[]
 
   @@map("especie")
+}
+
+// Plan de vacunación (spec 029). `codigo` es estable: se genera del nombre al crear, no se
+// edita y es lo que la API expone como `tipo` (la app ata el color de la medalla a él).
+// El orden de los selectores es el de creación (`id`).
+model Vacuna {
+  id          Int     @id @default(autoincrement()) @map("vacuna_id")
+  codigo      String  @unique @map("vacuna_codigo")
+  nombre      String  @unique @map("vacuna_nombre")
+  descripcion String  @map("vacuna_descripcion")
+  // Reservado para una spec futura: hoy siempre nulo, los colores viven en mobile.
+  color       String? @map("vacuna_color")
+
+  usuarioAlta         Int       @map("vacuna_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("vacuna_fecha_alta")
+  usuarioModificacion Int?      @map("vacuna_usuario_modificacion")
+  fechaModificacion   DateTime? @map("vacuna_fecha_modificacion")
+  usuarioBaja         Int?      @map("vacuna_usuario_baja")
+  fechaBaja           DateTime? @map("vacuna_fecha_baja")
+
+  especies          VacunaEspecie[]
+  historiasClinicas HistoriaClinica[]
+
+  @@map("vacuna")
+}
+
+// Especies que admite cada vacuna (N:M: la antirrábica es de perros y gatos). Quitar una
+// especie es baja lógica; volver a agregarla reactiva la misma fila.
+model VacunaEspecie {
+  id        Int @id @default(autoincrement()) @map("vacuna_especie_id")
+  vacunaId  Int @map("vacuna_id")
+  especieId Int @map("especie_id")
+
+  usuarioAlta         Int       @map("vacuna_especie_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("vacuna_especie_fecha_alta")
+  usuarioModificacion Int?      @map("vacuna_especie_usuario_modificacion")
+  fechaModificacion   DateTime? @map("vacuna_especie_fecha_modificacion")
+  usuarioBaja         Int?      @map("vacuna_especie_usuario_baja")
+  fechaBaja           DateTime? @map("vacuna_especie_fecha_baja")
+
+  vacuna  Vacuna  @relation(fields: [vacunaId], references: [id])
+  especie Especie @relation(fields: [especieId], references: [id])
+
+  @@unique([vacunaId, especieId])
+  @@map("vacuna_especie")
 }
 
 model Raza {
@@ -302,36 +329,36 @@ model Rol {
 // ─────────────── USUARIOS ───────────────
 
 model Usuario {
-  id              Int       @id @default(autoincrement()) @map("usuario_id")
-  nombre          String    @map("usuario_nombre")
-  apellido        String    @map("usuario_apellido")
-  email           String    @unique @map("usuario_email")
+  id                  Int       @id @default(autoincrement()) @map("usuario_id")
+  nombre              String    @map("usuario_nombre")
+  apellido            String    @map("usuario_apellido")
+  email               String    @unique @map("usuario_email")
   // Nullable: las cuentas creadas solo con Google no tienen contraseña local.
-  contrasena      String?   @map("usuario_contrasena")
-  telefono        String?   @map("usuario_telefono")
+  contrasena          String?   @map("usuario_contrasena")
+  telefono            String?   @map("usuario_telefono")
   // Nullable: el registro mobile actual no pide DNI; Google OAuth tampoco.
-  dni             String?   @unique @map("usuario_dni")
-  fechaNacimiento DateTime? @map("usuario_fecha_nacimiento")
-  googleId        String?   @unique @map("usuario_google_id")
-  verificado      Boolean   @default(false) @map("usuario_verificado")
-  imagenUrl       String?   @map("usuario_imagen_url")
+  dni                 String?   @unique @map("usuario_dni")
+  fechaNacimiento     DateTime? @map("usuario_fecha_nacimiento")
+  googleId            String?   @unique @map("usuario_google_id")
+  verificado          Boolean   @default(false) @map("usuario_verificado")
+  imagenUrl           String?   @map("usuario_imagen_url")
   // Documentación de identidad (spec 002.1): foto del DNI y selfie. Privadas (URL firmada).
-  dniImagenUrl    String?   @map("usuario_dni_imagen_url")
-  selfieUrl       String?   @map("usuario_selfie_url")
+  dniImagenUrl        String?   @map("usuario_dni_imagen_url")
+  selfieUrl           String?   @map("usuario_selfie_url")
   // Dirección estructurada del perfil, para geocodificar (node-geocoder). El texto que se
   // muestra es la concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
-  provincia       String?   @map("usuario_provincia")
-  localidad       String?   @map("usuario_localidad")
-  calleAltura     String?   @map("usuario_calle_altura")
+  provincia           String?   @map("usuario_provincia")
+  localidad           String?   @map("usuario_localidad")
+  calleAltura         String?   @map("usuario_calle_altura")
   // URL de Google Maps y coordenadas resultantes de la geocodificación. Las coordenadas se
   // guardan aparte para calcular distancia (Haversine) sin parsear la URL.
-  mapaUrl         String?   @map("usuario_mapa_url")
-  latitud         Float?    @map("usuario_latitud")
-  longitud        Float?    @map("usuario_longitud")
+  mapaUrl             String?   @map("usuario_mapa_url")
+  latitud             Float?    @map("usuario_latitud")
+  longitud            Float?    @map("usuario_longitud")
   // Si el usuario confirmó que el link de Maps apunta a su dirección real.
-  ubicacionVerificada Boolean @default(false) @map("usuario_ubicacion_verificada")
-  refugioId       Int?      @map("refugio_id")
-  estadoId        Int       @map("estado_id")
+  ubicacionVerificada Boolean   @default(false) @map("usuario_ubicacion_verificada")
+  refugioId           Int?      @map("refugio_id")
+  estadoId            Int       @map("estado_id")
 
   usuarioAlta         Int       @map("usuario_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("usuario_fecha_alta")
@@ -348,8 +375,8 @@ model Usuario {
   publicaciones        Publicacion[]
   favoritos            Favorito[]
   solicitudes          Solicitud[]
-  resenasComoAutor     Resena[]        @relation("ResenaAutor")
-  resenasComoReportado Resena[]        @relation("ResenaReportado")
+  resenasComoAutor     Resena[]          @relation("ResenaAutor")
+  resenasComoReportado Resena[]          @relation("ResenaReportado")
   chats                UsuarioChat[]
   mensajes             Mensaje[]
   notificaciones       Notificacion[]
@@ -383,28 +410,28 @@ model RolUsuario {
 // ─────────────── REFUGIOS ───────────────
 
 model Refugio {
-  id          Int     @id @default(autoincrement()) @map("refugio_id")
-  nombre      String  @map("refugio_nombre")
+  id                  Int     @id @default(autoincrement()) @map("refugio_id")
+  nombre              String  @map("refugio_nombre")
   // Dirección estructurada, para geocodificar (node-geocoder). El texto que se muestra es la
   // concatenación «calle_altura, localidad - provincia» (ver shared/ubicacion.ts).
-  provincia   String? @map("refugio_provincia")
-  localidad   String? @map("refugio_localidad")
-  calleAltura String? @map("refugio_calle_altura")
+  provincia           String? @map("refugio_provincia")
+  localidad           String? @map("refugio_localidad")
+  calleAltura         String? @map("refugio_calle_altura")
   // Enlace a Google Maps del refugio (Módulo 11): se muestra en el detalle de la mascota y
   // sus coordenadas, cuando el link las incluye, alimentan el filtro por cercanía.
-  mapaUrl     String? @map("refugio_mapa_url")
+  mapaUrl             String? @map("refugio_mapa_url")
   // Coordenadas persistidas al geocodificar la dirección, para no depender de parsear
   // `mapa_url` en el camino crítico del feed.
-  latitud     Float?  @map("refugio_latitud")
-  longitud    Float?  @map("refugio_longitud")
+  latitud             Float?  @map("refugio_latitud")
+  longitud            Float?  @map("refugio_longitud")
   // Si el refugio confirmó que el link de Maps apunta a su dirección real.
   ubicacionVerificada Boolean @default(false) @map("refugio_ubicacion_verificada")
-  telefono    String? @map("refugio_telefono")
-  email       String? @map("refugio_email")
-  descripcion String? @map("refugio_descripcion")
-  verificado  Boolean @default(false) @map("refugio_verificado")
-  imagenUrl   String? @map("refugio_imagen_url")
-  estadoId    Int     @map("estado_id")
+  telefono            String? @map("refugio_telefono")
+  email               String? @map("refugio_email")
+  descripcion         String? @map("refugio_descripcion")
+  verificado          Boolean @default(false) @map("refugio_verificado")
+  imagenUrl           String? @map("refugio_imagen_url")
+  estadoId            Int     @map("estado_id")
 
   usuarioAlta         Int       @map("refugio_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("refugio_fecha_alta")
@@ -419,7 +446,7 @@ model Refugio {
   mascotas             Mascota[]
   campanias            Campania[]
   conexionMercadoPago  ConexionMercadoPago?
-  resenasComoReportado Resena[]   @relation("ResenaReportado")
+  resenasComoReportado Resena[]             @relation("ResenaReportado")
   chats                Chat[]
 
   @@map("refugio")
@@ -648,19 +675,20 @@ model SolicitudEstado {
 // ─────────────── HISTORIA CLÍNICA ───────────────
 
 model HistoriaClinica {
-  id               Int         @id @default(autoincrement()) @map("historia_clinica_id")
-  fechaVisita      DateTime    @map("historia_clinica_fecha_visita")
-  fechaProxima     DateTime?   @map("historia_clinica_fecha_proxima")
-  requiereRevision Boolean     @default(false) @map("historia_clinica_requiere_revision")
-  vacunacion       Boolean     @default(false) @map("historia_clinica_vacunacion")
-  // Qué vacuna se aplicó (spec 019). Va junto con `vacunacion = true`; las vacunas de la
-  // mascota (sus medallas) salen de los registros vigentes con este campo cargado. Nulo en
-  // los registros que no son vacuna y en las vacunas cargadas antes de que existiera.
-  tipoVacuna       TipoVacuna? @map("historia_clinica_tipo_vacuna")
-  titulo           String      @map("historia_clinica_titulo")
-  descripcion      String      @map("historia_clinica_descripcion")
-  documentoUrl     String?     @map("historia_clinica_documento_url")
-  mascotaId        Int         @map("mascota_id")
+  id               Int       @id @default(autoincrement()) @map("historia_clinica_id")
+  fechaVisita      DateTime  @map("historia_clinica_fecha_visita")
+  fechaProxima     DateTime? @map("historia_clinica_fecha_proxima")
+  requiereRevision Boolean   @default(false) @map("historia_clinica_requiere_revision")
+  vacunacion       Boolean   @default(false) @map("historia_clinica_vacunacion")
+  // Qué vacuna se aplicó (spec 019, catálogo desde la spec 029). Va junto con
+  // `vacunacion = true`; las vacunas de la mascota (sus medallas) salen de los registros
+  // vigentes con este campo cargado. Nulo en los registros que no son vacuna y en las
+  // vacunas cargadas antes de la spec 019.
+  vacunaId         Int?      @map("vacuna_id")
+  titulo           String    @map("historia_clinica_titulo")
+  descripcion      String    @map("historia_clinica_descripcion")
+  documentoUrl     String?   @map("historia_clinica_documento_url")
+  mascotaId        Int       @map("mascota_id")
 
   // Regla crítica: inmutable. No hay UPDATE sobre un registro persistido — "modificar" es
   // baja lógica + alta de uno nuevo. usuarioModificacion/fechaModificacion no deberían
@@ -673,6 +701,8 @@ model HistoriaClinica {
   fechaBaja           DateTime? @map("historia_clinica_fecha_baja")
 
   mascota Mascota @relation(fields: [mascotaId], references: [id])
+  // Restrict: la historia clínica es inmutable, una vacuna no puede dejarla sin referencia.
+  vacuna  Vacuna? @relation(fields: [vacunaId], references: [id], onDelete: Restrict)
 
   @@map("historia_clinica")
 }
@@ -957,10 +987,10 @@ model Notificacion {
 }
 
 model DispositivoPush {
-  id             Int    @id @default(autoincrement()) @map("dispositivo_push_id")
-  expoPushToken  String @map("dispositivo_push_expo_push_token")
-  plataforma     String @map("dispositivo_push_plataforma") // 'ios' | 'android'
-  usuarioId      Int    @map("usuario_id")
+  id            Int    @id @default(autoincrement()) @map("dispositivo_push_id")
+  expoPushToken String @map("dispositivo_push_expo_push_token")
+  plataforma    String @map("dispositivo_push_plataforma") // 'ios' | 'android'
+  usuarioId     Int    @map("usuario_id")
 
   usuarioAlta         Int       @map("dispositivo_push_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("dispositivo_push_fecha_alta")

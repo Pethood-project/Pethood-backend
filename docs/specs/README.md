@@ -40,3 +40,4 @@ Cada módulo tiene una spec numerada que se escribe y aprueba ANTES de codificar
 | 026 | Campañas de donación (HU-12.1 a HU-12.7) | 13 | APROBADA |
 | 027 | Confirmación automática de donaciones con Mercado Pago | 13 | APROBADA |
 | 028 | Editar, pausar y eliminar campañas (sin HU) | 13 | APROBADA |
+| 029 | Vacunas como catálogo administrable | 13 | IMPLEMENTADA |

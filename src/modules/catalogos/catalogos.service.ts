@@ -1,5 +1,4 @@
 import { AppError } from '../../middlewares/errorHandler';
-import { vacunasDeEspecie } from '../../shared/vacunas';
 import * as repo from './catalogos.repository';
 
 /**
@@ -41,7 +40,7 @@ export async function listarRazasDeEspecie(especieId: number) {
 }
 
 /**
- * Vacunas del plan de la especie (spec 019), en el orden del calendario: alimentan el
+ * Vacunas del plan de la especie (spec 019), en orden de creación (spec 029): alimentan el
  * selector del alta de mascota y el de historia clínica. Vacío si la especie no tiene plan.
  */
 export async function listarVacunasDeEspecie(especieId: number) {
@@ -51,8 +50,11 @@ export async function listarVacunasDeEspecie(especieId: number) {
     throw new AppError('NO_ENCONTRADO', 'La especie no existe', 404);
   }
 
-  return vacunasDeEspecie(especie.nombre).map(({ tipo, nombre, descripcion }) => ({
-    tipo,
+  // `tipo` es el código: el contrato de la spec 019 no cambia (spec 029).
+  const vacunas = await repo.listarVacunasDeEspecie(especieId);
+  return vacunas.map(({ id, codigo, nombre, descripcion }) => ({
+    id,
+    tipo: codigo,
     nombre,
     descripcion,
   }));

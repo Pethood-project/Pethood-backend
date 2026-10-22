@@ -147,25 +147,29 @@ async function resolverRaza(razaId: number, especieId: number) {
  * registros de historia clínica. Cada una tiene que ser del plan de la especie y posterior
  * al nacimiento, y no se repite: un mismo tipo dos veces en el alta es un error de carga.
  */
-function resolverVacunasIniciales(
+async function resolverVacunasIniciales(
   vacunas: CrearMascotaDto['vacunas'],
-  mascota: { especie: string; fechaNacimiento: Date },
-): repo.DatosVacunaInicial[] {
+  mascota: { especieId: number; fechaNacimiento: Date },
+): Promise<repo.DatosVacunaInicial[]> {
   const tipos = new Set(vacunas.map((vacuna) => vacuna.tipo));
 
   if (tipos.size !== vacunas.length) {
     throw new AppError('VALIDACION', 'No podés cargar la misma vacuna dos veces', 400);
   }
+  if (vacunas.length === 0) return [];
+
+  const plan = await repo.listarVacunasDeEspecie(mascota.especieId);
 
   return vacunas.map(({ tipo, fecha }) => {
-    const resultado = validarVacunaDeMascota(tipo, fecha, mascota);
+    const vacuna = plan.find((v) => v.codigo === tipo) ?? null;
+    const resultado = validarVacunaDeMascota(vacuna, fecha, mascota.fechaNacimiento);
 
     if (!resultado.valida) {
       throw new AppError('VALIDACION', resultado.error, 400);
     }
 
     return {
-      tipoVacuna: tipo,
+      vacunaId: resultado.vacuna.id,
       fechaVisita: fecha,
       titulo: resultado.vacuna.nombre,
       descripcion: resultado.vacuna.descripcion,
@@ -209,8 +213,8 @@ export async function crearMascota(
 
   const usuario = await exigirUsuarioVerificado(contexto.usuarioId);
   const raza = await resolverRaza(datos.razaId, datos.especieId);
-  const vacunas = resolverVacunasIniciales(datos.vacunas, {
-    especie: raza.especie.nombre,
+  const vacunas = await resolverVacunasIniciales(datos.vacunas, {
+    especieId: raza.especieId,
     fechaNacimiento: datos.fechaNacimiento,
   });
   const estadoMascotaId = await resolverEstadoInicial(datos);
@@ -416,7 +420,7 @@ export async function obtenerMascota(
   return {
     ...aDto(mascota as MascotaConRelaciones),
     publicacionActivaId,
-    vacunas: vacunasAplicadas(mascota.historiaClinica, mascota.raza.especie.nombre),
+    vacunas: vacunasAplicadas(mascota.historiaClinica),
   };
 }
 

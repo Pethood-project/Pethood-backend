@@ -3,6 +3,11 @@
 **Estado:** APROBADA
 **Sprint:** 13 · **Responsable:** Grupo 09 · **Última actualización:** 2026-09-28
 
+> **Actualizada por la spec 029 (2026-10-22):** el plan de vacunación dejó de ser fijo en código
+> (enum `tipo_vacuna` + `shared/vacunas.ts`) y pasó a ser un catálogo administrable desde el
+> panel. El contrato de esta spec (`tipo`, `tipoVacuna`) no cambió: ahora es el `codigo` de la
+> vacuna. La antirrábica quedó con una sola descripción para perro y gato.
+
 ## 1. Objetivo
 
 Que las vacunas de una mascota dejen de ser texto libre y pasen a ser datos: se eligen de un

@@ -107,12 +107,13 @@ describe('crearHistoriaClinicaSchema — vacuna (spec 019)', () => {
     expect(resultado.success && resultado.data.tipoVacuna).toBe('ANTIRRABICA');
   });
 
-  it('rechaza un tipo de vacuna que no existe', () => {
+  // Que el código exista y sea de la especie lo chequea el service contra el catálogo (spec 029).
+  it('rechaza un código de vacuna más largo que el límite', () => {
     const resultado = crearHistoriaClinicaSchema.safeParse({
       fechaVisita: ayer(),
-      tipoVacuna: 'COVID',
+      tipoVacuna: 'A'.repeat(61),
     });
-    expect(!resultado.success && resultado.error.issues[0]!.message).toBe('La vacuna no es válida');
+    expect(resultado.success).toBe(false);
   });
 
   it('un registro común sin título avisa qué falta', () => {

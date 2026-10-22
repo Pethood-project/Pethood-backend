@@ -30,7 +30,7 @@ function aDto(registro: Registro): HistoriaClinicaDto {
     fechaProxima: registro.fechaProxima ? aFechaISO(registro.fechaProxima) : null,
     requiereRevision: registro.requiereRevision,
     vacunacion: registro.vacunacion,
-    tipoVacuna: registro.tipoVacuna,
+    tipoVacuna: registro.vacuna?.codigo ?? null,
     titulo: registro.titulo,
     descripcion: registro.descripcion,
     // Comprobante médico: privado, la URL sale firmada y vence.
@@ -95,19 +95,17 @@ async function exigirAcceso(mascotaId: number, usuarioId: number, ambito: Ambito
  * su nombre y, si no trae descripción, lleva la del plan de vacunación; tiene que ser del
  * plan de la especie y posterior al nacimiento, igual que al cargarla con la mascota.
  */
-function resolverContenido(
+async function resolverContenido(
   datos: CrearHistoriaClinicaDto,
   mascota: Mascota,
-): { titulo: string; descripcion: string } {
+): Promise<{ titulo: string; descripcion: string; vacunaId: number | null }> {
   if (!datos.tipoVacuna) {
     // El DTO ya exige los dos cuando no es vacuna.
-    return { titulo: datos.titulo!, descripcion: datos.descripcion! };
+    return { titulo: datos.titulo!, descripcion: datos.descripcion!, vacunaId: null };
   }
 
-  const resultado = validarVacunaDeMascota(datos.tipoVacuna, datos.fechaVisita, {
-    especie: mascota.raza.especie.nombre,
-    fechaNacimiento: mascota.fechaNacimiento,
-  });
+  const vacuna = await repo.buscarVacunaDeEspecie(datos.tipoVacuna, mascota.raza.especieId);
+  const resultado = validarVacunaDeMascota(vacuna, datos.fechaVisita, mascota.fechaNacimiento);
 
   if (!resultado.valida) {
     throw new AppError('VALIDACION', resultado.error, 400);
@@ -116,6 +114,7 @@ function resolverContenido(
   return {
     titulo: resultado.vacuna.nombre,
     descripcion: datos.descripcion ?? resultado.vacuna.descripcion,
+    vacunaId: resultado.vacuna.id,
   };
 }
 
@@ -125,7 +124,7 @@ export async function crearHistoriaClinica(
   contexto: Contexto,
 ): Promise<HistoriaClinicaDto> {
   const { mascota } = await exigirAcceso(mascotaId, contexto.usuarioId, contexto.ambito);
-  const { titulo, descripcion } = resolverContenido(datos, mascota);
+  const { titulo, descripcion, vacunaId } = await resolverContenido(datos, mascota);
 
   const documentoUrl = contexto.archivo
     ? await guardarImagen(contexto.archivo, SUBCARPETA_DOCUMENTOS)
@@ -138,8 +137,8 @@ export async function crearHistoriaClinica(
         fechaVisita: datos.fechaVisita,
         fechaProxima: datos.fechaProxima,
         requiereRevision: datos.requiereRevision,
-        vacunacion: datos.tipoVacuna !== null,
-        tipoVacuna: datos.tipoVacuna,
+        vacunacion: vacunaId !== null,
+        vacunaId,
         titulo,
         descripcion,
         documentoUrl,
@@ -207,7 +206,7 @@ export async function obtenerHistoriaClinica(
 /**
  * "Modificar" (HU-8.3): nunca actualiza el registro persistido. Da de baja el anterior y
  * crea uno nuevo con los campos fusionados — lo que no vino en el PATCH conserva el valor
- * vigente. `vacunacion` y `tipoVacuna` no son editables y siempre se arrastran del registro
+ * vigente. `vacunacion` y la vacuna no son editables y siempre se arrastran del registro
  * anterior; en una vacuna el título tampoco, porque es el nombre de la vacuna.
  */
 export async function editarHistoriaClinica(
@@ -236,8 +235,8 @@ export async function editarHistoriaClinica(
         fechaProxima: datos.fechaProxima !== undefined ? datos.fechaProxima : registro.fechaProxima,
         requiereRevision: datos.requiereRevision ?? registro.requiereRevision,
         vacunacion: registro.vacunacion,
-        tipoVacuna: registro.tipoVacuna,
-        titulo: registro.tipoVacuna ? registro.titulo : (datos.titulo ?? registro.titulo),
+        vacunaId: registro.vacunaId,
+        titulo: registro.vacunaId ? registro.titulo : (datos.titulo ?? registro.titulo),
         descripcion: datos.descripcion ?? registro.descripcion,
         documentoUrl: documentoNuevo ?? registro.documentoUrl,
         mascotaId: registro.mascotaId,

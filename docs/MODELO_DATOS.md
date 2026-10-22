@@ -23,6 +23,8 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 
 - **Especie** (`especie_id PK`) — ej. Perro, Gato.
 - **Raza** (`raza_id PK`, FK a `especie_id`) — depende de la especie seleccionada (el frontend debe filtrar razas dinámicamente al elegir especie).
+- **Vacuna** (`vacuna_id PK`) — plan de vacunación, ABM desde el panel admin. Además de nombre (único) y descripción (obligatoria): `vacuna_codigo` (único, estable: se genera del nombre al crear y no se edita; la API lo expone como `tipo`) y `vacuna_color` (nullable, reservado: hoy siempre nulo). El orden de los selectores es el de creación. **Agregado fuera del diagrama de clases (2026-10-22, spec 029)**: reemplaza al enum `tipo_vacuna`.
+- **Vacuna_Especie** (`vacuna_especie_id PK`, FK `vacuna_id`, FK `especie_id`, único `(vacuna_id, especie_id)`) — qué especies admite cada vacuna (N:M: la antirrábica es de perros y gatos). Quitar una especie es baja lógica; volver a agregarla reactiva la fila. Agregado fuera del diagrama (spec 029).
 - **Estado_Mascota** (`estado_mascota_id PK`) — valores: Disponible, En_Tratamiento, Adoptado, Fallecido, En_Transito (ver nota de negocio).
 - **Estado_Publicacion** (`estado_publicacion_id PK`) — valores: Activa, Pausada, Finalizada. Es el estado del aviso, no el de la mascota (ver `Publicacion_Estado`). **Agregado fuera del diagrama de clases (2026-09-25)**: pendiente reflejarlo en el diagrama del grupo.
 - **Estado_Usuario** (`estado_usuario_id PK`).
@@ -98,7 +100,7 @@ Ver catálogos arriba.
 | `publicacion_personalidad` | `text[]` | Rasgos elegidos como pastillas (≤25 caracteres cada uno). Hoy las opciones están fijas en el frontend; cuando se definan, deberían pasar a ser un catálogo como Especie o Raza. |
 | `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
 
-**Vacunas (2026-09-27, spec 019):** `publicacion_vacunas` (texto libre) se eliminó. Las vacunas son de la mascota y viven en `Historia_Clinica` (`historia_clinica_tipo_vacuna`); la publicación las muestra leyéndolas de ahí.
+**Vacunas (2026-09-27, spec 019):** `publicacion_vacunas` (texto libre) se eliminó. Las vacunas son de la mascota y viven en `Historia_Clinica` (`vacuna_id`, antes `historia_clinica_tipo_vacuna`); la publicación las muestra leyéndolas de ahí.
 
 **Campos agregados por el Módulo 11 (2026-09-27, HU-11.3):**
 
@@ -168,7 +170,7 @@ Ver catálogos. Incluye `tipo_solicitud_secuencia_dias` para parametrizar ventan
 
 `historia_clinica_id PK`, `historia_clinica_fecha_visita`, `historia_clinica_fecha_proxima`, `historia_clinica_requiere_revision`, `historia_clinica_vacunacion`, `historia_clinica_titulo`, `historia_clinica_descripcion`, `historia_clinica_documento_url`, FK `mascota_id FK NOT NULL`.
 
-**Campo agregado fuera del diagrama de clases (2026-09-27, spec 019):** `historia_clinica_tipo_vacuna` (enum `tipo_vacuna`, nullable) — qué vacuna del plan de vacunación se aplicó: `PRIMOVACUNACION`, `MULTIPLE`, `REFUERZO_MULTIPLE`, `TRIVALENTE_FELINA`, `REFUERZO_TRIVALENTE_LEUCEMIA`, `REFUERZO_LEUCEMIA`, `ANTIRRABICA`. Va junto con `historia_clinica_vacunacion = true`; nulo en los registros que no son vacuna. Las vacunas de una mascota (sus medallas) son sus registros vigentes con este campo cargado. Es enum y no catálogo porque el plan es fijo y el código ramifica por tipo (especie que lo admite, color de la medalla). Pendiente: reflejarlo en el diagrama de clases del grupo.
+**Campo agregado fuera del diagrama de clases (2026-09-27, spec 019; catálogo desde 2026-10-22, spec 029):** `vacuna_id` (FK a `Vacuna`, nullable, `ON DELETE RESTRICT`) — qué vacuna del plan se aplicó. Va junto con `historia_clinica_vacunacion = true`; nulo en los registros que no son vacuna. Las vacunas de una mascota (sus medallas) son sus registros vigentes con este campo cargado, aunque la vacuna esté de baja o ya no sea de esa especie. Hasta la spec 029 era `historia_clinica_tipo_vacuna` (enum `tipo_vacuna`); la migración `20261022120000_vacunas_catalogo` pasó cada registro a `vacuna_id` usando el valor del enum como `vacuna_codigo`. Pendiente: reflejarlo en el diagrama de clases del grupo.
 
 **Regla de negocio crítica: inmutabilidad.** No existe operación de UPDATE sobre un registro de historia clínica ya persistido. "Modificar" = dar de baja lógica del registro erróneo + crear uno nuevo. El campo de fecha de modificación genérico no debería usarse nunca en la práctica para esta entidad (si aparece poblado, es una señal de bug).
 
@@ -359,6 +361,10 @@ Ver catálogos.
 - Raza
   -> Especie
 
+- Vacuna_Especie
+  -> Vacuna
+  -> Especie
+
 - Usuario
   -> Refugio (opcional)
   -> Estado_Usuario
@@ -402,6 +408,7 @@ Ver catálogos.
 
 - Historia_Clinica
   -> Mascota
+  -> Vacuna (opcional)
 
 - Seguimiento
   -> Solicitud

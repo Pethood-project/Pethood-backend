@@ -1,6 +1,7 @@
-import type { GeneroMascota, TamanioMascota, TipoVacuna } from '@prisma/client';
+import type { GeneroMascota, TamanioMascota } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
+import { SELECT_VACUNA } from '../../shared/vacunas';
 import { ESTADO_PUBLICACION } from '../publicaciones/publicaciones.dto';
 
 export interface DatosNuevaMascota {
@@ -21,7 +22,7 @@ export interface DatosNuevaMascota {
 }
 
 export interface DatosVacunaInicial {
-  tipoVacuna: TipoVacuna;
+  vacunaId: number;
   fechaVisita: Date;
   titulo: string;
   descripcion: string;
@@ -54,6 +55,15 @@ export function crearConEstado(datos: DatosNuevaMascota, usuarioAlta: number) {
       historicoEstados: { include: { estadoMascota: true } },
       historiaClinica: { select: { id: true } },
     },
+  });
+}
+
+/** Vacunas activas del plan de la especie (spec 029), para validar las del alta. */
+export function listarVacunasDeEspecie(especieId: number) {
+  return prisma.vacuna.findMany({
+    where: { fechaBaja: null, especies: { some: { especieId, fechaBaja: null } } },
+    select: SELECT_VACUNA,
+    orderBy: { id: 'asc' },
   });
 }
 
@@ -111,8 +121,8 @@ export function buscarPorIdConRelaciones(mascotaId: number) {
         take: 1,
       },
       historiaClinica: {
-        where: { fechaBaja: null, tipoVacuna: { not: null } },
-        select: { tipoVacuna: true, fechaVisita: true },
+        where: { fechaBaja: null, vacunaId: { not: null } },
+        select: { fechaVisita: true, vacuna: { select: SELECT_VACUNA } },
       },
     },
   });

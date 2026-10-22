@@ -1,6 +1,6 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
-import { VACUNAS } from '../../shared/vacunas';
+import { aCodigoVacuna } from '../../shared/vacunas';
 import {
   PERMISOS,
   type DatosCatalogo,
@@ -33,6 +33,9 @@ function bloqueoDeBaja(catalogo: NombreCatalogo, fila: FilaCatalogo): Bloqueo | 
   if (fila.fechaBaja) {
     return { codigo: 'YA_DE_BAJA', mensaje: 'El valor ya está dado de baja.', status: 409 };
   }
+  // Una vacuna en uso sí se da de baja: la historia clínica es inmutable y nunca se liberaría.
+  // Deja de ofrecerse, pero las medallas de quien ya la tiene siguen (spec 029 §6).
+  if (catalogo === 'vacunas') return null;
   const usos = contarUsos(fila);
   if (usos > 0) {
     return {
@@ -53,6 +56,8 @@ function aItemDto(catalogo: NombreCatalogo, fila: FilaCatalogo) {
     descripcion: fila.descripcion ?? null,
     ...(fila.secuenciaDias !== undefined ? { secuenciaDias: fila.secuenciaDias } : {}),
     ...(fila.especie ? { especie: fila.especie } : {}),
+    ...(fila.codigo !== undefined ? { codigo: fila.codigo } : {}),
+    ...(fila.especies ? { especies: fila.especies.map((e) => e.especie) } : {}),
     fechaAlta: fila.fechaAlta,
     fechaBaja: fila.fechaBaja,
     cantidadUsos: contarUsos(fila),
@@ -105,28 +110,6 @@ async function auditar(adminId: number, accion: string, catalogo: NombreCatalogo
 export async function listar(catalogo: NombreCatalogo, filtros: FiltrosCatalogo) {
   const { page, limit } = filtros;
   const permisos = PERMISOS[catalogo];
-
-  if (catalogo === 'vacunas') {
-    // Enum de código, no tabla: ver `shared/vacunas.ts`. El `id` es el `tipo`.
-    const q = filtros.q?.toLowerCase();
-    const todas = VACUNAS.filter((v) => !q || v.nombre.toLowerCase().includes(q));
-    const items = todas.slice((page - 1) * limit, page * limit).map((v) => ({
-      id: v.tipo,
-      nombre: v.nombre,
-      descripcion: v.descripcion,
-      especie: v.especie,
-      fechaAlta: null,
-      fechaBaja: null,
-      cantidadUsos: 0,
-      puedeDarseDeBaja: false,
-      bloqueoBaja: {
-        codigo: 'CATALOGO_SIN_BAJA',
-        mensaje: 'Las vacunas son un plan fijo del sistema y no se administran desde el panel.',
-      },
-    }));
-    return { catalogo, permisos, items, total: todas.length, page, limit };
-  }
-
   const { items, total } = await repo.listar(catalogo, filtros);
   return {
     catalogo,
@@ -138,8 +121,48 @@ export async function listar(catalogo: NombreCatalogo, filtros: FiltrosCatalogo)
   };
 }
 
+/** Especies sin repetir, todas existentes y activas (spec 029 §6). */
+async function especiesValidas(especieIds: number[]): Promise<number[]> {
+  const ids = [...new Set(especieIds)];
+  if ((await repo.contarEspeciesActivas(ids)) !== ids.length) {
+    throw new AppError('ESPECIE_NO_ENCONTRADA', 'Alguna de las especies no existe.', 404);
+  }
+  return ids;
+}
+
+async function crearVacuna(adminId: number, datos: DatosCatalogo) {
+  const especieIds = await especiesValidas(datos.especieIds!);
+  await exigirNombreLibre('vacunas', datos.nombre!, undefined);
+
+  const base = aCodigoVacuna(datos.nombre!, []);
+  const codigo = aCodigoVacuna(datos.nombre!, await repo.codigosQueEmpiezanCon(base));
+  const fila = await repo.crearVacuna(
+    { codigo, nombre: datos.nombre!, descripcion: datos.descripcion! },
+    especieIds,
+    adminId,
+  );
+  await auditar(adminId, 'CREAR', 'vacunas', fila.id);
+  return aItemDto('vacunas', fila);
+}
+
+async function editarVacuna(adminId: number, id: number, datos: DatosCatalogo) {
+  const especieIds = await especiesValidas(datos.especieIds!);
+  await exigirNombreLibre('vacunas', datos.nombre!, undefined, id);
+
+  // El `codigo` no se toca aunque cambie el nombre: la app ata el color a él.
+  const fila = await repo.actualizarVacuna(
+    id,
+    { nombre: datos.nombre!, descripcion: datos.descripcion! },
+    especieIds,
+    adminId,
+  );
+  await auditar(adminId, 'MODIFICAR', 'vacunas', id);
+  return aItemDto('vacunas', fila);
+}
+
 export async function crear(adminId: number, catalogo: NombreCatalogo, datos: DatosCatalogo) {
   exigir(catalogo, 'alta');
+  if (catalogo === 'vacunas') return crearVacuna(adminId, datos);
 
   if (catalogo === 'razas') {
     const especie = await repo.buscarEspecieActiva(datos.especieId!);
@@ -163,6 +186,7 @@ export async function editar(
   if (actual.fechaBaja) {
     throw new AppError('YA_DE_BAJA', 'El valor está dado de baja: reactivalo para editarlo.', 409);
   }
+  if (catalogo === 'vacunas') return editarVacuna(adminId, id, datos);
   if (datos.nombre !== undefined) {
     await exigirNombreLibre(catalogo, datos.nombre, actual.especieId, id);
   }
@@ -190,6 +214,13 @@ export async function reactivar(adminId: number, catalogo: NombreCatalogo, id: n
   }
   if (catalogo === 'razas' && !(await repo.buscarEspecieActiva(actual.especieId!))) {
     throw new AppError('ESPECIE_DE_BAJA', 'La especie de la raza está dada de baja.', 409);
+  }
+  if (catalogo === 'vacunas' && (await repo.contarEspeciesActivasDeVacuna(id)) === 0) {
+    throw new AppError(
+      'ESPECIE_DE_BAJA',
+      'La vacuna no tiene ninguna especie activa: editala antes de reactivarla.',
+      409,
+    );
   }
 
   const fila = await repo.reactivar(catalogo, id, adminId);

@@ -1,22 +1,26 @@
-import type { TipoVacuna } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja } from '../../shared/auditoria';
+import { SELECT_VACUNA } from '../../shared/vacunas';
 
 export interface DatosNuevaHistoriaClinica {
   fechaVisita: Date;
   fechaProxima: Date | null;
   requiereRevision: boolean;
   vacunacion: boolean;
-  tipoVacuna: TipoVacuna | null;
+  vacunaId: number | null;
   titulo: string;
   descripcion: string;
   documentoUrl: string | null;
   mascotaId: number;
 }
 
+/** El código de la vacuna viaja en el DTO como `tipoVacuna` (spec 029). */
+const CON_VACUNA = { vacuna: { select: { codigo: true } } } as const;
+
 export function crear(datos: DatosNuevaHistoriaClinica, usuarioAlta: number) {
   return prisma.historiaClinica.create({
     data: { ...datos, ...datosAlta(usuarioAlta) },
+    include: CON_VACUNA,
   });
 }
 
@@ -32,8 +36,20 @@ export function buscarMascota(mascotaId: number) {
       usuarioId: true,
       refugioId: true,
       fechaNacimiento: true,
-      raza: { select: { especie: { select: { nombre: true } } } },
+      raza: { select: { especieId: true } },
     },
+  });
+}
+
+/** Vacuna activa del catálogo con ese código y asociada a esa especie (spec 029), o null. */
+export function buscarVacunaDeEspecie(codigo: string, especieId: number) {
+  return prisma.vacuna.findFirst({
+    where: {
+      codigo,
+      fechaBaja: null,
+      especies: { some: { especieId, fechaBaja: null } },
+    },
+    select: SELECT_VACUNA,
   });
 }
 
@@ -46,12 +62,16 @@ export function listarPorMascota(mascotaId: number) {
   return prisma.historiaClinica.findMany({
     where: { mascotaId, fechaBaja: null },
     orderBy: { fechaVisita: 'desc' },
+    include: CON_VACUNA,
   });
 }
 
 /** Registro vigente por id, sin filtrar por mascota: la propiedad la chequea el servicio. */
 export function buscarPorId(historiaClinicaId: number) {
-  return prisma.historiaClinica.findFirst({ where: { id: historiaClinicaId, fechaBaja: null } });
+  return prisma.historiaClinica.findFirst({
+    where: { id: historiaClinicaId, fechaBaja: null },
+    include: CON_VACUNA,
+  });
 }
 
 /**
@@ -71,6 +91,7 @@ export function reemplazar(
 
     return tx.historiaClinica.create({
       data: { ...datosNuevo, ...datosAlta(usuarioActor) },
+      include: CON_VACUNA,
     });
   });
 }

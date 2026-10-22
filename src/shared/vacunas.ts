@@ -1,124 +1,42 @@
 /**
- * Plan de vacunación de perros y gatos (spec 019). Lo usan la historia clínica (alta de una
- * vacuna), el alta de mascota (vacunas que ya tiene) y las fichas de mascota y publicación
- * (medallas). Es fijo: si cambia, cambia acá y en el enum `TipoVacuna` de schema.prisma.
+ * Reglas de las vacunas de una mascota (spec 019). Desde la spec 029 el plan de vacunación es
+ * el catálogo `Vacuna` (+ `VacunaEspecie`): cada módulo lo lee con su repository y acá solo
+ * queda la lógica pura, igual para el alta de mascota que para la historia clínica.
  *
- * `descripcion` es el texto que la app precarga en el registro de historia clínica y el que
- * muestra al tocar una medalla. El color de cada medalla es del front
- * (`apps/mobile/constants/Vacunas.ts`), atado al `tipo`.
+ * `codigo` es el identificador estable que la API expone como `tipo` y al que la app ata el
+ * color de la medalla (`apps/mobile/constants/Vacunas.ts`).
  */
-import type { TipoVacuna } from '@prisma/client';
 import { aFechaISO, inicioDelDia } from './validation/dates';
 
-/** Nombre de la especie en el catálogo `Especie` (ver `prisma/seed/catalogos.ts`). */
-export type EspecieVacunable = 'Perro' | 'Gato';
-
 export interface Vacuna {
-  tipo: TipoVacuna;
-  especie: EspecieVacunable;
+  id: number;
+  codigo: string;
   nombre: string;
   descripcion: string;
 }
 
-/** En el orden del calendario: así se listan en el selector. */
-export const VACUNAS: readonly Vacuna[] = [
-  {
-    tipo: 'PRIMOVACUNACION',
-    especie: 'Perro',
-    nombre: 'Primovacunación',
-    descripcion: '6 a 8 semanas: Primovacunación con Puppy / Polivalente (Parvovirus y Moquillo).',
-  },
-  {
-    tipo: 'MULTIPLE',
-    especie: 'Perro',
-    nombre: 'Vacuna Múltiple',
-    descripcion:
-      '9 a 12 semanas: Vacuna Múltiple o Séxtuple (Parvovirus, Moquillo, Hepatitis, ' +
-      'Parainfluenza y Leptospirosis).',
-  },
-  {
-    tipo: 'REFUERZO_MULTIPLE',
-    especie: 'Perro',
-    nombre: 'Refuerzo Múltiple',
-    descripcion: '14 a 16 semanas: Refuerzo de la vacuna Múltiple/Óctuple.',
-  },
-  {
-    tipo: 'ANTIRRABICA',
-    especie: 'Perro',
-    nombre: 'Antirrábica',
-    descripcion: 'A partir de los 3 a 4 meses: Vacuna Antirrábica (obligatoria por ley).',
-  },
-  {
-    tipo: 'TRIVALENTE_FELINA',
-    especie: 'Gato',
-    nombre: 'Trivalente Felina',
-    descripcion:
-      '8 semanas: Vacuna Trivalente Felina (Panleucopenia, Calicivirus y Rinotraqueítis).',
-  },
-  {
-    tipo: 'REFUERZO_TRIVALENTE_LEUCEMIA',
-    especie: 'Gato',
-    nombre: 'Refuerzo Trivalente + Leucemia',
-    descripcion:
-      '12 semanas: Refuerzo de la Trivalente Felina + Leucemia Felina (FeLV) (recomendada ' +
-      'si el gato tiene acceso al exterior o convivencia con otros gatos).',
-  },
-  {
-    tipo: 'REFUERZO_LEUCEMIA',
-    especie: 'Gato',
-    nombre: 'Refuerzo Leucemia Felina',
-    descripcion: '16 semanas: Segundo refuerzo de Leucemia Felina (si aplica).',
-  },
-  {
-    tipo: 'ANTIRRABICA',
-    especie: 'Gato',
-    nombre: 'Antirrábica',
-    descripcion: 'A partir de los 3 a 4 meses: Vacuna Antirrábica.',
-  },
-];
-
-/** Todos los tipos, sin repetir, para validar la entrada antes de conocer la especie. */
-export const TIPOS_VACUNA = [...new Set(VACUNAS.map((vacuna) => vacuna.tipo))] as [
-  TipoVacuna,
-  ...TipoVacuna[],
-];
-
-function mismaEspecie(especie: EspecieVacunable, nombreEspecie: string): boolean {
-  return especie.toLowerCase() === nombreEspecie.trim().toLowerCase();
-}
-
-/** Vacunas que admite una especie. Vacío si la especie no tiene plan (ej. un conejo). */
-export function vacunasDeEspecie(nombreEspecie: string): Vacuna[] {
-  return VACUNAS.filter((vacuna) => mismaEspecie(vacuna.especie, nombreEspecie));
-}
-
-/** La vacuna de ese tipo para esa especie, o null si la especie no la admite. */
-export function buscarVacuna(tipo: TipoVacuna, nombreEspecie: string): Vacuna | null {
-  return (
-    VACUNAS.find((vacuna) => vacuna.tipo === tipo && mismaEspecie(vacuna.especie, nombreEspecie)) ??
-    null
-  );
-}
+/** Campos de `Vacuna` que piden las reglas de abajo, para el `select` de los repositories. */
+export const SELECT_VACUNA = { id: true, codigo: true, nombre: true, descripcion: true } as const;
 
 export type ResultadoVacuna = { valida: true; vacuna: Vacuna } | { valida: false; error: string };
 
 /**
- * Regla de negocio de una vacuna aplicada, igual al cargarla con la mascota que desde la
- * historia clínica: tiene que ser del plan de la especie y no puede ser anterior al
- * nacimiento (sin fecha de nacimiento, eso último no se puede chequear).
+ * Regla de negocio de una vacuna aplicada: tiene que ser del plan de la especie y no puede
+ * ser anterior al nacimiento (sin fecha de nacimiento, eso último no se puede chequear).
+ *
+ * `vacuna` es la del catálogo con ese código, activa y asociada a la especie de la mascota,
+ * o `null` si no hay ninguna (código inexistente, de baja o de otra especie).
  */
 export function validarVacunaDeMascota(
-  tipo: TipoVacuna,
+  vacuna: Vacuna | null,
   fecha: Date,
-  mascota: { especie: string; fechaNacimiento: Date | null },
+  fechaNacimiento: Date | null,
 ): ResultadoVacuna {
-  const vacuna = buscarVacuna(tipo, mascota.especie);
-
   if (!vacuna) {
     return { valida: false, error: 'Esa vacuna no corresponde a la especie de la mascota' };
   }
 
-  if (mascota.fechaNacimiento && inicioDelDia(fecha) < inicioDelDia(mascota.fechaNacimiento)) {
+  if (fechaNacimiento && inicioDelDia(fecha) < inicioDelDia(fechaNacimiento)) {
     return {
       valida: false,
       error: `La fecha de la vacuna ${vacuna.nombre} no puede ser anterior al nacimiento`,
@@ -128,39 +46,63 @@ export function validarVacunaDeMascota(
   return { valida: true, vacuna };
 }
 
+/**
+ * Código estable de una vacuna nueva a partir de su nombre (spec 029 §6): mayúsculas, sin
+ * tildes y con `_` en lugar de lo que no sea letra o número («Refuerzo + Leucemia» →
+ * `REFUERZO_LEUCEMIA`). Si ya existe, suma un sufijo numérico (`_2`, `_3`...). `existentes`
+ * son los códigos tomados, incluidos los de vacunas de baja.
+ */
+export function aCodigoVacuna(nombre: string, existentes: readonly string[]): string {
+  const base =
+    nombre
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'VACUNA';
+
+  if (!existentes.includes(base)) return base;
+
+  let sufijo = 2;
+  while (existentes.includes(`${base}_${sufijo}`)) sufijo++;
+  return `${base}_${sufijo}`;
+}
+
 /** Vacuna de la mascota, tal como la pinta una medalla. */
 export interface VacunaAplicadaDto {
-  tipo: TipoVacuna;
+  /** El `codigo` de la vacuna. */
+  tipo: string;
   nombre: string;
   descripcion: string;
-  /** `AAAA-MM-DD` de la aplicación más reciente de ese tipo. */
+  /** `AAAA-MM-DD` de la aplicación más reciente de esa vacuna. */
   fechaAplicacion: string;
 }
 
 /**
- * Medallas de una mascota a partir de sus registros de vacuna vigentes: una por tipo (un
+ * Medallas de una mascota a partir de sus registros de vacuna vigentes: una por vacuna (un
  * refuerzo repetido no duplica la medalla) con la fecha más reciente, en el orden del
- * calendario. Un tipo que la especie no admite se descarta — solo puede pasar si la
- * mascota cambió de especie después de cargarlo.
+ * catálogo (creación). Una vacuna de baja o que ya no es de la especie se sigue mostrando:
+ * fue aplicada (spec 029 §6).
  */
 export function vacunasAplicadas(
-  registros: { tipoVacuna: TipoVacuna | null; fechaVisita: Date }[],
-  nombreEspecie: string,
+  registros: { vacuna: Vacuna | null; fechaVisita: Date }[],
 ): VacunaAplicadaDto[] {
-  const ultimaPorTipo = new Map<TipoVacuna, Date>();
+  const ultimaPorVacuna = new Map<number, { vacuna: Vacuna; fecha: Date }>();
 
-  for (const { tipoVacuna, fechaVisita } of registros) {
-    if (!tipoVacuna) continue;
-    const anterior = ultimaPorTipo.get(tipoVacuna);
-    if (!anterior || fechaVisita > anterior) ultimaPorTipo.set(tipoVacuna, fechaVisita);
+  for (const { vacuna, fechaVisita } of registros) {
+    if (!vacuna) continue;
+    const anterior = ultimaPorVacuna.get(vacuna.id);
+    if (!anterior || fechaVisita > anterior.fecha) {
+      ultimaPorVacuna.set(vacuna.id, { vacuna, fecha: fechaVisita });
+    }
   }
 
-  return vacunasDeEspecie(nombreEspecie)
-    .filter((vacuna) => ultimaPorTipo.has(vacuna.tipo))
-    .map((vacuna) => ({
-      tipo: vacuna.tipo,
+  return [...ultimaPorVacuna.values()]
+    .sort((a, b) => a.vacuna.id - b.vacuna.id)
+    .map(({ vacuna, fecha }) => ({
+      tipo: vacuna.codigo,
       nombre: vacuna.nombre,
       descripcion: vacuna.descripcion,
-      fechaAplicacion: aFechaISO(ultimaPorTipo.get(vacuna.tipo)!),
+      fechaAplicacion: aFechaISO(fecha),
     }));
 }

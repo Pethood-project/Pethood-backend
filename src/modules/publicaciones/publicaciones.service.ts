@@ -593,7 +593,7 @@ function aFeedDto(
     personalidad: publicacion.personalidad,
     desparasitado: publicacion.desparasitado,
     // Las vacunas no son de la publicación sino de la mascota: salen de su historia clínica.
-    vacunas: vacunasAplicadas(mascota.historiaClinica, mascota.raza.especie.nombre),
+    vacunas: vacunasAplicadas(mascota.historiaClinica),
     // Una publicación sin fotos propias reusa la de la mascota, que es obligatoria en el
     // alta: así la galería nunca queda vacía.
     imagenes: imagenesDe(publicacion),
