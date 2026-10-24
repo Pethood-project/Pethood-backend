@@ -5,7 +5,12 @@
  */
 import { z } from 'zod';
 import { LIMITES } from '../../shared/validation/limits';
-import { enteroSchema, idSchema, textoOpcionalSchema } from '../../shared/validation/schemas';
+import {
+  enteroSchema,
+  idSchema,
+  limitePaginaSchema,
+  textoOpcionalSchema,
+} from '../../shared/validation/schemas';
 
 /**
  * Alta de reseña. `solicitudId` es la transacción CONCRETADA que la habilita: sin ella no se
@@ -20,6 +25,18 @@ export const crearResenaSchema = z.object({
 });
 
 export type CrearResenaDto = z.infer<typeof crearResenaSchema>;
+
+/**
+ * Query del historial de reseñas. Paginación por cursor: `cursor` es el id de la última reseña
+ * que el cliente ya tiene (ausente es la primera página). Sin `limite` ni `cursor` el endpoint
+ * conserva su comportamiento anterior y devuelve todas, que es lo que usa web-admin.
+ */
+export const historialResenasQuerySchema = z.object({
+  cursor: idSchema('El cursor').optional(),
+  limite: limitePaginaSchema(LIMITES.resena.pagina),
+});
+
+export type HistorialResenasQueryDto = z.infer<typeof historialResenasQuerySchema>;
 
 /** Nombres reales del catálogo TipoSolicitud (prisma/seed.ts), para tipar el flujo. */
 const TIPOS_SOLICITUD = ['Adopcion', 'Transito'] as const;
@@ -68,6 +85,14 @@ export interface ResumenResenasDto {
   cantidad: number;
   distribucion: DistribucionEstrellasDto[];
   resenas: ResenaDto[];
+}
+
+/** Una página del historial: el resumen es siempre sobre TODAS las reseñas, `resenas` solo la página. */
+export interface ResumenResenasPaginadoDto extends ResumenResenasDto {
+  /** `true` si quedan reseñas por pedir con `proximoCursor`. */
+  hayMas: boolean;
+  /** Id a mandar como `cursor` para la página siguiente. `null` si ya no hay más. */
+  proximoCursor: number | null;
 }
 
 /** La contraparte de una transacción, para que el modal sepa a quién se está valorando. */

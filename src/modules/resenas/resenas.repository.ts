@@ -101,6 +101,46 @@ export function listarDeRefugio(refugioReportadoId: number) {
   });
 }
 
+/** Quién recibe las reseñas que se consultan: una persona o un refugio. */
+export type ReceptorResenas = { usuarioReportadoId: number } | { refugioReportadoId: number };
+
+/**
+ * Una página del historial, de la más nueva a la más vieja. El id va como desempate para que
+ * dos reseñas con la misma fecha no se repitan ni se salteen entre páginas. Se piden
+ * `limite + 1` filas para saber si hay más sin un `count` aparte; `skip: 1` porque la reseña
+ * del cursor es la última que el cliente ya tiene.
+ */
+export function listarPaginaDeReceptor(receptor: ReceptorResenas, limite: number, cursor?: number) {
+  return prisma.resena.findMany({
+    where: { ...receptor, fechaBaja: null },
+    include: { autor: { select: AUTOR_SELECT }, solicitud: { select: SOLICITUD_SELECT } },
+    orderBy: [{ fechaAlta: 'desc' }, { id: 'desc' }],
+    take: limite + 1,
+    ...(cursor === undefined ? {} : { cursor: { id: cursor }, skip: 1 }),
+  });
+}
+
+/** ¿El cursor es una reseña viva de este receptor? Con un id ajeno la página saldría vacía. */
+export async function existeDeReceptor(receptor: ReceptorResenas, resenaId: number) {
+  const fila = await prisma.resena.findFirst({
+    where: { ...receptor, id: resenaId, fechaBaja: null },
+    select: { id: true },
+  });
+
+  return fila !== null;
+}
+
+/** Cuántas reseñas vivas hay de cada puntuación: alcanza para el promedio y el desglose. */
+export async function contarPorPuntuacion(receptor: ReceptorResenas) {
+  const filas = await prisma.resena.groupBy({
+    by: ['puntuacion'],
+    where: { ...receptor, fechaBaja: null },
+    _count: { _all: true },
+  });
+
+  return filas.map((fila) => ({ puntuacion: fila.puntuacion, cantidad: fila._count._all }));
+}
+
 /**
  * Transacciones vivas en las que el actor es parte, desde cualquiera de sus dos perfiles:
  * lo que solicitó (solicitante) o lo que publicó (mascota personal o de su refugio). El

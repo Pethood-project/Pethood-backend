@@ -23,6 +23,8 @@ Permitir que las dos partes de una transacción concretada (adopción o tránsit
 | GET | `/api/v1/resenas/elegibles` | cualquier sesión | Transacciones concretadas que el perfil activo todavía no reseñó |
 | GET | `/api/v1/resenas/usuario/:usuarioId` | cualquier sesión | Promedio, cantidad, desglose y comentarios de una persona |
 | GET | `/api/v1/resenas/refugio/:refugioId` | cualquier sesión | Idem para un refugio |
+
+**Paginación opcional del historial:** ambos GET aceptan `?limite=<1-50>&cursor=<id>`. Con alguno de los dos responden una página por cursor (`limite` por defecto 10, `cursor` = id de la última reseña que el cliente ya tiene) y agregan `hayMas` y `proximoCursor` a la respuesta; `promedio`, `cantidad` y `distribucion` siempre son sobre todas las reseñas, no sobre la página. Un cursor que no es una reseña del receptor devuelve `400 CURSOR_INVALIDO`. Sin `limite` ni `cursor` devuelven todas (lo usa web-admin).
 | POST | `/api/v1/resenas` | cualquier sesión | Crea la reseña |
 | DELETE | `/api/v1/resenas/:id` | ADMIN | Baja lógica (HU-10.6) |
 

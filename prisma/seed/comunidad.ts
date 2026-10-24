@@ -242,6 +242,13 @@ const RESENAS: DefResena[] = [
   },
   {
     autor: 'martin',
+    refugio: 'patitas',
+    puntuacion: 5,
+    comentario: 'Nos acompañaron en todo el proceso de adopción y siguen preguntando por Toby.',
+    diasAtras: 5,
+  },
+  {
+    autor: 'martin',
     refugio: 'huellitas',
     puntuacion: 3,
     comentario: 'Tardaron una semana en responder la solicitud.',
