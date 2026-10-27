@@ -202,8 +202,8 @@ de Mercado Pago. Esta spec no lo repite para que no haya dos versiones que se de
    un admin. No existía forma de cargarlo desde el perfil.
 6. **Consulta periódica y no webhook** para la primera versión: no depende de que Mercado Pago
    llegue a una URL pública, y el spike mostró que la acreditación es instantánea.
-7. **Prueba de punta a punta:** requiere una URL pública HTTPS para el callback (ngrok en
-   desarrollo o Render), registrada en la aplicación de Mercado Pago Developers, y el permiso
+7. **Prueba de punta a punta:** requiere una URL pública HTTPS para el callback (el deploy de
+   Render), registrada en la aplicación de Mercado Pago Developers, y el permiso
    `offline_access` habilitado para la renovación.
 8. **2026-10-06 — Prueba real + equipo: sólo Mercado Pago → Mercado Pago se confirma solo.** En
    una transferencia desde otro banco o billetera (Naranja X, `account_fund` / `bank_transfer`

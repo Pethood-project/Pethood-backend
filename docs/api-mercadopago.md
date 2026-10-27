@@ -77,19 +77,15 @@ Cualquier usuario autenticado. Body: `{ "dni": "30123456" }`. Devuelve `{ "usuar
 
 ## Cómo se confirma una donación sola
 
-Pago `approved` + mismo monto (centavos incluidos) + DNI del donante igual al del CUIL/CUIT/DNI del pagador + pago hecho entre 24 h antes y 72 h después de «Terminar donación» + pago no usado por otra donación. Se intenta al donar (tope de 5 s); si no aparece, se reintenta en segundo plano para esa donación 3 veces cada 30 s y después al minuto, a los 2 y a los 5 (30 s, 1 min, 1 min 30 s, 2 min 30 s, 4 min 30 s y 9 min 30 s desde el botón); y, como respaldo, en el cron `src/jobs/conciliar-donaciones-mp.job.ts`, cada 5 minutos, que además renueva los tokens que vencen en menos de 30 días:
-
-```
-*/5 * * * * cd /ruta/al/repo && node dist/jobs/conciliar-donaciones-mp.job.js
-```
+Pago `approved` + mismo monto (centavos incluidos) + DNI del donante igual al del CUIL/CUIT/DNI del pagador + pago hecho entre 24 h antes y 72 h después de «Terminar donación» + pago no usado por otra donación. Se intenta al donar (tope de 5 s); si no aparece, se reintenta en segundo plano para esa donación 3 veces cada 30 s y después al minuto, a los 2 y a los 5 (30 s, 1 min, 1 min 30 s, 2 min 30 s, 4 min 30 s y 9 min 30 s desde el botón); y, como respaldo, en el cron `src/jobs/conciliar-donaciones-mp.job.ts`, cada 5 minutos, que además renueva los tokens que vencen en menos de 30 días. Lo programa `src/jobs/notificaciones.scheduler.ts` con BullMQ dentro del mismo proceso del server (en Render no hay crontab), así que corre mientras el server esté despierto; en el free tier de Render, al despertar ejecuta la corrida atrasada. Para correrlo a mano: `node dist/jobs/conciliar-donaciones-mp.job.js`.
 
 ## Configurar la aplicación de Mercado Pago
 
 1. En [Mercado Pago Developers](https://www.mercadopago.com.ar/developers/panel/app), la aplicación del proyecto (una sola para todos los refugios) con credenciales de producción activadas.
-2. En su configuración, **URL de redireccionamiento** = `MP_REDIRECT_URI`, exactamente igual: `https://<host público>/api/v1/mercadopago/oauth/callback`. Habilitar el permiso **`offline_access`** (sin él no hay renovación de tokens).
-3. En `.env`: `MP_CLIENT_ID` y `MP_CLIENT_SECRET` de «Credenciales de producción», `MP_REDIRECT_URI` y `MP_CLAVE_CIFRADO` (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`). **No cambiar la clave** una vez que hay refugios vinculados: sus tokens dejarían de poder descifrarse y tendrían que volver a vincular.
+2. En su configuración, **URL de redireccionamiento** = `MP_REDIRECT_URI`, exactamente igual: `https://<servicio>.onrender.com/api/v1/mercadopago/oauth/callback`. Habilitar el permiso **`offline_access`** (sin él no hay renovación de tokens).
+3. En el **Environment del servicio de Render** (no en el repo): `MP_CLIENT_ID` y `MP_CLIENT_SECRET` de «Credenciales de producción», `MP_REDIRECT_URI` y `MP_CLAVE_CIFRADO` (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`). **No cambiar la clave** una vez que hay refugios vinculados: sus tokens dejarían de poder descifrarse y tendrían que volver a vincular.
 
-**En desarrollo:** Mercado Pago exige HTTPS, así que el callback necesita una URL pública. Con `ngrok http 3000`, usar la URL `https://….ngrok-free.app/api/v1/mercadopago/oauth/callback` como `MP_REDIRECT_URI` y registrarla igual en la aplicación.
+**En desarrollo:** Mercado Pago exige HTTPS y una URL de retorno registrada, así que la vinculación se prueba contra el deploy de Render. En local, sin las keys de `MP_*`, el módulo queda apagado y las donaciones se confirman a mano.
 
 ## Pendiente
 

@@ -18,6 +18,7 @@ import {
   avisarTransitosProgramados,
 } from '../modules/solicitudes/solicitudes.service';
 import { avisarPerfilesIncompletos } from '../modules/usuarios/usuarios.service';
+import { conciliarDonacionesMp } from './conciliar-donaciones-mp.job';
 
 const NOMBRE_COLA = 'jobs-programados';
 
@@ -26,15 +27,22 @@ const TAREAS: Record<string, () => Promise<void>> = {
   'solicitudes-pendientes-hace-mucho': () => avisarPendientesHaceMucho(),
   'transitos-programados': () => avisarTransitosProgramados(),
   'perfiles-incompletos': () => avisarPerfilesIncompletos(),
+  // Spec 027: en Render no hay crontab del sistema, así que corre acá. Sin las keys de
+  // Mercado Pago no hace nada (`disponible()` da false).
+  'conciliar-donaciones-mp': async () => {
+    await conciliarDonacionesMp();
+  },
 };
 
 /** Nombre de tarea → patrón cron. Horarios de la madrugada/mañana para no competir con las
- * horas pico de la API, salvo el de seguimientos, que es horario porque los plazos son de horas. */
+ * horas pico de la API, salvo el de seguimientos, que es horario porque los plazos son de horas,
+ * y el de Mercado Pago, cada 5 minutos porque es el respaldo de una donación recién hecha. */
 const PROGRAMACION: Record<keyof typeof TAREAS, string> = {
   'sincronizar-seguimientos': '0 * * * *',
   'solicitudes-pendientes-hace-mucho': '0 9 * * *',
   'transitos-programados': '0 8 * * *',
   'perfiles-incompletos': '0 10 * * *',
+  'conciliar-donaciones-mp': '*/5 * * * *',
 };
 
 const cola = new Queue(NOMBRE_COLA, { connection: redis });

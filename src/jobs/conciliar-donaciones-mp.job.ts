@@ -2,8 +2,9 @@
  * Spec 027 §6.5 y §6.8: cada 5 minutos, renueva los tokens de Mercado Pago que vencen pronto y
  * reintenta confirmar las donaciones Pendientes de refugios vinculados (usuario SISTEMA).
  *
- * Función pura + entrypoint CLI, como los otros jobs. Crontab:
- *   *\/5 * * * * cd /ruta/al/repo && node dist/jobs/conciliar-donaciones-mp.job.js
+ * Lo programa `notificaciones.scheduler.ts` (BullMQ, dentro del proceso del server), porque en
+ * Render no hay crontab del sistema. El entrypoint CLI queda para correrlo a mano:
+ *   node dist/jobs/conciliar-donaciones-mp.job.js
  */
 import * as campaniasRepo from '../modules/campanias/campanias.repository';
 import { conciliarGrupo } from '../modules/campanias/campanias.service';
