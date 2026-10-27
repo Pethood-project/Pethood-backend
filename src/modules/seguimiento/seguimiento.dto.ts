@@ -74,6 +74,11 @@ export interface SolicitudEnSeguimientoDto {
   tipo: string;
   rol: RolSeguimiento;
   mascota: MascotaSeguimientoDto;
+  /**
+   * La mascota que quedó en el perfil del adoptante al aprobarse una adopción: no es la de
+   * `mascota` (la del refugio). Sirve para llegar al seguimiento desde su tarjeta.
+   */
+  mascotaAdoptadaId: number | null;
   adoptante: AdoptanteSeguimientoDto;
   totales: { completados: number; vencidos: number; pendientes: number };
   /** El pedido que se puede responder ahora, o null si no hay ninguno (botón en gris). */

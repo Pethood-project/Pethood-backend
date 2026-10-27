@@ -499,6 +499,7 @@ function aResumen(contexto: Contexto1Solicitud): SolicitudEnSeguimientoDto {
     tipo: contexto.solicitud.tipoSolicitud.nombre,
     rol: contexto.rol,
     mascota,
+    mascotaAdoptadaId: contexto.solicitud.mascotaAdoptadaId ?? null,
     adoptante,
     totales: {
       completados: items.filter((item) => item.estado === 'COMPLETADO').length,
