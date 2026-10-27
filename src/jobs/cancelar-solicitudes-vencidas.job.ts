@@ -1,60 +1,64 @@
 /**
- * HU-7.6: cancela automáticamente las solicitudes "Pendiente" que llevan más de
- * `tipoSolicitud.secuenciaDias` días sin respuesta (`usuario_baja = "SISTEMA"`).
+ * Cierra las solicitudes abiertas que llevan más de `tipoSolicitud.secuenciaDias` días sin
+ * cambiar de estado: pasan a `Cerrada` con la causa `VENCIDA_SIN_RESPUESTA`, a nombre de
+ * SISTEMA. Una solicitud que se mueve no vence; la que lleva el plazo quieta, sí.
+ *
+ * El archivo conserva su nombre porque es el que invoca el cron del sistema.
  *
  * Función pura + entrypoint CLI, testeable sin levantar el servidor HTTP
  * (docs/ARQUITECTURA.md). Se invoca desde un cron del sistema (crontab/systemd timer) —
- * no vive embebido en app.ts/server.ts. Decisión y razones en
- * docs/specs/003-adopcion-favoritos.md § Notas y decisiones.
+ * no vive embebido en app.ts/server.ts.
  *
  * Ejemplo de crontab (una vez por día a las 3am):
  *   0 3 * * * cd /ruta/al/repo && node dist/jobs/cancelar-solicitudes-vencidas.job.js
  */
 import { USUARIO_SISTEMA_ID } from '../shared/auditoria';
-import { registrarAuditoria } from '../shared/logAuditoria';
+import { estaAbierta } from '../shared/requestStates';
 import * as repo from '../modules/solicitudes/solicitudes.repository';
 import * as notificaciones from '../modules/notificaciones/notificaciones.service';
-import { destinatariosPublicador } from '../modules/solicitudes/solicitudes.service';
+import {
+  cerrarSolicitudes,
+  destinatariosPublicador,
+} from '../modules/solicitudes/solicitudes.service';
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
-function vencida(fechaDesdePendiente: Date, secuenciaDias: number, ahora: Date): boolean {
-  return fechaDesdePendiente.getTime() + secuenciaDias * MS_POR_DIA <= ahora.getTime();
+function vencida(fechaDesdeEstado: Date, secuenciaDias: number, ahora: Date): boolean {
+  return fechaDesdeEstado.getTime() + secuenciaDias * MS_POR_DIA <= ahora.getTime();
 }
 
-/** Aviso previo, spec 004: 14 días antes de la cancelación automática de HU-7.6. */
+/** Aviso previo: 14 días antes del cierre automático. */
 const DIAS_AVISO_PREVIO = 14;
 
-function proximaAVencer(fechaDesdePendiente: Date, secuenciaDias: number, ahora: Date): boolean {
-  const faltan = fechaDesdePendiente.getTime() + secuenciaDias * MS_POR_DIA - ahora.getTime();
+function proximaAVencer(fechaDesdeEstado: Date, secuenciaDias: number, ahora: Date): boolean {
+  const faltan = fechaDesdeEstado.getTime() + secuenciaDias * MS_POR_DIA - ahora.getTime();
   return faltan > 0 && faltan <= DIAS_AVISO_PREVIO * MS_POR_DIA;
 }
+
+type SolicitudConDetalle = Awaited<ReturnType<typeof repo.listarSinRespuestaConDetalle>>[number];
 
 /**
  * `ahora` es inyectable para poder testear los bordes de la ventana de vencimiento sin
  * depender del reloj real.
  */
-export async function cancelarSolicitudesVencidas(ahora = new Date()): Promise<number> {
-  const estadoCancelada = await repo.buscarEstadoSolicitudPorNombre('Cancelada');
-  if (!estadoCancelada) {
-    throw new Error('Falta el estado "Cancelada" en el catálogo EstadoSolicitud');
-  }
-
+export async function cerrarSolicitudesVencidas(ahora = new Date()): Promise<number> {
   const solicitudes = await repo.listarSinRespuestaConDetalle();
-  let canceladas = 0;
+  let cerradas = 0;
 
   for (const solicitud of solicitudes) {
     const vigente = solicitud.historicoEstados[0];
-    // "Sin respuesta" también incluye En_Revision: esta es la fuente de verdad real.
-    if (vigente?.estadoSolicitud.nombre !== 'Pendiente') continue;
+    // `fechaRespuesta: null` solo acota la consulta: la fuente de verdad es el estado vigente.
+    if (!vigente || !estaAbierta(vigente.estadoSolicitud.nombre)) continue;
 
-    if (proximaAVencer(vigente.fechaAlta, solicitud.tipoSolicitud.secuenciaDias, ahora)) {
+    const { secuenciaDias } = solicitud.tipoSolicitud;
+
+    if (proximaAVencer(vigente.fechaAlta, secuenciaDias, ahora)) {
       const nombreMascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
       await notificaciones.notificarUnaVez({
         usuarioId: solicitud.usuarioId,
         tipo: 'SOLICITUD_PROXIMA_A_VENCER',
-        mensaje: `Tu solicitud por ${nombreMascota} sigue sin respuesta y se va a cancelar sola si nadie responde`,
-        asuntoMail: `Tu solicitud por ${nombreMascota} está por vencer`,
+        mensaje: `Tu solicitud por ${nombreMascota} lleva mucho tiempo sin novedades y se va a cerrar sola si sigue así`,
+        asuntoMail: `Tu solicitud por ${nombreMascota} está por cerrarse`,
         entidadTipo: 'SOLICITUD',
         entidadId: solicitud.id,
         canal: { mail: true },
@@ -62,56 +66,34 @@ export async function cancelarSolicitudesVencidas(ahora = new Date()): Promise<n
       });
     }
 
-    if (!vencida(vigente.fechaAlta, solicitud.tipoSolicitud.secuenciaDias, ahora)) continue;
+    if (!vencida(vigente.fechaAlta, secuenciaDias, ahora)) continue;
 
-    const canceladaAhora = await repo.cancelarSiPendiente(
-      solicitud.id,
-      estadoCancelada.id,
+    // Si una acción humana la resolvió un instante antes que el cron, no hay nada que cerrar:
+    // no es un error, es la carrera esperada.
+    const [cerrada] = await cerrarSolicitudes(
+      [{ id: solicitud.id }],
+      'VENCIDA_SIN_RESPUESTA',
       USUARIO_SISTEMA_ID,
     );
-    // Si ya no estaba Pendiente (un refugio la resolvió un instante antes que el cron), no
-    // hay nada que cancelar: no es un error, es la carrera esperada.
-    if (!canceladaAhora) continue;
+    if (cerrada === undefined) continue;
 
-    canceladas++;
-    await registrarAuditoria({
-      usuarioId: USUARIO_SISTEMA_ID,
-      accion: 'CANCELAR',
-      entidad: 'Solicitud',
-      entidadId: solicitud.id,
-      detalle: `Pendiente -> Cancelada (vencida, tipo=${solicitud.tipoSolicitud.nombre}, secuenciaDias=${solicitud.tipoSolicitud.secuenciaDias})`,
-    });
-
-    await avisarCancelacionPorVencida(solicitud);
+    cerradas++;
+    await avisarAlPublicador(solicitud);
   }
 
-  return canceladas;
+  return cerradas;
 }
 
-/** Spec 004: "tu solicitud se canceló automáticamente por vencida", a las dos puntas.
- * Best-effort: la solicitud ya se canceló, un aviso que falla no la revierte. */
-async function avisarCancelacionPorVencida(
-  solicitud: Awaited<ReturnType<typeof repo.listarSinRespuestaConDetalle>>[number],
-): Promise<void> {
+/** Quien publicó se entera de que la solicitud se cerró sola. Best-effort. */
+async function avisarAlPublicador(solicitud: SolicitudConDetalle): Promise<void> {
   const mascota = solicitud.publicacion.mascota;
   const nombreMascota = mascota.nombre ?? 'la mascota';
-
-  await notificaciones.notificar({
-    usuarioId: solicitud.usuarioId,
-    tipo: 'SOLICITUD_CANCELADA_VENCIDA',
-    mensaje: `Tu solicitud por ${nombreMascota} se canceló automáticamente por falta de respuesta`,
-    asuntoMail: `Tu solicitud por ${nombreMascota} se canceló`,
-    entidadTipo: 'SOLICITUD',
-    entidadId: solicitud.id,
-    canal: { mail: true },
-    usuarioAlta: USUARIO_SISTEMA_ID,
-  });
 
   let destinatarios: number[] = [];
   try {
     destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
   } catch (err) {
-    console.error('No se pudo resolver a quién avisarle la cancelación', solicitud.id, err);
+    console.error('No se pudo resolver a quién avisarle el cierre', solicitud.id, err);
     return;
   }
 
@@ -119,9 +101,9 @@ async function avisarCancelacionPorVencida(
     destinatarios.map((usuarioId) =>
       notificaciones.notificar({
         usuarioId,
-        tipo: 'SOLICITUD_CANCELADA_VENCIDA',
-        mensaje: `La solicitud por ${nombreMascota} se canceló automáticamente por falta de respuesta`,
-        asuntoMail: `Una solicitud por ${nombreMascota} se canceló`,
+        tipo: 'SOLICITUD_CERRADA_VENCIDA',
+        mensaje: `La solicitud por ${nombreMascota} se cerró sola por falta de novedades`,
+        asuntoMail: `Una solicitud por ${nombreMascota} se cerró`,
         entidadTipo: 'SOLICITUD',
         entidadId: solicitud.id,
         canal: { mail: true },
@@ -132,9 +114,9 @@ async function avisarCancelacionPorVencida(
 }
 
 if (require.main === module) {
-  cancelarSolicitudesVencidas()
+  cerrarSolicitudesVencidas()
     .then((cantidad) => {
-      console.log(`✅ cancelar-solicitudes-vencidas: ${cantidad} solicitud(es) cancelada(s).`);
+      console.log(`✅ cancelar-solicitudes-vencidas: ${cantidad} solicitud(es) cerrada(s).`);
       process.exit(0);
     })
     .catch((err) => {

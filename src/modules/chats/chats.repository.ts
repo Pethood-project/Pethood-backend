@@ -494,7 +494,11 @@ export function buscarSolicitudParaChat(solicitudId: number) {
     select: {
       id: true,
       fechaAlta: true,
+      fechaRespuesta: true,
+      fechaInicioTransito: true,
+      fechaFinTransito: true,
       usuarioId: true,
+      motivacion: true,
       tipoSolicitud: { select: { nombre: true } },
       historicoEstados: {
         where: { fechaBaja: null },
@@ -510,6 +514,7 @@ export function buscarSolicitudParaChat(solicitudId: number) {
             select: {
               id: true,
               nombre: true,
+              genero: true,
               fechaNacimiento: true,
               imagenUrl: true,
               refugioId: true,

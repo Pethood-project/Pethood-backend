@@ -1,7 +1,8 @@
-import { Prisma, type Hogar, type Mascota } from '@prisma/client';
+import { Prisma, type Hogar, type Mascota, type MotivoSolicitud } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import type { Ambito } from '../../shared/ambito';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
+import { estaAbierta, type NombreEstadoSolicitud } from '../../shared/requestStates';
 
 /**
  * Lo que necesitan tanto el resumen como el detalle de una solicitud.
@@ -15,12 +16,20 @@ import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria'
  * refugio tiene que ver las dos cosas: dónde dijo que estaría y dónde dice estar ahora.
  */
 const RELACIONES_SOLICITUD = {
-  publicacion: { include: { mascota: true } },
+  publicacion: {
+    include: {
+      // Quién publicó, para decirle a la persona de quién espera respuesta: el refugio, o la
+      // persona si la mascota es particular.
+      mascota: { include: { refugio: { select: { id: true, nombre: true, imagenUrl: true } } } },
+      usuario: { select: { id: true, nombre: true, apellido: true, imagenUrl: true } },
+    },
+  },
   usuario: {
     include: { hogares: { where: { fechaBaja: null }, take: 1 } },
   },
   hogar: true,
   tipoSolicitud: true,
+  respuestas: { where: { fechaBaja: null }, orderBy: { orden: 'asc' as const } },
 } as const;
 
 function historicoCompleto() {
@@ -31,49 +40,31 @@ function historicoCompleto() {
   };
 }
 
-/** Otras solicitudes "Pendiente" sobre la misma publicación (spec 004: se avisa a sus autores
- * cuando una de las otras se aprueba — "la mascota que solicitaste fue adoptada por otra"). */
-export async function listarOtrasPendientesDePublicacion(
-  publicacionId: number,
-  excluirSolicitudId: number,
-) {
-  const vivas = await prisma.solicitud.findMany({
-    where: { publicacionId, fechaBaja: null, id: { not: excluirSolicitudId } },
-    select: {
-      id: true,
-      usuarioId: true,
-      historicoEstados: {
-        where: { fechaBaja: null },
-        select: { estadoSolicitud: { select: { nombre: true } } },
-        orderBy: { fechaAlta: 'desc' },
-        take: 1,
-      },
-    },
-  });
+/** Solo el estado vigente (la fila más nueva del histórico), para decidir si está abierta. */
+const SOLO_VIGENTE = {
+  where: { fechaBaja: null },
+  select: { estadoSolicitud: { select: { nombre: true } } },
+  orderBy: { fechaAlta: 'desc' as const },
+  take: 1,
+};
 
-  return vivas.filter((s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente');
-}
-
-/** Solicitudes "Pendiente" sobre esta publicación (spec 004: se avisa a sus autores si el
- * publicador la pausa o la da de baja). */
-export async function listarPendientesDePublicacion(
+/** Solicitudes abiertas de una publicación, sin contar `excluirSolicitudId` si se pasa. */
+export async function listarAbiertasDePublicacion(
   publicacionId: number,
+  excluirSolicitudId?: number,
 ): Promise<{ id: number; usuarioId: number }[]> {
-  const vivas = await prisma.solicitud.findMany({
-    where: { publicacionId, fechaBaja: null },
-    select: {
-      id: true,
-      usuarioId: true,
-      historicoEstados: {
-        where: { fechaBaja: null },
-        select: { estadoSolicitud: { select: { nombre: true } } },
-        orderBy: { fechaAlta: 'desc' },
-        take: 1,
-      },
+  const solicitudes = await prisma.solicitud.findMany({
+    where: {
+      publicacionId,
+      fechaBaja: null,
+      ...(excluirSolicitudId === undefined ? {} : { id: { not: excluirSolicitudId } }),
     },
+    select: { id: true, usuarioId: true, historicoEstados: SOLO_VIGENTE },
   });
 
-  return vivas.filter((s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente');
+  return solicitudes
+    .filter((s) => estaAbierta(s.historicoEstados[0]?.estadoSolicitud.nombre))
+    .map(({ id, usuarioId }) => ({ id, usuarioId }));
 }
 
 /** Ids de los miembros activos de un refugio — a quién avisarle algo del lado publicador. */
@@ -121,6 +112,8 @@ export function buscarPublicacionParaSolicitar(publicacionId: number) {
       },
       mascota: {
         include: {
+          // La especie decide qué preguntas del refugio le tocan a quien solicita.
+          raza: { select: { especieId: true } },
           historicoEstados: {
             where: { fechaBaja: null },
             include: { estadoMascota: true },
@@ -134,36 +127,38 @@ export function buscarPublicacionParaSolicitar(publicacionId: number) {
 }
 
 /**
- * Cuántas solicitudes vivas del usuario están en "Pendiente" ahora mismo. Alimenta la
- * quota anti-spam de 5 (regla transversal 7). Se cuenta sobre el estado VIGENTE del
- * histórico, no sobre `fechaRespuesta`: una "En_Revision" tampoco tiene respuesta y no
- * debe sumar al tope.
+ * Cuántas solicitudes abiertas tiene el usuario ahora mismo, en cualquier etapa. Alimenta la
+ * quota anti-spam de 5. Se cuenta sobre el estado vigente del histórico: las finales no
+ * suman.
  */
-export async function contarPendientesDeUsuario(usuarioId: number): Promise<number> {
-  const vivas = await prisma.solicitud.findMany({
-    where: { usuarioId, fechaBaja: null, fechaRespuesta: null },
-    select: {
-      historicoEstados: {
-        where: { fechaBaja: null },
-        select: { estadoSolicitud: { select: { nombre: true } } },
-        orderBy: { fechaAlta: 'desc' },
-        take: 1,
-      },
-    },
+export async function contarAbiertasDeUsuario(usuarioId: number): Promise<number> {
+  const solicitudes = await prisma.solicitud.findMany({
+    where: { usuarioId, fechaBaja: null },
+    select: { historicoEstados: SOLO_VIGENTE },
   });
 
-  return vivas.filter((s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente').length;
+  return solicitudes.filter((s) => estaAbierta(s.historicoEstados[0]?.estadoSolicitud.nombre))
+    .length;
 }
 
 /**
- * Solicitud viva del usuario sobre esta publicación, sin importar en qué estado esté.
- * Evita que mande dos veces la misma mientras la primera sigue abierta.
+ * Solicitud abierta del usuario sobre esta publicación. Evita que mande dos veces la misma
+ * mientras la primera sigue abierta; una retirada, cerrada o ya resuelta no cuenta.
  */
-export function buscarVivaDeUsuarioEnPublicacion(usuarioId: number, publicacionId: number) {
-  return prisma.solicitud.findFirst({
-    where: { usuarioId, publicacionId, fechaBaja: null, fechaRespuesta: null },
-    select: { id: true },
+export async function buscarAbiertaDeUsuarioEnPublicacion(
+  usuarioId: number,
+  publicacionId: number,
+): Promise<{ id: number } | null> {
+  const solicitudes = await prisma.solicitud.findMany({
+    where: { usuarioId, publicacionId, fechaBaja: null },
+    select: { id: true, historicoEstados: SOLO_VIGENTE },
   });
+
+  const abierta = solicitudes.find((s) =>
+    estaAbierta(s.historicoEstados[0]?.estadoSolicitud.nombre),
+  );
+
+  return abierta ? { id: abierta.id } : null;
 }
 
 export function buscarHogarActivo(usuarioId: number) {
@@ -224,6 +219,13 @@ export interface DatosSolicitud {
   fechaFinTransito: Date | null;
 }
 
+/** Una respuesta ya validada, con la copia del texto que se le preguntó a la persona. */
+export interface DatosRespuesta {
+  preguntaAdopcionId: number;
+  preguntaTexto: string;
+  respuesta: string;
+}
+
 /** Campos del hogar que definen si dos declaraciones son "la misma casa". */
 const RESPUESTAS_HOGAR = [
   'direccion',
@@ -263,6 +265,7 @@ export function crearConHogar(
   datos: DatosSolicitud,
   hogar: DatosHogar,
   estadoPendienteId: number,
+  respuestas: DatosRespuesta[] = [],
 ) {
   return prisma.$transaction(async (tx) => {
     const vigente = await tx.hogar.findFirst({ where: { usuarioId, fechaBaja: null } });
@@ -294,10 +297,30 @@ export function crearConHogar(
       },
     });
 
+    if (respuestas.length > 0) {
+      await tx.solicitudRespuesta.createMany({
+        data: respuestas.map((respuesta, orden) => ({
+          ...respuesta,
+          solicitudId: solicitud.id,
+          orden,
+          ...datosAlta(usuarioId),
+        })),
+      });
+    }
+
     return tx.solicitud.findFirstOrThrow({
       where: { id: solicitud.id },
       include: { ...RELACIONES_SOLICITUD, historicoEstados: historicoCompleto() },
     });
+  });
+}
+
+/** Guarda (o borra, con `null`) la nota privada de quien publicó. La última escritura gana. */
+export function guardarNota(solicitudId: number, texto: string | null, usuarioId: number) {
+  return prisma.solicitud.update({
+    where: { id: solicitudId },
+    data: { notaInterna: texto, ...datosModificacion(usuarioId) },
+    include: { ...RELACIONES_SOLICITUD, historicoEstados: historicoCompleto() },
   });
 }
 
@@ -310,22 +333,26 @@ export function listarDelSolicitante(usuarioId: number) {
   });
 }
 
+export interface Transicion {
+  /** Estados vigentes desde los que se acepta el cambio. */
+  desde: readonly NombreEstadoSolicitud[];
+  estadoId: number;
+  /** Causa, en los estados finales que la llevan. */
+  motivo?: MotivoSolicitud;
+  usuarioId: number;
+  /** Respuesta del refugio (Aprobada y Rechazada): su comentario y la fecha en que respondió. */
+  respuesta?: { comentario: string | null };
+}
+
 /**
- * Resuelve la solicitud SI Y SOLO SI sigue "Pendiente" en el momento de la escritura,
- * atómicamente: aislamiento Serializable para que dos PATCH concurrentes sobre la misma
- * solicitud no puedan pisarse (uno gana, el otro recibe `null` y el service lo traduce a
- * `409 SOLICITUD_YA_RESUELTA` en vez de dejar el histórico inconsistente).
+ * Pasa la solicitud a otro estado SI Y SOLO SI el vigente sigue siendo uno de `desde` en el
+ * momento de escribir. Es atómico (Serializable): si dos acciones compiten sobre la misma
+ * solicitud gana una y la otra recibe `null`, que el service traduce a un 409.
  *
  * Devuelve `null` en vez de tirar un error de Prisma: quien pierde la carrera no rompió
- * nada, solo llegó tarde — es el mismo caso que "ya estaba resuelta" que valida el service
- * antes de llamar acá, así que ambos caminos terminan en el mismo 409.
+ * nada, solo llegó tarde.
  */
-export async function resolverSiPendiente(
-  solicitudId: number,
-  estadoSolicitudId: number,
-  comentario: string | null,
-  usuarioId: number,
-) {
+export async function transicionar(solicitudId: number, transicion: Transicion) {
   try {
     return await prisma.$transaction(
       async (tx) => {
@@ -335,17 +362,28 @@ export async function resolverSiPendiente(
           include: { estadoSolicitud: true },
         });
 
-        if (vigente?.estadoSolicitud.nombre !== 'Pendiente') {
+        const nombre = vigente?.estadoSolicitud.nombre as NombreEstadoSolicitud | undefined;
+        if (!nombre || !transicion.desde.includes(nombre)) {
           return null;
         }
 
         await tx.solicitud.update({
           where: { id: solicitudId },
-          data: { comentario, fechaRespuesta: new Date(), ...datosModificacion(usuarioId) },
+          data: {
+            ...(transicion.respuesta
+              ? { comentario: transicion.respuesta.comentario, fechaRespuesta: new Date() }
+              : {}),
+            ...datosModificacion(transicion.usuarioId),
+          },
         });
 
         await tx.solicitudEstado.create({
-          data: { solicitudId, estadoSolicitudId, ...datosAlta(usuarioId) },
+          data: {
+            solicitudId,
+            estadoSolicitudId: transicion.estadoId,
+            motivo: transicion.motivo ?? null,
+            ...datosAlta(transicion.usuarioId),
+          },
         });
 
         return tx.solicitud.findFirstOrThrow({
@@ -356,7 +394,7 @@ export async function resolverSiPendiente(
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   } catch (err) {
-    // P2034 = conflicto de serialización: el otro PATCH concurrente confirmó primero.
+    // P2034 = conflicto de serialización: la otra escritura concurrente confirmó primero.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034') {
       return null;
     }
@@ -365,29 +403,10 @@ export async function resolverSiPendiente(
 }
 
 /**
- * Todas las solicitudes vivas sin respuesta, con el tipo (para `secuenciaDias`) y el
- * estado vigente. `fechaRespuesta: null` es un filtro de performance, no la fuente de
- * verdad: quien decide si sigue "Pendiente" es el service, mirando `historicoEstados[0]`
- * — así una solicitud "En_Revision" (tampoco tiene respuesta todavía) no se cuela.
- * Usado por el cron de HU-7.6.
+ * Las solicitudes que pueden estar abiertas, con el detalle para avisar a las dos puntas.
+ * `fechaRespuesta: null` es solo un filtro de performance (una abierta nunca respondió): quien
+ * decide si sigue abierta es el service, mirando el estado vigente.
  */
-export function listarSinRespuesta() {
-  return prisma.solicitud.findMany({
-    where: { fechaBaja: null, fechaRespuesta: null },
-    include: {
-      tipoSolicitud: true,
-      historicoEstados: {
-        where: { fechaBaja: null },
-        include: { estadoSolicitud: true },
-        orderBy: { fechaAlta: 'desc' },
-        take: 1,
-      },
-    },
-  });
-}
-
-/** Igual que `listarSinRespuesta`, con la mascota/publicación — para el job de la spec 004
- * ("pendiente hace muchos días"), que necesita a quién avisarle y con qué nombre. */
 export function listarSinRespuestaConDetalle() {
   return prisma.solicitud.findMany({
     where: { fechaBaja: null, fechaRespuesta: null },
@@ -412,51 +431,6 @@ export function listarTransitosAprobados() {
   });
 }
 
-/**
- * Cancelación automática de HU-7.6: baja lógica de la solicitud + nuevo estado
- * "Cancelada" en el histórico, SI Y SOLO SI sigue "Pendiente" al momento de escribir
- * (mismo aislamiento Serializable que `resolverSiPendiente`, para no cancelar algo que un
- * refugio acaba de aceptar/rechazar un instante antes de que corra el cron).
- */
-export async function cancelarSiPendiente(
-  solicitudId: number,
-  estadoCanceladaId: number,
-  usuarioId: number,
-): Promise<boolean> {
-  try {
-    return await prisma.$transaction(
-      async (tx) => {
-        const vigente = await tx.solicitudEstado.findFirst({
-          where: { solicitudId, fechaBaja: null },
-          orderBy: { fechaAlta: 'desc' },
-          include: { estadoSolicitud: true },
-        });
-
-        if (vigente?.estadoSolicitud.nombre !== 'Pendiente') {
-          return false;
-        }
-
-        await tx.solicitud.update({
-          where: { id: solicitudId },
-          data: datosBaja(usuarioId),
-        });
-
-        await tx.solicitudEstado.create({
-          data: { solicitudId, estadoSolicitudId: estadoCanceladaId, ...datosAlta(usuarioId) },
-        });
-
-        return true;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034') {
-      return false;
-    }
-    throw err;
-  }
-}
-
 /** Datos de la mascota publicada que se copian a la mascota propia del adoptante. */
 export type MascotaAdoptada = Pick<
   Mascota,
@@ -466,6 +440,7 @@ export type MascotaAdoptada = Pick<
   | 'peso'
   | 'tamanio'
   | 'castrado'
+  | 'desparasitado'
   | 'descripcion'
   | 'imagenUrl'
   | 'razaId'
@@ -473,12 +448,10 @@ export type MascotaAdoptada = Pick<
 
 export interface DatosAprobacionAdopcion {
   estadoAprobadaId: number;
-  estadoRechazadaId: number;
+  estadoCerradaId: number;
   estadoMascotaAdoptadoId: number;
   estadoPublicacionFinalizadaId: number;
   comentario: string | null;
-  /** Comentario que se deja en las solicitudes que se rechazan solas por esta aprobación. */
-  comentarioRechazo: string;
   publicacionId: number;
   mascotaOrigenId: number;
   mascotaOrigen: MascotaAdoptada;
@@ -488,23 +461,22 @@ export interface DatosAprobacionAdopcion {
 export interface ResultadoAprobacionAdopcion {
   solicitud: NonNullable<Awaited<ReturnType<typeof buscarConDetalle>>>;
   mascotaAdoptadaId: number;
-  solicitudesRechazadas: number[];
+  solicitudesCerradas: number[];
 }
 
 /**
- * Aprobación de una adopción (HU-7.4), en una sola transacción Serializable. Además de
- * resolver la solicitud, todo lo que tiene que pasar junta para no dejar el sistema a
- * medias:
+ * Aprobación de una adopción, en una sola transacción Serializable. Además de resolver la
+ * solicitud, todo lo que tiene que pasar junta para no dejar el sistema a medias:
  *
- * 1. resuelve la solicitud (mismo chequeo "sigue Pendiente" que `resolverSiPendiente`);
+ * 1. aprueba la solicitud, si sigue "Revisada" al escribir;
  * 2. crea para el adoptante una mascota propia (sin refugio) con estado "Adoptado",
  *    copiando los datos de la mascota publicada;
  * 3. pasa la mascota ORIGINAL a "Adoptado" (baja de su estado vigente + alta del nuevo);
  * 4. finaliza la publicación del aviso (baja del estado vigente + alta de "Finalizada");
- * 5. rechaza las demás solicitudes que sigan "Pendiente" para esa publicación.
+ * 5. cierra las demás solicitudes abiertas de esa publicación, en la etapa que estén.
  *
- * Devuelve `null` si la solicitud ya no está "Pendiente" al escribir (otro PATCH ganó la
- * carrera), igual que `resolverSiPendiente`. Los ids de catálogo los resuelve el servicio.
+ * Devuelve `null` si la solicitud ya no está "Revisada" al escribir (otra acción ganó la
+ * carrera). Los ids de catálogo los resuelve el servicio.
  */
 export async function aprobarAdopcion(
   solicitudId: number,
@@ -520,7 +492,7 @@ export async function aprobarAdopcion(
           include: { estadoSolicitud: true },
         });
 
-        if (vigente?.estadoSolicitud.nombre !== 'Pendiente') {
+        if (vigente?.estadoSolicitud.nombre !== 'Revisada') {
           return null;
         }
 
@@ -549,6 +521,12 @@ export async function aprobarAdopcion(
               create: { estadoMascotaId: datos.estadoMascotaAdoptadoId, ...datosAlta(usuarioId) },
             },
           },
+        });
+
+        // La solicitud recuerda la mascota que nació de ella.
+        await tx.solicitud.update({
+          where: { id: solicitudId },
+          data: { mascotaAdoptadaId: adoptada.id },
         });
 
         // 3. Mascota original -> "Adoptado". Mismo patrón baja+alta que PublicacionEstado,
@@ -588,39 +566,28 @@ export async function aprobarAdopcion(
           });
         }
 
-        // 5. Rechazar las otras solicitudes de la publicación que sigan "Pendiente". El
-        //    estado vigente es el de la fila activa más nueva, como en todo el módulo.
+        // 5. Cerrar las otras solicitudes abiertas de la publicación. El estado vigente es el
+        //    de la fila activa más nueva, como en todo el módulo.
         const candidatas = await tx.solicitud.findMany({
           where: { publicacionId: datos.publicacionId, fechaBaja: null, id: { not: solicitudId } },
-          select: {
-            id: true,
-            historicoEstados: {
-              where: { fechaBaja: null },
-              orderBy: { fechaAlta: 'desc' },
-              take: 1,
-              select: { estadoSolicitud: { select: { nombre: true } } },
-            },
-          },
+          select: { id: true, historicoEstados: SOLO_VIGENTE },
         });
 
-        const pendientes = candidatas.filter(
-          (s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente',
+        const abiertas = candidatas.filter((s) =>
+          estaAbierta(s.historicoEstados[0]?.estadoSolicitud.nombre),
         );
 
-        for (const pendiente of pendientes) {
+        for (const abierta of abiertas) {
           await tx.solicitud.update({
-            where: { id: pendiente.id },
-            data: {
-              comentario: datos.comentarioRechazo,
-              fechaRespuesta: new Date(),
-              ...datosModificacion(usuarioId),
-            },
+            where: { id: abierta.id },
+            data: datosModificacion(usuarioId),
           });
 
           await tx.solicitudEstado.create({
             data: {
-              solicitudId: pendiente.id,
-              estadoSolicitudId: datos.estadoRechazadaId,
+              solicitudId: abierta.id,
+              estadoSolicitudId: datos.estadoCerradaId,
+              motivo: 'ADOPTADA_POR_OTRA_PERSONA',
               ...datosAlta(usuarioId),
             },
           });
@@ -634,7 +601,7 @@ export async function aprobarAdopcion(
         return {
           solicitud,
           mascotaAdoptadaId: adoptada.id,
-          solicitudesRechazadas: pendientes.map((p) => p.id),
+          solicitudesCerradas: abiertas.map((s) => s.id),
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

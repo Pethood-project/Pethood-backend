@@ -25,3 +25,13 @@ solicitudesRouter.get('/recibidas', autenticar, controller.listarRecibidas);
 solicitudesRouter.get('/:id', autenticar, controller.obtenerDetalle);
 
 solicitudesRouter.patch('/:id/estado', autenticar, controller.resolver);
+
+// Revisión de quien publicó la mascota: abrirla y marcarla como revisada.
+solicitudesRouter.post('/:id/revision', autenticar, controller.iniciarRevision);
+solicitudesRouter.post('/:id/revisada', autenticar, controller.marcarRevisada);
+
+// El solicitante retira la suya: solo desde el perfil personal.
+solicitudesRouter.post('/:id/retiro', soloPersonal, controller.retirar);
+
+// La nota privada de quien publicó: una sola, editable.
+solicitudesRouter.put('/:id/nota', autenticar, controller.guardarNota);

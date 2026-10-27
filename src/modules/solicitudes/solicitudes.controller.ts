@@ -6,6 +6,7 @@ import {
   filtrosElegibilidadSchema,
   filtrosMiasSchema,
   filtrosRecibidasSchema,
+  guardarNotaSchema,
   idSolicitudSchema,
   resolverSolicitudSchema,
 } from './solicitudes.dto';
@@ -91,6 +92,51 @@ export async function resolver(req: Request, res: Response, next: NextFunction):
     res.json(
       await service.resolverSolicitud(idDeRuta(req), datos, req.usuario!.usuarioId, req.ambito!),
     );
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** El refugio abre la revisión: la solicitud pasa a "En_Revision" (idempotente). */
+export async function iniciarRevision(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    res.json(await service.iniciarRevision(idDeRuta(req), req.usuario!.usuarioId, req.ambito!));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** El refugio termina de revisarla. */
+export async function marcarRevisada(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    res.json(await service.marcarRevisada(idDeRuta(req), req.usuario!.usuarioId, req.ambito!));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** El solicitante retira su solicitud. */
+export async function retirar(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    res.json(await service.retirarSolicitud(idDeRuta(req), req.usuario!.usuarioId, req.ambito!));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** La nota privada de quien publicó (el solicitante nunca la recibe). */
+export async function guardarNota(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const datos = parsearOFallar(guardarNotaSchema, req.body);
+    res.json(await service.guardarNota(idDeRuta(req), datos, req.usuario!.usuarioId, req.ambito!));
   } catch (err) {
     next(err);
   }

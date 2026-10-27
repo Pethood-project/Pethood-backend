@@ -29,7 +29,7 @@ Estas son tablas simples de tipo catálogo, usadas como FK desde otras entidades
 - **Estado_Publicacion** (`estado_publicacion_id PK`) — valores: Activa, Pausada, Finalizada. Es el estado del aviso, no el de la mascota (ver `Publicacion_Estado`). **Agregado fuera del diagrama de clases (2026-09-25)**: pendiente reflejarlo en el diagrama del grupo.
 - **Estado_Usuario** (`estado_usuario_id PK`).
 - **Estado_Refugio** (`estado_refugio_id PK`).
-- **Estado_Solicitud** (`estado_solicitud_id PK`).
+- **Estado_Solicitud** (`estado_solicitud_id PK`): `Pendiente`, `En_Revision`, `Revisada`, `Aprobada`, `Rechazada`, `Cancelada`, `Cerrada` (spec 030). Abiertos: los tres primeros. Finales: los otros cuatro, según quién decidió — el refugio (`Aprobada`, `Rechazada`), el solicitante (`Cancelada`) o nadie (`Cerrada`).
 - **Estado_Campaña** (`estado_campaña_id PK`) — valores: Inactiva, Activa, Pausada, Finalizada (spec 028; «Cancelada» quedó dada de baja).
 - **Estado_Donacion** (`estado_donacion_id PK`) — valores: Pendiente, Realizada, Cancelada. Agregado fuera del diagrama de clases (spec 026).
 - **Estado_Animal_Perdido** (`estado_animal_perdido_id PK`) — incluye "Encontrado/Perdido/Resuelto".
@@ -68,7 +68,7 @@ Relaciones: 1 Refugio → N Campaña, 1 Refugio → N Reseña (como reportado/ `
 
 ### Mascota
 
-`mascota_id PK`, `mascota_nombre`, `mascota_fecha_nacimiento`, `mascota_genero`, `mascota_peso`, `mascota_tamanio`, `mascota_castrado`, `mascota_descripcion`, `mascota_imagen_url`, FK `raza_id NOT NULL`, FK `refugio_id` (nullable), FK `usuario_id NOT NULL` (dueño/creador).
+`mascota_id PK`, `mascota_nombre`, `mascota_fecha_nacimiento`, `mascota_genero`, `mascota_peso`, `mascota_tamanio`, `mascota_castrado`, `mascota_desparasitado`, `mascota_descripcion`, `mascota_imagen_url`, FK `raza_id NOT NULL`, FK `refugio_id` (nullable), FK `usuario_id NOT NULL` (dueño/creador).
 
 **Campos agregados fuera del diagrama de clases (2026-08-13, HU-6.1):** `mascota_peso` (`Decimal(4,1)`) y `mascota_tamanio` (enum `PEQUENO`/`MEDIANO`/`GRANDE`) **no figuran en el diagrama de clases original**, pero HU-6.1 AC-12 y AC-13 los pide como campos base obligatorios del formulario de creación. Se agregaron por migración. Pendiente: reflejarlos en el diagrama de clases del grupo para que no vuelvan a divergir.
 
@@ -98,7 +98,6 @@ Ver catálogos arriba.
 | --- | --- | --- |
 | `publicacion_imagenes` | `text[]` | Hasta 5 fotos. **El orden del array es el orden de la galería**: la primera es la portada. `publicacion_imagen_url` se mantiene sincronizado con esa portada para no romper lo que ya lee ese campo. Si no se suben fotos propias, se hereda la de la mascota. |
 | `publicacion_personalidad` | `text[]` | Rasgos elegidos como pastillas (≤25 caracteres cada uno). Hoy las opciones están fijas en el frontend; cuando se definan, deberían pasar a ser un catálogo como Especie o Raza. |
-| `publicacion_desparasitado` | `boolean` | Del interruptor de GUI-24. |
 
 **Vacunas (2026-09-27, spec 019):** `publicacion_vacunas` (texto libre) se eliminó. Las vacunas son de la mascota y viven en `Historia_Clinica` (`vacuna_id`, antes `historia_clinica_tipo_vacuna`); la publicación las muestra leyéndolas de ahí.
 
@@ -111,7 +110,7 @@ Ver catálogos arriba.
 
 Ambos son nullable: las publicaciones anteriores no las tienen. Cuando faltan, la publicación se sigue pudiendo ubicar por `publicacion_ubicacion` (texto libre), pero no entra en el filtro por distancia. Se agregaron fuera del diagrama de clases; pendiente reflejarlos. La decisión de solicitar GPS (contra el criterio original de "no GPS") es del equipo — ver `DEUDA_TECNICA.md`.
 
-**A revisar con el equipo:** `publicacion_desparasitado` sigue en `Publicacion` por conveniencia de la pantalla, pero su lugar natural es `Historia_Clinica`, como pasó con las vacunas.
+**Desparasitado (2026-10-26):** `publicacion_desparasitado` pasó a `mascota_desparasitado`. Es un dato de la mascota y se pregunta al crearla, igual que castrado; la publicación lo muestra leyéndolo de ahí. La migración copió lo que ya habían declarado las publicaciones vivas.
 
 **Pendiente de definición:** `publicacion_titulo` es NOT NULL en el schema, pero el formulario de GUI-24 (AC-25 a AC-28) no pide un título — solo descripción, requisitos y ubicación. Confirmar con el equipo si el título se deriva del nombre de la mascota o si falta el campo en la pantalla.
 
@@ -150,17 +149,43 @@ El feed muestra sólo las publicaciones `Activa`, sólo esas reciben solicitudes
 
 ### Solicitud
 
-`solicitud_id PK`, `solicitud_motivacion`, `solicitud_fecha_respuesta`, `solicitud_comentario`, `solicitud_fecha_inicio_transito`, `solicitud_fecha_fin_transito`, FK `publicacion_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (solicitante), FK `tipoSolicitud_id FK NOT NULL`.
+`solicitud_id PK`, `solicitud_motivacion`, `solicitud_fecha_respuesta`, `solicitud_comentario`, `solicitud_fecha_inicio_transito`, `solicitud_fecha_fin_transito`, `solicitud_nota_interna`, FK `publicacion_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (solicitante), FK `tipoSolicitud_id FK NOT NULL`, FK `hogar_id` (nullable), FK `mascota_adoptada_id` (nullable).
+
+**Campos agregados (spec 030):**
+
+- `solicitud_motivacion` pasó a ser el **saludo** del solicitante: 20–300 caracteres, y sale como primer mensaje del chat. El nombre de la columna no cambia.
+- `solicitud_nota_interna` (nullable, ≤ 1000): una sola nota privada de quien publicó, editable y sin historial. Nunca viaja al solicitante.
+- `mascota_adoptada_id` (nullable): la mascota propia que nació al aprobarse una adopción. Nula en tránsito, en las no aprobadas y en las aprobadas antes de esta columna.
 
 **Campos agregados fuera del diagrama de clases (HU-7.1):** `solicitud_fecha_inicio_transito` y `solicitud_fecha_fin_transito`, ambos nullable. Son el período que el solicitante ofrece cuando el tipo es `Transito`; en una adopción quedan nulos. El diagrama original no los tenía y la HU los pide explícitamente ("el sistema le muestra en la misma solicitud de adopción el tiempo de inicio y el tiempo de fin") — ver `REQUISITOS.md` §10.
 
 Van en `Solicitud` y no en `Hogar` porque son de ESA solicitud: el hogar es el perfil del usuario y lo comparten todas.
 
-Reglas de negocio: máximo 5 solicitudes en estado "Pendiente" simultáneas por usuario. Cancelación automática (usuario "SISTEMA") a los 6 meses sin resolución. Solo se puede solicitar una publicación viva de otro usuario cuya mascota esté `Disponible`, y no se puede tener más de una solicitud abierta sobre la misma publicación.
+Reglas de negocio: máximo 5 solicitudes abiertas (`Pendiente`, `En_Revision` o `Revisada`) simultáneas por usuario. Una abierta que lleva 6 meses sin cambiar de estado se cierra sola (`Cerrada`, causa `VENCIDA_SIN_RESPUESTA`, a nombre de "SISTEMA"). Los estados finales no dan de baja la solicitud: se siguen viendo con su estado y su causa. Solo se puede solicitar una publicación viva de otro usuario cuya mascota esté `Disponible`, y no se puede tener más de una solicitud abierta sobre la misma publicación.
 
 ### Solicitud_Estado
 
-Histórico de estados de una solicitud. `solicitud_estado_id PK`, FK `solicitud_id FK NOT NULL`, FK `estado_solicitud_id FK NOT NULL`.
+Histórico de estados de una solicitud. `solicitud_estado_id PK`, FK `solicitud_id FK NOT NULL`, FK `estado_solicitud_id FK NOT NULL`, `solicitud_estado_motivo` (nullable, enum `motivo_solicitud`).
+
+`solicitud_estado_motivo` es la **causa** de un estado final y vive en la fila del histórico porque pertenece a la transición (junto con quién y cuándo). Cada valor corresponde a un solo estado y el service valida el cruce:
+
+| Estado | Causas |
+|---|---|
+| `Rechazada` | `NO_CUMPLE_REQUISITOS`, `MASCOTA_CON_HOGAR`, `SIN_CONTACTO`, `OTRO` |
+| `Cancelada` | `RETIRADA_POR_SOLICITANTE`, `CUENTA_CERRADA_SOLICITANTE` |
+| `Cerrada` | `ADOPTADA_POR_OTRA_PERSONA`, `MASCOTA_FALLECIDA`, `PUBLICACION_RETIRADA`, `PUBLICANTE_CERRO_CUENTA`, `VENCIDA_SIN_RESPUESTA` |
+
+### Pregunta_Adopcion
+
+`pregunta_adopcion_id PK`, FK `refugio_id FK NOT NULL`, FK `especie_id` (nullable: vacío = todas las especies), `pregunta_adopcion_texto` (≤ 200), `pregunta_adopcion_tipo` (enum `tipo_pregunta_adopcion`: `TEXTO` | `SI_NO` | `OPCIONES`), `pregunta_adopcion_opciones` (TEXT[], solo en `OPCIONES`: entre 2 y 6), `pregunta_adopcion_obligatoria`, `pregunta_adopcion_orden`, `pregunta_adopcion_activa`, más la auditoría completa.
+
+Pregunta propia de un refugio que se suma al final del formulario de solicitud (spec 030). Máximo 5 activas por refugio. Se desactiva o se da de baja, nunca se borra.
+
+### Solicitud_Respuesta
+
+`solicitud_respuesta_id PK`, FK `solicitud_id FK NOT NULL`, FK `pregunta_adopcion_id` (nullable), `solicitud_respuesta_pregunta_texto`, `solicitud_respuesta_respuesta` (≤ 300), `solicitud_respuesta_orden`, más la auditoría completa.
+
+`solicitud_respuesta_pregunta_texto` es una **copia** de lo que se le preguntó a la persona: si el refugio edita o desactiva la pregunta después, la solicitud sigue mostrando exactamente lo que esa persona leyó y respondió.
 
 ### Tipo_Solicitud
 
@@ -215,7 +240,7 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 
 ### Mensaje
 
-`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD` | `ANIMAL_PERDIDO` | `MASCOTA` | `UBICACION_REFUGIO`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable), FK `mascota_id` (nullable), FK `mensaje_respondido_id` (nullable, autorreferencia a `mensaje`), `mensaje_usuario_baja` y `mensaje_fecha_baja` (nullable).
+`mensaje_id PK`, `mensaje_contenido`, `mensaje_leido`, `mensaje_imagen_url`, `mensaje_imagenes` (TEXT[]), `mensaje_tipo` (enum `tipo_mensaje`: `TEXTO` | `SOLICITUD` | `SOLICITUD_ESTADO` | `ANIMAL_PERDIDO` | `MASCOTA` | `UBICACION_REFUGIO`), FK `chat_id FK NOT NULL`, FK `usuario_id FK NOT NULL` (emisor), FK `solicitud_id` (nullable), FK `animal_perdido_id` (nullable), FK `mascota_id` (nullable), FK `mensaje_respondido_id` (nullable, autorreferencia a `mensaje`), `mensaje_usuario_baja` y `mensaje_fecha_baja` (nullable).
 
 - **`mensaje_leido` quedó obsoleto.** Lo reemplazan las marcas de `Usuario_Chat`. Se sigue poblando para no romper lecturas viejas de la columna, pero ninguna query del backend lo consulta. No usarlo en código nuevo.
 - **`mensaje_imagen_url` es la PRIMERA de `mensaje_imagenes`**, desnormalizada para que el preview del listado no tenga que mirar el array. Mismo par que `publicacion_imagen_url` / `publicacion_imagenes`. Un mensaje admite hasta 5 fotos (`LIMITES.mensaje.fotos.maximo`).
@@ -223,6 +248,7 @@ Tabla intermedia N:N entre Usuario y Chat (participantes de una sala). `chat_id 
 - **`mensaje_tipo = ANIMAL_PERDIDO`** (HU-13.2) es lo mismo con la tarjeta del aviso reclamado: la emite SISTEMA, lleva `animal_perdido_id` y su contenido va vacío. Índice único parcial sobre `(animal_perdido_id, chat_id) WHERE animal_perdido_id IS NOT NULL`: una tarjeta por aviso y por sala, y es el equivalente del índice de `chat.solicitud_id`.
 - **Resolver un aviso no deja ningún mensaje.** Se evaluó una línea de sistema "Volvió con su dueño" en la sala y se descartó junto con el cierre de la conversación (spec 024 §9, decisión 2): la leyenda vive en el portal, que es donde el aviso se mira.
 
+- **`mensaje_tipo = SOLICITUD_ESTADO`** (2026-10-23) lo emite SISTEMA cuando una solicitud pasa a revisada, aceptada o no aceptada: es una línea de aviso, no una tarjeta, y el texto va en `mensaje_contenido` ("La solicitud fue aceptada"). Lleva `solicitud_id` y no manda push: el cambio de estado ya tiene el suyo.
 - **`mensaje_tipo = MASCOTA`** y **`UBICACION_REFUGIO`** (2026-10-12) son tarjetas que manda **una persona** de la sala, no SISTEMA: van de su lado y su autor las puede eliminar. `MASCOTA` lleva `mascota_id` (como persona, una mascota que quien la manda tiene en favoritos y que es de la contraparte; como refugio, una mascota publicada del propio refugio); `UBICACION_REFUGIO` no lleva columna propia: es la del refugio de la sala (`chat.refugio_id`), sacada del perfil del refugio. Como las de sistema, sus datos se resuelven en cada pedido y su `mensaje_contenido` va vacío.
 - **`mensaje_respondido_id`** es el mensaje que éste cita (deslizar para responder). Siempre de la misma sala y de tipo `TEXTO`: lo valida el service, la base no lo puede expresar.
 

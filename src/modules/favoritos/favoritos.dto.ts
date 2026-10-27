@@ -50,6 +50,11 @@ export interface MascotaFavoritaDto {
    */
   solicitudAbiertaId: number | null;
   /**
+   * Si la última solicitud propia sobre esa publicación fue retirada y no hay otra abierta: la
+   * tarjeta dice "Cancelada" en vez de ofrecer "Solicitar" como si nunca hubiera pedido.
+   */
+  solicitudCanceladaId: number | null;
+  /**
    * `true` si este usuario es quien la adoptó (tiene la solicitud de adopción aprobada). Con
    * el estado "Adoptado" no alcanza para distinguirlo de una mascota que adoptó otra persona.
    */

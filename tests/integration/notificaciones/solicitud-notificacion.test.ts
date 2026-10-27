@@ -11,10 +11,12 @@ import * as solicitudesRepo from '../../../src/modules/solicitudes/solicitudes.r
 import * as solicitudesService from '../../../src/modules/solicitudes/solicitudes.service';
 import * as notificacionesRepo from '../../../src/modules/notificaciones/notificaciones.repository';
 import * as chatsRepo from '../../../src/modules/chats/chats.repository';
+import * as preguntasRepo from '../../../src/modules/preguntas-adopcion/preguntas-adopcion.repository';
 
 vi.mock('../../../src/modules/solicitudes/solicitudes.repository');
 vi.mock('../../../src/modules/notificaciones/notificaciones.repository');
 vi.mock('../../../src/modules/chats/chats.repository');
+vi.mock('../../../src/modules/preguntas-adopcion/preguntas-adopcion.repository');
 vi.mock('../../../src/shared/logAuditoria');
 
 const SOLICITANTE = 7;
@@ -54,13 +56,37 @@ function solicitudCreada(mascotaRefugioId: number | null) {
     fechaAlta: new Date('2026-09-01T12:00:00.000Z'),
     fechaRespuesta: null,
     hogar: null,
-    usuario: { id: SOLICITANTE, nombre: 'Ana', apellido: 'Pérez', hogares: [] },
+    usuario: {
+      id: SOLICITANTE,
+      nombre: 'Ana',
+      apellido: 'Pérez',
+      imagenUrl: null,
+      localidad: 'Godoy Cruz',
+      provincia: 'Mendoza',
+      verificado: true,
+      fechaAlta: new Date('2026-03-02T12:00:00.000Z'),
+      hogares: [],
+    },
     publicacion: {
       id: NUEVA.publicacionId,
       usuarioId: PUBLICADOR,
-      mascota: { id: 8, nombre: 'Toby', imagenUrl: null, refugioId: mascotaRefugioId },
+      requisitos: [],
+      usuario: { id: PUBLICADOR, nombre: 'Carla', apellido: 'Gómez', imagenUrl: null },
+      mascota: {
+        id: 8,
+        nombre: 'Toby',
+        genero: 'MACHO',
+        imagenUrl: null,
+        refugioId: mascotaRefugioId,
+        refugio: mascotaRefugioId
+          ? { id: mascotaRefugioId, nombre: 'Refugio Patitas', imagenUrl: null }
+          : null,
+      },
     },
     tipoSolicitud: { nombre: 'Adopcion' },
+    respuestas: [],
+    mascotaAdoptadaId: null,
+    notaInterna: null,
     historicoEstados: [
       {
         estadoSolicitud: { id: 1, nombre: 'Pendiente' },
@@ -78,8 +104,8 @@ beforeEach(() => {
     fechaBaja: null,
     verificado: true,
   } as never);
-  vi.mocked(solicitudesRepo.contarPendientesDeUsuario).mockResolvedValue(0);
-  vi.mocked(solicitudesRepo.buscarVivaDeUsuarioEnPublicacion).mockResolvedValue(null as never);
+  vi.mocked(solicitudesRepo.contarAbiertasDeUsuario).mockResolvedValue(0);
+  vi.mocked(solicitudesRepo.buscarAbiertaDeUsuarioEnPublicacion).mockResolvedValue(null as never);
   vi.mocked(solicitudesRepo.buscarTipoSolicitudPorNombre).mockResolvedValue({ id: 1 } as never);
   vi.mocked(solicitudesRepo.buscarEstadoSolicitudPorNombre).mockResolvedValue({ id: 1 } as never);
   vi.mocked(chatsRepo.buscarChatEntre).mockResolvedValue(null as never);
@@ -96,6 +122,7 @@ beforeEach(() => {
       }) as never,
   );
   vi.mocked(notificacionesRepo.contarNoLeidas).mockResolvedValue(0);
+  vi.mocked(preguntasRepo.listarAplicables).mockResolvedValue([]);
 });
 
 describe('crear una solicitud notifica al publicador (HU-4.2)', () => {
@@ -104,6 +131,7 @@ describe('crear una solicitud notifica al publicador (HU-4.2)', () => {
       mascota: {
         usuarioId: null,
         refugioId: REFUGIO_ID,
+        raza: { especieId: 2 },
         historicoEstados: [{ estadoMascota: { nombre: 'Disponible' } }],
       },
       historicoEstados: [{ estadoPublicacion: { nombre: 'Activa' } }],

@@ -68,7 +68,7 @@ El campo `mensaje` viene en español con voseo rioplatense y **se puede mostrar 
 | `imagenes` | **Todas** las fotos, en el orden en que se enviaron. Vacío si el mensaje es solo texto. Hasta 5. Puede contener la URL de un video |
 | `adjuntos` | Las **mismas** URLs de `imagenes`, cada una con su `tipo`: `{ url, tipo: "IMAGEN" \| "VIDEO" }`. Es el campo a usar de ahora en más |
 | `usuarioId` | **Id del emisor.** El cliente lo compara con su sesión para decidir el lado de la burbuja |
-| `tipo` | `"TEXTO"`, `"SOLICITUD"`, `"ANIMAL_PERDIDO"`, `"MASCOTA"` o `"UBICACION_REFUGIO"`. Ver "Mensajes de sistema" y «Tarjetas que manda una persona» |
+| `tipo` | `"TEXTO"`, `"SOLICITUD"`, `"SOLICITUD_ESTADO"` (línea de aviso con el texto en `contenido`), `"ANIMAL_PERDIDO"`, `"MASCOTA"` o `"UBICACION_REFUGIO"`. Ver "Mensajes de sistema" y «Tarjetas que manda una persona» |
 | `entregado` | Le llegó al destinatario, aunque no lo haya abierto → **segundo tilde** |
 | `leido` | El destinatario lo leyó → **doble tilde pintado**. Un mensaje leído está siempre entregado |
 | `fechaLectura` | Cuándo lo leyó, ISO 8601 crudo, o `null` si todavía no |

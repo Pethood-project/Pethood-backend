@@ -44,6 +44,7 @@ const camposBase = {
   especieId: idSchema('La especie'),
   razaId: idSchema('La raza'),
   castrado: booleanoSchema(),
+  desparasitado: booleanoSchema(),
   descripcion: textoOpcionalSchema({
     max: LIMITES.mascota.descripcion.max,
     etiqueta: 'La descripción',
@@ -94,6 +95,7 @@ export const editarMascotaSchema = z
     especieId: idSchema('La especie').optional(),
     razaId: idSchema('La raza').optional(),
     castrado: booleanoOpcionalSchema(),
+    desparasitado: booleanoOpcionalSchema(),
     descripcion: textoOpcionalSchema({
       max: LIMITES.mascota.descripcion.max,
       etiqueta: 'La descripción',
@@ -124,6 +126,7 @@ export interface MascotaCreadaDto {
   peso: number | null;
   tamanio: string | null;
   castrado: boolean;
+  desparasitado: boolean;
   descripcion: string | null;
   imagenUrl: string | null;
   especie: { id: number; nombre: string };

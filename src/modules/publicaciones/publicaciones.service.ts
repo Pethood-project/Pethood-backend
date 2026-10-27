@@ -124,7 +124,6 @@ export async function crearPublicacion(
         longitud: datos.longitud ?? null,
         requisitos: datos.requisitos,
         personalidad: datos.personalidad,
-        desparasitado: datos.desparasitado,
         imagenes,
         mascotaId: mascota.id,
         usuarioId,
@@ -166,7 +165,6 @@ export async function crearPublicacion(
     ubicacion: publicacion.ubicacion,
     requisitos: publicacion.requisitos,
     personalidad: publicacion.personalidad,
-    desparasitado: publicacion.desparasitado,
     imagenes: publicacion.imagenes,
     mascotaId: publicacion.mascotaId,
     usuarioId: publicacion.usuarioId,
@@ -232,6 +230,58 @@ export async function sincronizarConEstadoMascota(
     entidadId: publicacion.id,
     detalle: `estado=${destino} (automático, mascota=${estadoMascota})`,
   });
+
+  // Una mascota que ya no está disponible deja sin sentido lo que se le había pedido.
+  if (destino === ESTADO_PUBLICACION.FINALIZADA) {
+    await solicitudes.cerrarAbiertasDePublicacion(
+      publicacion.id,
+      estadoMascota === 'Fallecido' ? 'MASCOTA_FALLECIDA' : 'ADOPTADA_POR_OTRA_PERSONA',
+      usuarioId,
+    );
+
+    // Y sale de los favoritos de todos, avisándoles antes.
+    await retirarDeFavoritos(
+      mascotaId,
+      publicacion.mascota.nombre,
+      estadoMascota === 'Fallecido' ? 'FALLECIDA' : 'ADOPTADA',
+    );
+  }
+}
+
+/**
+ * La mascota falleció o la adoptaron por fuera de una solicitud: se avisa a quienes la tenían en
+ * favoritos y se la saca de ahí. Best-effort: el cambio de estado ya se escribió y un aviso que
+ * falla no lo revierte.
+ */
+async function retirarDeFavoritos(
+  mascotaId: number,
+  nombreMascota: string | null,
+  motivo: 'FALLECIDA' | 'ADOPTADA',
+): Promise<void> {
+  try {
+    const usuarioIds = await favoritos.listarUsuariosConFavorito(mascotaId);
+    const mascota = nombreMascota ?? 'la mascota';
+
+    await Promise.all(
+      usuarioIds.map((usuarioId) =>
+        notificaciones.notificar({
+          usuarioId,
+          tipo: motivo === 'FALLECIDA' ? 'FAVORITO_FALLECIDO' : 'FAVORITO_ADOPTADO',
+          mensaje:
+            motivo === 'FALLECIDA'
+              ? `Lamentamos contarte que ${mascota}, que tenías en favoritos, falleció.`
+              : `${mascota}, que tenías en favoritos, ya encontró su hogar.`,
+          entidadTipo: 'FAVORITOS',
+          entidadId: mascotaId,
+          canal: { push: true },
+        }),
+      ),
+    );
+
+    await favoritos.retirarDeTodosLosFavoritos(mascotaId);
+  } catch (err) {
+    console.error('No se pudo retirar la mascota de los favoritos', mascotaId, err);
+  }
 }
 
 type Actor = { id: number; refugioId: number | null };
@@ -332,7 +382,6 @@ export async function editarPublicacion(
         longitud: datos.longitud ?? null,
         requisitos: datos.requisitos,
         personalidad: datos.personalidad,
-        desparasitado: datos.desparasitado,
         imagenes,
       },
       usuarioId,
@@ -460,9 +509,26 @@ export async function cambiarEstadoPublicacion(
     detalle: `estado=${transicion.hacia} (manual)`,
   });
 
-  if (accion === 'PAUSAR' || accion === 'FINALIZAR') {
+  // Pausar es reversible: las solicitudes siguen abiertas y solo se avisa. Finalizar no: se
+  // cierran con su causa.
+  if (accion === 'PAUSAR') {
     await avisarSolicitudesAbiertas(publicacion.id, publicacion.mascota.nombre);
-    await avisarFavoritosNoDisponibles(publicacion.mascota.id, publicacion.mascota.nombre);
+  }
+
+  if (accion === 'FINALIZAR') {
+    await solicitudes.cerrarAbiertasDePublicacion(
+      publicacion.id,
+      'PUBLICACION_RETIRADA',
+      usuarioId,
+    );
+  }
+
+  if (accion === 'PAUSAR' || accion === 'FINALIZAR') {
+    await avisarFavoritosNoDisponibles(
+      publicacion.mascota.id,
+      publicacion.mascota.nombre,
+      accion === 'PAUSAR',
+    );
   }
 
   if (accion === 'REACTIVAR') {
@@ -476,22 +542,22 @@ export async function cambiarEstadoPublicacion(
   return obtenerPublicacion(publicacion.id, usuarioId, ambito);
 }
 
-/** Spec 004: la publicación se pausó o dio de baja con solicitudes pendientes abiertas.
+/** Se pausó la publicación con solicitudes abiertas: siguen abiertas, solo se avisa.
  * Best-effort: el cambio de estado ya se escribió, un aviso que falla no lo revierte. */
 async function avisarSolicitudesAbiertas(
   publicacionId: number,
   nombreMascota: string | null,
 ): Promise<void> {
   try {
-    const pendientes = await solicitudes.listarPendientesDePublicacion(publicacionId);
+    const abiertas = await solicitudes.listarAbiertasDePublicacion(publicacionId);
     const mascota = nombreMascota ?? 'la mascota';
 
     await Promise.all(
-      pendientes.map((solicitud) =>
+      abiertas.map((solicitud) =>
         notificaciones.notificar({
           usuarioId: solicitud.usuarioId,
           tipo: 'PUBLICACION_PAUSADA_CON_SOLICITUD',
-          mensaje: `La publicación de ${mascota} ya no está disponible`,
+          mensaje: `Pausaron por un tiempo la publicación de ${mascota}. Tu solicitud sigue abierta y te avisamos cuando vuelva.`,
           entidadTipo: 'SOLICITUD',
           entidadId: solicitud.id,
           canal: { push: true },
@@ -507,10 +573,14 @@ async function avisarSolicitudesAbiertas(
   }
 }
 
-/** Spec 004: "una mascota de tus favoritos dejó de estar disponible". Best-effort, ídem arriba. */
+/**
+ * "Una mascota de tus favoritos dejó de estar disponible". Solo promete avisar si vuelve
+ * cuando fue una pausa: una publicación finalizada no vuelve. Best-effort, ídem arriba.
+ */
 async function avisarFavoritosNoDisponibles(
   mascotaId: number,
   nombreMascota: string | null,
+  vuelve: boolean,
 ): Promise<void> {
   try {
     const usuarioIds = await favoritos.listarUsuariosConFavorito(mascotaId);
@@ -521,7 +591,9 @@ async function avisarFavoritosNoDisponibles(
         notificaciones.notificar({
           usuarioId,
           tipo: 'FAVORITO_NO_DISPONIBLE',
-          mensaje: `${mascota}, que tenías en favoritos, ya no está disponible. Te avisaremos si vuelve.`,
+          mensaje: vuelve
+            ? `${mascota}, que tenías en favoritos, ya no está disponible. Te avisaremos si vuelve.`
+            : `${mascota}, que tenías en favoritos, ya no está disponible para adopción.`,
           entidadTipo: 'FAVORITOS',
           entidadId: mascotaId,
           canal: { push: true },
@@ -591,7 +663,8 @@ function aFeedDto(
     ubicacion: publicacion.ubicacion,
     requisitos: publicacion.requisitos,
     personalidad: publicacion.personalidad,
-    desparasitado: publicacion.desparasitado,
+    // Es de la mascota: se pregunta al crearla, no al publicarla.
+    desparasitado: mascota.desparasitado,
     // Las vacunas no son de la publicación sino de la mascota: salen de su historia clínica.
     vacunas: vacunasAplicadas(mascota.historiaClinica),
     // Una publicación sin fotos propias reusa la de la mascota, que es obligatoria en el

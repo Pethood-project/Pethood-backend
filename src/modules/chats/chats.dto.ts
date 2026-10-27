@@ -42,10 +42,12 @@ export interface ContactoChatDto {
  * tarjetas, con `contenido` vacío:
  *
  * - `SOLICITUD` y `ANIMAL_PERDIDO` las emite el usuario SISTEMA (no son de nadie de la sala).
+ * - `SOLICITUD_ESTADO` también la emite SISTEMA, pero no es una tarjeta: es una línea con el aviso
+ *   en `contenido` ("La solicitud fue aceptada").
  * - `MASCOTA` y `UBICACION_REFUGIO` las manda una persona: van de su lado y las puede eliminar.
  */
 export type TipoMensajeDto =
-  'TEXTO' | 'SOLICITUD' | 'ANIMAL_PERDIDO' | 'MASCOTA' | 'UBICACION_REFUGIO';
+  'TEXTO' | 'SOLICITUD' | 'SOLICITUD_ESTADO' | 'ANIMAL_PERDIDO' | 'MASCOTA' | 'UBICACION_REFUGIO';
 
 /** Vista previa del último mensaje. `null` si la sala todavía no tiene ninguno. */
 export interface UltimoMensajeDto {
@@ -230,18 +232,26 @@ export interface MensajeEliminadoDto {
  */
 export interface SolicitudEnChatDto {
   id: number;
+  /** Quien la envió: el cliente lo compara con la sesión para saber de qué lado va la tarjeta. */
+  usuarioId: number;
   /** "Adopcion" o "Transito", del catálogo `TipoSolicitud`. */
   tipo: string;
   /** Estado vigente: "Pendiente", "Aceptada", "Rechazada"… El color lo decide el cliente. */
   estado: string;
   /** ISO 8601 crudo: cuándo se envió. */
   fechaAlta: string;
+  /** ISO 8601 crudo: cuándo se resolvió, o `null` si sigue abierta. */
+  fechaRespuesta: string | null;
+  /** El período ofrecido, solo en un tránsito (fechas `AAAA-MM-DD`). */
+  transito: { fechaInicio: string; fechaFin: string } | null;
   mascota: {
     id: number;
     /** `null` en una mascota sin nombre cargado: el texto de relleno lo pone el cliente. */
     nombre: string | null;
     /** Nombre de la especie, del catálogo. */
     especie: string;
+    /** Para decir "adoptado" o "adoptada" como corresponde. */
+    genero: 'MACHO' | 'HEMBRA';
     /** ISO 8601 crudo, o `null` si no se cargó. La edad la calcula el cliente. */
     fechaNacimiento: string | null;
     imagenUrl: string | null;

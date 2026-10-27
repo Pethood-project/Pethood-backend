@@ -5,6 +5,8 @@
  */
 import { z } from 'zod';
 import { esPasada, parsearFecha } from '../../shared/validation/dates';
+import { MOTIVOS_RECHAZO, type NombreEstadoSolicitud } from '../../shared/requestStates';
+import type { PreguntaAplicableDto } from '../preguntas-adopcion/preguntas-adopcion.dto';
 import { LIMITES } from '../../shared/validation/limits';
 import {
   booleanoSchema,
@@ -59,6 +61,18 @@ const hogarSchema = z.object({
 
 export type HogarDto = z.infer<typeof hogarSchema>;
 
+/** Lo que respondió el solicitante a una pregunta del refugio. */
+const respuestaSchema = z.object({
+  preguntaId: idSchema('La pregunta'),
+  respuesta: z
+    .string({ invalid_type_error: 'La respuesta no es válida' })
+    .trim()
+    .max(
+      LIMITES.preguntaAdopcion.respuesta.max,
+      `Las respuestas pueden tener hasta ${LIMITES.preguntaAdopcion.respuesta.max} caracteres`,
+    ),
+});
+
 /**
  * Alta de solicitud (HU-7.1). El período de tránsito no se puede validar campo por campo
  * porque su obligatoriedad depende de `tipoSolicitud`: se acepta cualquier fecha en el
@@ -71,10 +85,11 @@ export const crearSolicitudSchema = z
       required_error: 'Elegí si querés adoptar o ser hogar de tránsito',
       invalid_type_error: 'El tipo de solicitud no es válido',
     }),
-    motivacion: textoSchema({ ...LIMITES.solicitud.motivacion, etiqueta: 'La motivación' }),
+    motivacion: textoSchema({ ...LIMITES.solicitud.motivacion, etiqueta: 'El saludo' }),
     fechaInicioTransito: z.unknown().optional(),
     fechaFinTransito: z.unknown().optional(),
     hogar: hogarSchema,
+    respuestas: z.array(respuestaSchema).optional(),
   })
   .transform((datos, ctx) => {
     const esTransito = datos.tipoSolicitud === 'Transito';
@@ -128,19 +143,36 @@ function exigirFechaDePeriodo(
 
 export type CrearSolicitudDto = z.infer<typeof crearSolicitudSchema>;
 
-/** El refugio solo puede llevar una solicitud "Pendiente" a uno de estos dos destinos. */
+/** Con la solicitud abierta, el refugio decide con uno de estos dos destinos. */
 export const ESTADOS_RESOLUCION = ['Aprobada', 'Rechazada'] as const;
 
-export const resolverSolicitudSchema = z.object({
-  estado: z.enum(ESTADOS_RESOLUCION, {
-    required_error: 'El estado es obligatorio',
-    invalid_type_error: 'El estado no es válido',
-  }),
-  comentario: textoOpcionalSchema({
-    ...LIMITES.solicitud.comentario,
-    etiqueta: 'El comentario',
-  }),
-});
+export const resolverSolicitudSchema = z
+  .object({
+    estado: z.enum(ESTADOS_RESOLUCION, {
+      required_error: 'El estado es obligatorio',
+      invalid_type_error: 'El estado no es válido',
+    }),
+    motivo: z
+      .enum(MOTIVOS_RECHAZO, { errorMap: () => ({ message: 'El motivo no es válido' }) })
+      .optional(),
+    comentario: textoOpcionalSchema({
+      ...LIMITES.solicitud.comentario,
+      etiqueta: 'El comentario',
+    }),
+  })
+  .superRefine((datos, ctx) => {
+    if (datos.estado === 'Rechazada' && !datos.motivo) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['motivo'], message: 'Elegí un motivo' });
+    }
+
+    if (datos.estado === 'Aprobada' && datos.motivo) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['motivo'],
+        message: 'Una solicitud aprobada no lleva motivo',
+      });
+    }
+  });
 
 export type ResolverSolicitudDto = z.infer<typeof resolverSolicitudSchema>;
 
@@ -148,10 +180,12 @@ export type ResolverSolicitudDto = z.infer<typeof resolverSolicitudSchema>;
 export const NOMBRES_ESTADO_SOLICITUD = [
   'Pendiente',
   'En_Revision',
+  'Revisada',
   'Aprobada',
   'Rechazada',
   'Cancelada',
-] as const;
+  'Cerrada',
+] as const satisfies readonly NombreEstadoSolicitud[];
 
 /** Una punta del rango de fecha de los filtros. Vacío/ausente queda `undefined`, no error. */
 function fechaFiltroSchema(campo: 'fechaDesde' | 'fechaHasta') {
@@ -181,6 +215,8 @@ export const filtrosRecibidasSchema = z
      * solicitudes que están en cualquiera de ellos. Se suma a `estado` si llegan los dos.
      */
     estados: listaDeValoresSchema(NOMBRES_ESTADO_SOLICITUD, 'El estado'),
+    /** Solo adopciones o solo tránsitos. */
+    tipo: z.enum(['Adopcion', 'Transito']).optional(),
     /** Filtran por `fechaAlta`, inclusive en las dos puntas. */
     fechaDesde: fechaFiltroSchema('fechaDesde'),
     fechaHasta: fechaFiltroSchema('fechaHasta'),
@@ -202,6 +238,13 @@ export const filtrosMiasSchema = filtrosRecibidasSchema;
 export type FiltrosMiasDto = FiltrosRecibidasDto;
 
 export const idSolicitudSchema = idSchema('El id de la solicitud');
+
+/** La nota privada de quien publicó. Vacía o `null` la borra. */
+export const guardarNotaSchema = z.object({
+  texto: textoOpcionalSchema({ ...LIMITES.solicitud.nota, etiqueta: 'La nota' }),
+});
+
+export type GuardarNotaDto = z.infer<typeof guardarNotaSchema>;
 
 /** La publicación es opcional: sin ella solo se evalúa al usuario. */
 export const filtrosElegibilidadSchema = z.object({
@@ -232,6 +275,8 @@ export interface ElegibilidadDto {
    * aparte: la UI ya llama a este endpoint antes de abrir el modal.
    */
   hogar: HogarSolicitanteDto | null;
+  /** Las preguntas propias del refugio que le toca responder, ya filtradas por la especie. */
+  preguntas: PreguntaAplicableDto[];
 }
 
 /** Período ofrecido en una solicitud de tránsito. Null cuando el tipo es "Adopcion". */
@@ -248,16 +293,25 @@ export interface SolicitudResumenDto {
   solicitante: { id: number; nombre: string; apellido: string };
   tipoSolicitud: string;
   estado: { id: number; nombre: string };
+  /** Causa del estado vigente, si es un final que la lleva. */
+  motivo: string | null;
   comentario: string | null;
   transito: PeriodoTransitoDto | null;
   fechaAlta: string;
   fechaRespuesta: string | null;
+  /**
+   * Por qué estados pasó, del más reciente al más viejo. Va hasta en el listado: el camino
+   * de estados se pinta con lo que realmente pasó, no con lo que se supone que pasó.
+   */
+  historial: EstadoSolicitudDto[];
 }
 
 /** Una fila del histórico de HU-7.5, ordenado del estado más reciente al más viejo. */
 export interface EstadoSolicitudDto {
   id: number;
   nombre: string;
+  /** Causa, en los estados finales que la llevan. */
+  motivo: string | null;
   fecha: string;
 }
 
@@ -291,23 +345,48 @@ export interface CambioDeHogarDto {
   fechaCambio: string;
 }
 
-export interface SolicitudDetalleDto extends SolicitudResumenDto {
+/** Lo que respondió el solicitante a una pregunta del refugio, con el texto que se le mostró. */
+export interface RespuestaSolicitudDto {
+  pregunta: string;
+  respuesta: string;
+}
+
+export interface SolicitudDetalleDto extends Omit<SolicitudResumenDto, 'mascota' | 'solicitante'> {
+  mascota: SolicitudResumenDto['mascota'] & {
+    genero: string;
+    /** Lo que pide la mascota, tal como lo escribió quien la publicó. */
+    requisitos: string[];
+  };
+  /** Lo que el publicador necesita para evaluar a la persona: nunca documento ni contacto. */
+  solicitante: SolicitudResumenDto['solicitante'] & {
+    imagenUrl: string | null;
+    localidad: string | null;
+    provincia: string | null;
+    verificado: boolean;
+    /** `AAAA-MM-DD` */
+    miembroDesde: string;
+  };
   motivacion: string;
+  /** Quién publicó la mascota: el refugio, o la persona si la mascota es particular. */
+  publicador: { nombre: string; imagenUrl: string | null; esRefugio: boolean };
   /** Lo que el solicitante declaró al enviar, o sea lo que se está evaluando. */
   hogar: HogarSolicitanteDto | null;
   /** Solo viene si el hogar cambió después de enviar la solicitud. */
   cambioDeHogar: CambioDeHogarDto | null;
-  historial: EstadoSolicitudDto[];
+  respuestas: RespuestaSolicitudDto[];
+  /** La conversación con quien publicó, o `null` si la sala no se pudo abrir. */
+  chatId: number | null;
+  /** Solo para el solicitante de una adopción aprobada: la mascota que ahora es suya. */
+  mascotaAdoptadaId: number | null;
+  /** Solo viene para quien publicó la mascota: el solicitante nunca la recibe. */
+  notaInterna?: string | null;
 }
 
 /**
- * Respuesta del alta (HU-7.1): el detalle más la conversación que se abrió con la tarjeta del
- * pedido adentro, para que la app lleve al solicitante directo ahí (decisión del 2026-10-18).
- * `null` si la sala no se pudo abrir: la solicitud está creada igual.
+ * Respuesta del alta: el detalle, cuyo `chatId` lleva al solicitante directo a la conversación
+ * que se abrió con la tarjeta del pedido adentro (decisión del 2026-10-18).
  */
-export interface SolicitudCreadaDto extends SolicitudDetalleDto {
-  chatId: number | null;
-}
+export type SolicitudCreadaDto = SolicitudDetalleDto;
 
 export interface ListaSolicitudesRecibidasDto {
   /** Total que matchea el filtro, no el largo de esta página. */

@@ -327,7 +327,11 @@ interface TarjetasDelMensaje {
  * Las tarjetas que emite SISTEMA. Las demás (`TEXTO`, `MASCOTA`, `UBICACION_REFUGIO`) las
  * escribe una persona de la sala: van de su lado y su autor las puede eliminar.
  */
-const TIPOS_DE_SISTEMA: readonly TipoMensaje[] = ['SOLICITUD', 'ANIMAL_PERDIDO'];
+const TIPOS_DE_SISTEMA: readonly TipoMensaje[] = [
+  'SOLICITUD',
+  'SOLICITUD_ESTADO',
+  'ANIMAL_PERDIDO',
+];
 
 /**
  * Lo que la respuesta muestra del mensaje citado. Si el citado se eliminó, la cita lo dice y
@@ -432,9 +436,12 @@ function aMensajeDto(
     tipo: mensaje.tipo,
     ...acuseDe(mensaje, marcas),
     // La tarjeta sólo viaja en el mensaje que la anuncia: el que la pide resuelve la de cada
-    // mensaje (ver `listarHistorial`).
+    // mensaje (ver `listarHistorial`). El aviso de estado la lleva también, para mostrar la
+    // mascota con su foto.
     solicitud:
-      mensaje.tipo === 'SOLICITUD' && solicitud !== null && solicitud.id === mensaje.solicitudId
+      (mensaje.tipo === 'SOLICITUD' || mensaje.tipo === 'SOLICITUD_ESTADO') &&
+      solicitud !== null &&
+      solicitud.id === mensaje.solicitudId
         ? solicitud
         : null,
     // Mismo criterio que la solicitud: la tarjeta viaja sólo en el mensaje que la anuncia.
@@ -467,15 +474,25 @@ function aSolicitudEnChat(
 
   return {
     id: solicitud.id,
+    usuarioId: solicitud.usuarioId,
     tipo: solicitud.tipoSolicitud.nombre,
     // Sin estado vigente la solicitud está inconsistente; se informa como pendiente en vez
     // de romper la sala entera, igual que el listado omite un chat sin contraparte.
     estado: solicitud.historicoEstados[0]?.estadoSolicitud.nombre ?? 'Pendiente',
     fechaAlta: solicitud.fechaAlta.toISOString(),
+    fechaRespuesta: solicitud.fechaRespuesta?.toISOString() ?? null,
+    transito:
+      solicitud.fechaInicioTransito && solicitud.fechaFinTransito
+        ? {
+            fechaInicio: aFechaISO(solicitud.fechaInicioTransito),
+            fechaFin: aFechaISO(solicitud.fechaFinTransito),
+          }
+        : null,
     mascota: {
       id: mascota.id,
       nombre: mascota.nombre,
       especie: mascota.raza.especie.nombre,
+      genero: mascota.genero,
       fechaNacimiento: mascota.fechaNacimiento?.toISOString() ?? null,
       // La foto de la publicación manda sobre la de la mascota: es la que el adoptante vio.
       imagenUrl: solicitud.publicacion.imagenUrl ?? mascota.imagenUrl,
@@ -711,7 +728,9 @@ export async function listarHistorial(
   // mayoría de las páginas son mensajes de texto y no pagan ninguna query.
   const idsDeSolicitud = new Set(
     pagina.flatMap((fila) =>
-      fila.tipo === 'SOLICITUD' && fila.solicitudId !== null ? [fila.solicitudId] : [],
+      (fila.tipo === 'SOLICITUD' || fila.tipo === 'SOLICITUD_ESTADO') && fila.solicitudId !== null
+        ? [fila.solicitudId]
+        : [],
     ),
   );
   const idsDeAviso = new Set(
@@ -1420,7 +1439,90 @@ export async function asegurarChatDeSolicitud(solicitudId: number): Promise<numb
     participantesIds,
   );
 
+  await enviarSaludoDeSolicitud(solicitud, chatId, participantesIds);
+
   return chatId;
+}
+
+/** Lo que dice la sala cuando la solicitud avanza. Neutro: lo leen las dos partes. */
+const TEXTO_DE_ESTADO_DE_SOLICITUD = {
+  REVISADA: 'La solicitud fue revisada',
+  APROBADA: 'La solicitud fue aceptada',
+  RECHAZADA: 'La solicitud no fue aceptada',
+} as const;
+
+export type EtapaAnunciable = keyof typeof TEXTO_DE_ESTADO_DE_SOLICITUD;
+
+/**
+ * Deja en la sala de la solicitud una línea que avisa que fue revisada, aceptada o no aceptada.
+ * La emite SISTEMA y no manda push: el cambio de estado ya tiene su propio aviso.
+ *
+ * Best-effort y sin efecto si la solicitud no tiene sala (no se pudo abrir al enviarla): el
+ * cambio de estado ya está escrito y no puede caerse por esto.
+ */
+export async function anunciarEstadoDeSolicitud(
+  solicitudId: number,
+  etapa: EtapaAnunciable,
+): Promise<void> {
+  try {
+    const tarjeta = await repo.buscarMensajeDeSolicitud(solicitudId);
+    if (!tarjeta) return;
+
+    const participantesIds = (await repo.marcasDeParticipantes(tarjeta.chatId)).map(
+      (participante) => participante.usuarioId,
+    );
+
+    const mensaje = await repo.crearMensaje({
+      chatId: tarjeta.chatId,
+      usuarioId: USUARIO_SISTEMA_ID,
+      contenido: TEXTO_DE_ESTADO_DE_SOLICITUD[etapa],
+      imagenes: [],
+      tipo: 'SOLICITUD_ESTADO',
+      solicitudId,
+    });
+
+    // Lleva la mascota y su foto: una aceptación no puede pasar como una línea más.
+    const solicitud = await repo.buscarSolicitudParaChat(solicitudId);
+
+    emisor.emitirMensajeNuevo(
+      aMensajeDto(mensaje, [], { solicitud: solicitud ? aSolicitudEnChat(solicitud) : null }),
+      participantesIds,
+    );
+  } catch (err) {
+    console.error('No se pudo anunciar el estado de la solicitud en el chat', solicitudId, err);
+  }
+}
+
+/**
+ * El saludo que escribió quien solicita va como mensaje suyo, justo debajo de la tarjeta, para
+ * romper el hielo. Es el único texto que la persona escribió al pedir: sale con su autoría y
+ * despierta al refugio como cualquier mensaje.
+ *
+ * Best-effort: la tarjeta ya está y la solicitud también; un saludo que no se pudo mandar no
+ * tira abajo nada.
+ */
+async function enviarSaludoDeSolicitud(
+  solicitud: { id: number; usuarioId: number; motivacion: string },
+  chatId: number,
+  participantesIds: number[],
+): Promise<void> {
+  try {
+    const saludo = await repo.crearMensaje({
+      chatId,
+      usuarioId: solicitud.usuarioId,
+      contenido: solicitud.motivacion,
+      imagenes: [],
+    });
+
+    emisor.emitirMensajeNuevo(aMensajeDto(saludo, []), participantesIds);
+
+    await avisarDestinatarios(solicitud.usuarioId, chatId, participantesIds, {
+      texto: solicitud.motivacion,
+      cantidadImagenes: 0,
+    });
+  } catch (err) {
+    console.error('No se pudo enviar el saludo de la solicitud', solicitud.id, err);
+  }
 }
 
 // ─────────────── La tarjeta de un aviso reclamado (HU-13.2) ───────────────
@@ -1534,4 +1636,10 @@ export async function asegurarChatDeReclamo(
   await avisarReclamo(reclamanteId, reportanteId, chatId);
 
   return { chatId, nueva: existente === null };
+}
+
+/** La conversación donde quedó la tarjeta de una solicitud, o `null` si todavía no existe. */
+export async function chatIdDeSolicitud(solicitudId: number): Promise<number | null> {
+  const tarjeta = await repo.buscarMensajeDeSolicitud(solicitudId);
+  return tarjeta?.chatId ?? null;
 }

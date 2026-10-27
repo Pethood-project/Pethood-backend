@@ -1,10 +1,10 @@
 // Hogares, solicitudes de adopción/tránsito y seguimiento post-adopción.
 //
-// Cubre los cinco Estado_Solicitud, los dos tipos, el versionado de hogar (HU-7.1), una
+// Cubre los siete Estado_Solicitud (con la causa de los finales), los dos tipos, el versionado de hogar (HU-7.1), una
 // pendiente vencida para el cron de HU-7.6 y adopciones aprobadas en distintos tramos de la
 // secuencia de seguimiento (HU-9.x): recién aprobada, con pedidos vencidos, a mitad de camino
 // y con la secuencia agotada.
-import type { Hogar } from '@prisma/client';
+import type { Hogar, MotivoSolicitud } from '@prisma/client';
 import {
   pedidosExigiblesA,
   plazoDeRespuesta,
@@ -176,8 +176,11 @@ interface DefSolicitud {
   hogar: string | null;
   tipo: TipoFlujo;
   motivacion: string;
-  /** Histórico de estados, del más viejo al vigente: [estado, hace cuántos días]. */
-  historial: [string, number][];
+  /**
+   * Histórico de estados, del más viejo al vigente: [estado, hace cuántos días, causa]. La causa
+   * va en los finales que la llevan (Rechazada, Cancelada, Cerrada).
+   */
+  historial: [string, number, MotivoSolicitud?][];
   /** Respuesta del refugio al aceptar/rechazar (HU-7.4). */
   comentario?: string;
   transito?: { duracionDias: number };
@@ -220,7 +223,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'recuperación con los controles que hagan falta.',
     historial: [
       ['Pendiente', 15],
-      ['Rechazada', 14],
+      ['Rechazada', 14, 'NO_CUMPLE_REQUISITOS'],
     ],
     comentario:
       'Gracias Ana. Por ahora Rocky necesita una casa sin escaleras y en planta baja hasta que ' +
@@ -236,6 +239,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'con gatos de pelo largo.',
     historial: [
       ['Pendiente', 5],
+      ['Revisada', 4],
       ['Aprobada', 3],
     ],
     comentario: '¡Bienvenida Mia a su nueva familia! Cualquier duda nos escribís por el chat.',
@@ -251,6 +255,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'Tengo experiencia dando baños medicados.',
     historial: [
       ['Pendiente', 12],
+      ['Revisada', 11],
       ['Aprobada', 10],
     ],
     comentario: 'Aprobado. Te pasamos el protocolo de baños por el chat.',
@@ -267,6 +272,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'para sumarla a la familia.',
     historial: [
       ['Pendiente', 103],
+      ['Revisada', 102],
       ['Aprobada', 100],
     ],
     comentario: 'Aprobada. ¡Que sean muy felices!',
@@ -282,6 +288,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'preparado con red en el balcón.',
     historial: [
       ['Pendiente', 905],
+      ['Revisada', 903],
       ['Aprobada', 900],
     ],
     comentario: 'Aprobada.',
@@ -328,7 +335,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'Es nuestro primer perro y buscamos uno equilibrado y bueno con chicos como describen a Coco.',
     historial: [
       ['Pendiente', 95],
-      ['Cancelada', 90],
+      ['Cerrada', 90, 'VENCIDA_SIN_RESPUESTA'],
     ],
   },
   {
@@ -341,7 +348,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'cuidadosos.',
     historial: [
       ['Pendiente', 30],
-      ['Rechazada', 28],
+      ['Rechazada', 28, 'NO_CUMPLE_REQUISITOS'],
     ],
     comentario:
       'Kira se estresa mucho con chicos y con movimiento, no la vemos en una casa con niños. ' +
@@ -365,7 +372,7 @@ const SOLICITUDES: DefSolicitud[] = [
       'Sería mi primer perro. Me gusta que Pipo sea tranquilo porque trabajo muchas horas afuera.',
     historial: [
       ['Pendiente', 62],
-      ['Rechazada', 60],
+      ['Rechazada', 60, 'NO_CUMPLE_REQUISITOS'],
     ],
     comentario: 'Pipo necesita alguien que esté más tiempo en casa. Gracias por postularte.',
   },
@@ -377,7 +384,7 @@ const SOLICITUDES: DefSolicitud[] = [
     motivacion: 'Coco parece un perro fácil para alguien sin experiencia como yo.',
     historial: [
       ['Pendiente', 120],
-      ['Rechazada', 118],
+      ['Rechazada', 118, 'NO_CUMPLE_REQUISITOS'],
     ],
     comentario: 'Coco necesita paseos largos todos los días y el departamento no tiene espacio.',
   },
@@ -390,6 +397,31 @@ const SOLICITUDES: DefSolicitud[] = [
     historial: [
       ['Pendiente', 8],
       ['En_Revision', 7],
+      ['Revisada', 3],
+    ],
+  },
+
+  // ── Los otros finales: retirada por la persona y cerrada porque la mascota ya encontró hogar ──
+  {
+    mascota: 'nala',
+    solicitante: 'lucia',
+    hogar: 'lucia',
+    tipo: 'Adopcion',
+    motivacion: 'Me enamoré de Nala, pero cambié de planes y prefiero esperar un tiempo.',
+    historial: [
+      ['Pendiente', 20],
+      ['Cancelada', 18, 'RETIRADA_POR_SOLICITANTE'],
+    ],
+  },
+  {
+    mascota: 'mia',
+    solicitante: 'lucia',
+    hogar: 'lucia',
+    tipo: 'Adopcion',
+    motivacion: 'Mia me pareció ideal para mi casa: tranquila y de buen tamaño para un balcón.',
+    historial: [
+      ['Pendiente', 9],
+      ['Cerrada', 3, 'ADOPTADA_POR_OTRA_PERSONA'],
     ],
   },
 
@@ -492,8 +524,70 @@ async function seedSeguimientos(
   }
 }
 
+/**
+ * Quién dejó cada estado: la persona al enviar o al retirar, SISTEMA cuando venció, y quien
+ * publicó en el resto (revisar, resolver, o cerrar por haber aprobado a otra persona).
+ */
+function autorDelEstado(
+  estado: string,
+  motivo: MotivoSolicitud | undefined,
+  solicitanteId: number,
+  publicadorId: number,
+  catalogos: Catalogos,
+): number {
+  if (estado === 'Pendiente' || motivo === 'RETIRADA_POR_SOLICITANTE') return solicitanteId;
+  if (motivo === 'VENCIDA_SIN_RESPUESTA') return catalogos.sistemaId;
+  return publicadorId;
+}
+
+// ─────────────── Preguntas del refugio ───────────────
+
+/** Tres preguntas de Refugio Patitas, una por tipo, para probar el paso extra del formulario. */
+async function seedPreguntasAdopcion(catalogos: Catalogos, actores: Actores) {
+  const refugioId = actores.patitas.id;
+  if ((await prisma.preguntaAdopcion.count({ where: { refugioId } })) > 0) return;
+
+  const perro = await prisma.especie.findFirst({ where: { nombre: 'Perro' } });
+
+  const preguntas = [
+    {
+      texto: '¿Tenés veterinario de confianza cerca de tu casa?',
+      tipo: 'SI_NO' as const,
+      obligatoria: true,
+    },
+    {
+      texto: '¿Dónde dormiría?',
+      tipo: 'OPCIONES' as const,
+      opciones: ['Adentro de la casa', 'Patio o jardín', 'Balcón'],
+      obligatoria: true,
+    },
+    {
+      texto: '¿Cómo harías con los paseos diarios?',
+      tipo: 'TEXTO' as const,
+      obligatoria: false,
+      especieId: perro?.id ?? null,
+    },
+  ];
+
+  for (const [orden, pregunta] of preguntas.entries()) {
+    await prisma.preguntaAdopcion.create({
+      data: {
+        refugioId,
+        orden,
+        opciones: [],
+        especieId: null,
+        ...pregunta,
+        usuarioAlta: catalogos.sistemaId,
+      },
+    });
+  }
+
+  log(`❓ Preguntas de adopción: ${preguntas.length} en Refugio Patitas`);
+}
+
 export async function seedSolicitudes(catalogos: Catalogos, actores: Actores, mascotas: Mascotas) {
   const hogares = await seedHogares(actores);
+  await seedPreguntasAdopcion(catalogos, actores);
   let nuevas = 0;
 
   for (const def of SOLICITUDES) {
@@ -510,7 +604,6 @@ export async function seedSolicitudes(catalogos: Catalogos, actores: Actores, ma
     const vigente = def.historial[def.historial.length - 1]!;
     const [estadoVigente, diasVigente] = vigente;
     const resuelta = estadoVigente === 'Aprobada' || estadoVigente === 'Rechazada';
-    const cancelada = estadoVigente === 'Cancelada';
     const fechaAlta = haceDias(diasAlta);
 
     const solicitud = await prisma.solicitud.create({
@@ -529,26 +622,22 @@ export async function seedSolicitudes(catalogos: Catalogos, actores: Actores, ma
         ...(resuelta
           ? { usuarioModificacion: publicacion.usuarioId, fechaModificacion: haceDias(diasVigente) }
           : {}),
-        // La cancelación automática (HU-7.6) es baja lógica de la solicitud + estado Cancelada.
-        ...(cancelada
-          ? { usuarioBaja: catalogos.sistemaId, fechaBaja: haceDias(diasVigente) }
-          : {}),
       },
     });
 
-    for (const [estado, dias] of def.historial) {
-      const autor =
-        estado === 'Pendiente'
-          ? solicitante.id
-          : estado === 'Cancelada'
-            ? catalogos.sistemaId
-            : publicacion.usuarioId;
-
+    for (const [estado, dias, motivo] of def.historial) {
       await prisma.solicitudEstado.create({
         data: {
           solicitudId: solicitud.id,
           estadoSolicitudId: id(catalogos.estadosSolicitud, estado),
-          usuarioAlta: autor,
+          motivo: motivo ?? null,
+          usuarioAlta: autorDelEstado(
+            estado,
+            motivo,
+            solicitante.id,
+            publicacion.usuarioId,
+            catalogos,
+          ),
           fechaAlta: haceDias(dias),
         },
       });

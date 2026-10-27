@@ -1,6 +1,7 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { esMascotaDelAmbito, type Ambito } from '../../shared/ambito';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import { estaAbierta } from '../../shared/requestStates';
 import { borrarImagen, guardarImagen } from '../../shared/storage';
 import { vacunasAplicadas, validarVacunaDeMascota } from '../../shared/vacunas';
 import { aFechaISO } from '../../shared/validation/dates';
@@ -19,9 +20,6 @@ import type {
 import * as repo from './mascotas.repository';
 
 const SUBCARPETA_FOTOS = 'mascotas';
-
-/** Trámites de adopción abiertos de otro usuario: frenan la baja de la mascota. */
-const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'];
 
 /** El adoptante no elige estado: se deriva de si la mascota es propia o para adopción. */
 const ESTADO_POR_DESTINO = {
@@ -60,6 +58,7 @@ function aDto(mascota: MascotaConRelaciones): MascotaCreadaDto {
     peso: mascota.peso === null ? null : Number(mascota.peso),
     tamanio: mascota.tamanio,
     castrado: mascota.castrado,
+    desparasitado: mascota.desparasitado,
     descripcion: mascota.descripcion,
     imagenUrl: mascota.imagenUrl,
     especie: { id: mascota.raza.especie.id, nombre: mascota.raza.especie.nombre },
@@ -236,6 +235,7 @@ export async function crearMascota(
         peso: datos.peso,
         tamanio: datos.tamanio,
         castrado: datos.castrado,
+        desparasitado: datos.desparasitado,
         descripcion: datos.descripcion,
         imagenUrl,
         razaId: raza.id,
@@ -318,6 +318,7 @@ export async function editarMascota(
         peso: datos.peso,
         tamanio: datos.tamanio,
         castrado: datos.castrado,
+        desparasitado: datos.desparasitado,
         descripcion: datos.descripcion,
         razaId: datos.razaId,
         imagenUrl: imagenNueva,
@@ -371,7 +372,7 @@ export async function eliminarMascota(
   const solicitudes = await repo.listarSolicitudesDeMascota(mascotaId);
   const hayAbiertas = solicitudes.some((solicitud) => {
     const estado = solicitud.historicoEstados[0]?.estadoSolicitud;
-    return estado !== undefined && ESTADOS_SOLICITUD_ABIERTA.includes(estado.nombre);
+    return estaAbierta(estado?.nombre);
   });
 
   if (hayAbiertas) {

@@ -1,7 +1,12 @@
 /**
  * Módulo de Solicitud, de las dos puntas:
- * - lado solicitante: crearla (HU-7.1) y ver su historial (HU-7.3).
- * - lado de quien publicó la mascota: resolverla (HU-7.4) y ver lo recibido (HU-7.5).
+ * - lado solicitante: crearla, ver su historial y retirarla.
+ * - lado de quien publicó la mascota: revisarla, resolverla y ver lo recibido.
+ *
+ * Una solicitud pasa por Pendiente -> En_Revision -> Revisada y termina en uno de cuatro
+ * estados finales según quién decidió: Aprobada y Rechazada (quien publicó), Cancelada (el
+ * solicitante) o Cerrada (nadie: una circunstancia, con causa). Los finales no dan de baja
+ * la solicitud: se siguen viendo con su estado. Qué es "abierta" sale de `requestStates`.
  *
  * "Quien publicó la mascota" no es siempre un refugio: un adoptante particular también
  * puede ofrecer una mascota propia en adopción (`mascotas.dto.ts`, actor ADOPTANTE +
@@ -14,12 +19,21 @@
  * Solicitar (y ver lo solicitado) es siempre del perfil personal: desde la vista de refugio
  * no se adopta. Ver `shared/ambito.ts`.
  */
+import type { MotivoSolicitud } from '@prisma/client';
 import { FLAGS } from '../../config/flags';
 import { AppError } from '../../middlewares/errorHandler';
 import { esSolicitudDemorada } from '../../shared/alertasRefugio';
+import {
+  ESTADO_SOLICITUD,
+  ESTADOS_SOLICITUD_ABIERTA,
+  estaAbierta,
+  type NombreEstadoSolicitud,
+} from '../../shared/requestStates';
 import * as chats from '../chats/chats.service';
 import * as favoritos from '../favoritos/favoritos.service';
 import * as notificaciones from '../notificaciones/notificaciones.service';
+import { RESPUESTAS_SI_NO } from '../preguntas-adopcion/preguntas-adopcion.dto';
+import * as preguntasAdopcion from '../preguntas-adopcion/preguntas-adopcion.service';
 import { esMascotaDelAmbito, esMascotaPropia, type Ambito } from '../../shared/ambito';
 import { aFechaISO, finDelDia } from '../../shared/validation/dates';
 import { registrarAuditoria } from '../../shared/logAuditoria';
@@ -30,6 +44,7 @@ import type {
   FiltrosMiasDto,
   FiltrosRecibidasDto,
   HogarDto,
+  GuardarNotaDto,
   HogarSolicitanteDto,
   ListaSolicitudesRecibidasDto,
   PeriodoTransitoDto,
@@ -38,6 +53,7 @@ import type {
   SolicitudDetalleDto,
   SolicitudResumenDto,
 } from './solicitudes.dto';
+import { textoDeCierre } from './solicitudes.messages';
 import * as repo from './solicitudes.repository';
 
 type Actor = { id: number; refugioId: number | null; ambito: Ambito };
@@ -76,16 +92,16 @@ async function exigirSolicitud(
   return solicitud;
 }
 
-/** Solo quien publicó la mascota resuelve (HU-7.4) y ve lo recibido (HU-7.5). */
+/** Solo quien publicó la mascota la revisa, la resuelve y ve lo recibido. */
 const gestionablePor =
   (actor: Actor) =>
   (solicitud: SolicitudConDetalle): boolean =>
     esPropiaDelActor(solicitud.publicacion.mascota, actor);
 
 /**
- * El detalle lo ven las dos puntas: quien publicó la mascota (HU-7.5) y el propio
- * solicitante, que necesita seguir el estado de lo que mandó (HU-7.3, GUI "Mi Solicitud").
- * Lo que mandó lo ve desde su perfil personal, que es desde donde se solicita.
+ * El detalle lo ven las dos puntas: quien publicó la mascota y el propio solicitante, que
+ * necesita seguir el estado de lo que mandó. Lo que mandó lo ve desde su perfil personal,
+ * que es desde donde se solicita.
  */
 const visiblePor =
   (actor: Actor) =>
@@ -93,18 +109,18 @@ const visiblePor =
     (actor.ambito === 'PERSONAL' && solicitud.usuarioId === actor.id) ||
     esPropiaDelActor(solicitud.publicacion.mascota, actor);
 
-/**
- * A quién avisarle algo del lado de quien publicó la mascota (spec 004): todos los miembros
- * activos si es de un refugio, o solo el publicador si la mascota es personal — mismo
- * criterio que ya resuelve `chats.service.ts` para abrir la sala.
- */
-/** Para `publicaciones.service.ts` (spec 004): a quién avisarle si esta publicación se pausa/da de baja. */
-export function listarPendientesDePublicacion(
+/** Para `publicaciones.service.ts`: a quién avisarle si esta publicación se pausa. */
+export function listarAbiertasDePublicacion(
   publicacionId: number,
 ): Promise<{ id: number; usuarioId: number }[]> {
-  return repo.listarPendientesDePublicacion(publicacionId);
+  return repo.listarAbiertasDePublicacion(publicacionId);
 }
 
+/**
+ * A quién avisarle algo del lado de quien publicó la mascota: todos los miembros activos si
+ * es de un refugio, o solo el publicador si la mascota es personal — mismo criterio que ya
+ * resuelve `chats.service.ts` para abrir la sala.
+ */
 export async function destinatariosPublicador(
   mascota: {
     refugioId: number | null;
@@ -185,29 +201,91 @@ function aResumenDto(solicitud: SolicitudConDetalle): SolicitudResumenDto {
     },
     tipoSolicitud: solicitud.tipoSolicitud.nombre,
     estado: { id: vigente.id, nombre: vigente.nombre },
+    motivo: solicitud.historicoEstados[0]!.motivo,
     comentario: solicitud.comentario,
     transito: aPeriodoTransito(solicitud),
     fechaAlta: solicitud.fechaAlta.toISOString(),
     fechaRespuesta: solicitud.fechaRespuesta?.toISOString() ?? null,
-  };
-}
-
-function aDetalleDto(solicitud: SolicitudConDetalle): SolicitudDetalleDto {
-  return {
-    ...aResumenDto(solicitud),
-    motivacion: solicitud.motivacion,
-    hogar: solicitud.hogar ? aHogarDto(solicitud.hogar) : null,
-    cambioDeHogar: aCambioDeHogar(solicitud),
     historial: solicitud.historicoEstados.map((h) => ({
       id: h.estadoSolicitud.id,
       nombre: h.estadoSolicitud.nombre,
+      motivo: h.motivo,
       fecha: h.fechaAlta.toISOString(),
     })),
   };
 }
 
-/** Tope de solicitudes "Pendiente" simultáneas por usuario (regla transversal 7). */
-const MAXIMO_PENDIENTES = 5;
+/** El refugio si la mascota es de uno; si no, la persona que la publicó. */
+function aPublicadorDto(solicitud: SolicitudConDetalle): SolicitudDetalleDto['publicador'] {
+  const { refugio } = solicitud.publicacion.mascota;
+
+  if (refugio) {
+    return { nombre: refugio.nombre, imagenUrl: refugio.imagenUrl, esRefugio: true };
+  }
+
+  const persona = solicitud.publicacion.usuario;
+  return {
+    nombre: `${persona.nombre} ${persona.apellido}`,
+    imagenUrl: persona.imagenUrl,
+    esRefugio: false,
+  };
+}
+
+/**
+ * Quién mira el detalle: el endpoint es el mismo para las dos puntas, pero la nota privada es
+ * solo de quien publicó y la mascota adoptada es solo de quien la adoptó.
+ */
+type VistaDetalle = 'solicitante' | 'publicador';
+
+function aDetalleDto(
+  solicitud: SolicitudConDetalle,
+  vista: VistaDetalle,
+  chatId: number | null,
+): SolicitudDetalleDto {
+  const resumen = aResumenDto(solicitud);
+  const { usuario, publicacion } = solicitud;
+
+  return {
+    ...resumen,
+    mascota: {
+      ...resumen.mascota,
+      genero: publicacion.mascota.genero,
+      requisitos: publicacion.requisitos,
+    },
+    // Una lista blanca: ni documento, ni email, ni teléfono. El contacto es por el chat.
+    solicitante: {
+      ...resumen.solicitante,
+      imagenUrl: usuario.imagenUrl,
+      localidad: usuario.localidad,
+      provincia: usuario.provincia,
+      verificado: usuario.verificado,
+      miembroDesde: aFechaISO(usuario.fechaAlta),
+    },
+    motivacion: solicitud.motivacion,
+    publicador: aPublicadorDto(solicitud),
+    hogar: solicitud.hogar ? aHogarDto(solicitud.hogar) : null,
+    cambioDeHogar: aCambioDeHogar(solicitud),
+    respuestas: solicitud.respuestas.map((r) => ({
+      pregunta: r.preguntaTexto,
+      respuesta: r.respuesta,
+    })),
+    chatId,
+    mascotaAdoptadaId: vista === 'solicitante' ? solicitud.mascotaAdoptadaId : null,
+    ...(vista === 'publicador' ? { notaInterna: solicitud.notaInterna } : {}),
+  };
+}
+
+/** El detalle con la conversación resuelta. Sin sala, o si no se pudo leer, `chatId` va null. */
+async function aDetalle(
+  solicitud: SolicitudConDetalle,
+  vista: VistaDetalle,
+): Promise<SolicitudDetalleDto> {
+  const chatId = await chats.chatIdDeSolicitud(solicitud.id).catch(() => null);
+  return aDetalleDto(solicitud, vista, chatId ?? null);
+}
+
+/** Tope de solicitudes abiertas simultáneas por usuario, en cualquier etapa. */
+const MAXIMO_ABIERTAS = 5;
 
 /** Espacios exteriores que cuentan como patio para el booleano del diagrama de clases. */
 const ESPACIOS_CON_PATIO = ['Patio', 'Jardin'];
@@ -266,10 +344,10 @@ async function evaluarElegibilidad(
     throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
   }
 
-  const pendientes = await repo.contarPendientesDeUsuario(usuarioId);
+  const pendientes = await repo.contarAbiertasDeUsuario(usuarioId);
   const hogar = await repo.buscarHogarActivo(usuarioId);
   const abierta = publicacionId
-    ? await repo.buscarVivaDeUsuarioEnPublicacion(usuarioId, publicacionId)
+    ? await repo.buscarAbiertaDeUsuarioEnPublicacion(usuarioId, publicacionId)
     : null;
 
   // Se resuelve acá (y no solo al crear) para que el botón de la ficha ya nazca oculto o
@@ -289,9 +367,16 @@ async function evaluarElegibilidad(
       ? 'NO_VERIFICADO'
       : abierta
         ? 'YA_SOLICITADA'
-        : pendientes >= MAXIMO_PENDIENTES
+        : pendientes >= MAXIMO_ABIERTAS
           ? 'LIMITE_ALCANZADO'
           : null;
+
+  // Solo si va a poder abrir el formulario, y solo un refugio tiene preguntas propias.
+  const mascota = publicacion?.mascota;
+  const preguntas =
+    motivo === null && mascota?.refugioId
+      ? await preguntasAdopcion.preguntasAplicables(mascota.refugioId, mascota.raza.especieId)
+      : [];
 
   return {
     puedeSolicitar: motivo === null,
@@ -299,9 +384,10 @@ async function evaluarElegibilidad(
     mensaje: motivo ? BLOQUEOS[motivo].mensaje : null,
     verificado: usuario.verificado,
     pendientes,
-    maximo: MAXIMO_PENDIENTES,
+    maximo: MAXIMO_ABIERTAS,
     solicitudAbiertaId: abierta?.id ?? null,
     hogar: hogar ? aHogarDto(hogar) : null,
+    preguntas,
   };
 }
 
@@ -352,14 +438,8 @@ const ESTADO_SOLICITABLE = 'Disponible';
 /** Solo un aviso activo recibe solicitudes: uno pausado o finalizado está fuera del feed. */
 const ESTADO_PUBLICACION_SOLICITABLE = 'Activa';
 
-/** Tipo de solicitud que, al aprobarse, transfiere la mascota al adoptante (HU-7.4). */
+/** Tipo de solicitud que, al aprobarse, transfiere la mascota al adoptante. */
 const TIPO_SOLICITUD_ADOPCION = 'Adopcion';
-
-/**
- * Comentario que queda en las demás solicitudes "Pendiente" de la publicación cuando una
- * adopción se aprueba: se rechazan solas porque la mascota ya tiene un hogar.
- */
-const COMENTARIO_RECHAZO_POR_ADOPCION = 'La mascota fue adoptada por otra persona';
 
 export async function crearSolicitud(
   datos: CrearSolicitudDto,
@@ -406,6 +486,8 @@ export async function crearSolicitud(
     throw new AppError('ERROR_INTERNO', 'Falta el estado "Pendiente" en el catálogo', 500);
   }
 
+  const respuestas = await validarRespuestas(datos.respuestas ?? [], publicacion.mascota);
+
   const creada = await repo.crearConHogar(
     usuarioId,
     {
@@ -417,6 +499,7 @@ export async function crearSolicitud(
     },
     aDatosHogar(datos.hogar),
     estadoPendiente.id,
+    respuestas,
   );
 
   await registrarAuditoria({
@@ -441,7 +524,77 @@ export async function crearSolicitud(
 
   await avisarSolicitudNueva(creada);
 
-  return { ...aDetalleDto(creada), chatId };
+  return aDetalleDto(creada, 'solicitante', chatId);
+}
+
+/**
+ * Valida lo respondido contra las preguntas del refugio aplicables a esta mascota EN ESTE
+ * MOMENTO, y arma lo que se guarda con la copia del texto de cada pregunta.
+ *
+ * - Una respuesta a una pregunta que ya no está activa o no aplica se ignora.
+ * - Una obligatoria sin ninguna entrada significa que el formulario no la conocía (el refugio
+ *   la agregó mientras se completaba): se frena para que la persona la vea, en vez de
+ *   decirle que "falta" algo que nunca le mostraron.
+ */
+async function validarRespuestas(
+  enviadas: { preguntaId: number; respuesta: string }[],
+  mascota: { refugioId: number | null; raza: { especieId: number } },
+): Promise<repo.DatosRespuesta[]> {
+  if (mascota.refugioId === null) return [];
+
+  const aplicables = await preguntasAdopcion.preguntasAplicables(
+    mascota.refugioId,
+    mascota.raza.especieId,
+  );
+
+  const porPregunta = new Map<number, string>();
+  for (const { preguntaId, respuesta } of enviadas) {
+    if (!porPregunta.has(preguntaId)) porPregunta.set(preguntaId, respuesta);
+  }
+
+  if (aplicables.some((pregunta) => pregunta.obligatoria && !porPregunta.has(pregunta.id))) {
+    throw new AppError(
+      'PREGUNTAS_DESACTUALIZADAS',
+      'El refugio actualizó sus preguntas. Revisá el formulario antes de enviar',
+      409,
+    );
+  }
+
+  const validadas: repo.DatosRespuesta[] = [];
+
+  for (const pregunta of aplicables) {
+    const respuesta = porPregunta.get(pregunta.id)?.trim() ?? '';
+
+    if (respuesta === '') {
+      if (pregunta.obligatoria) {
+        throw new AppError('RESPUESTAS_INVALIDAS', `Falta responder: ${pregunta.texto}`, 400);
+      }
+      continue;
+    }
+
+    const permitidas: readonly string[] | null =
+      pregunta.tipo === 'SI_NO'
+        ? RESPUESTAS_SI_NO
+        : pregunta.tipo === 'OPCIONES'
+          ? pregunta.opciones
+          : null;
+
+    if (permitidas && !permitidas.includes(respuesta)) {
+      throw new AppError(
+        'RESPUESTAS_INVALIDAS',
+        `La respuesta de «${pregunta.texto}» no es válida`,
+        400,
+      );
+    }
+
+    validadas.push({
+      preguntaAdopcionId: pregunta.id,
+      preguntaTexto: pregunta.texto,
+      respuesta,
+    });
+  }
+
+  return validadas;
 }
 
 /**
@@ -499,6 +652,7 @@ export async function listarMias(
 function filtrarPorEstadoYFecha<
   T extends {
     fechaAlta: Date;
+    tipoSolicitud: { nombre: string };
     historicoEstados: { fechaAlta: Date; estadoSolicitud: { nombre: string } }[];
   },
 >(solicitudes: T[], filtros: FiltrosRecibidasDto | FiltrosMiasDto): T[] {
@@ -520,6 +674,7 @@ function filtrarPorEstadoYFecha<
     ) {
       return false;
     }
+    if (filtros.tipo && s.tipoSolicitud.nombre !== filtros.tipo) return false;
     if (filtros.fechaDesde && s.fechaAlta < filtros.fechaDesde) return false;
     if (filtros.fechaHasta && s.fechaAlta > finDelDia(filtros.fechaHasta)) return false;
     return true;
@@ -534,7 +689,22 @@ export async function obtenerDetalle(
   const actor = await resolverActor(usuarioId, ambito);
   const solicitud = await exigirSolicitud(solicitudId, visiblePor(actor));
 
-  return aDetalleDto(solicitud);
+  return aDetalle(solicitud, gestionablePor(actor)(solicitud) ? 'publicador' : 'solicitante');
+}
+
+/** La nota privada de quien publicó. Una sola, editable; la última escritura gana. */
+export async function guardarNota(
+  solicitudId: number,
+  datos: GuardarNotaDto,
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<SolicitudDetalleDto> {
+  const actor = await resolverActor(usuarioId, ambito);
+  await exigirSolicitud(solicitudId, gestionablePor(actor));
+
+  const actualizada = await repo.guardarNota(solicitudId, datos.texto, usuarioId);
+
+  return aDetalle(actualizada, 'publicador');
 }
 
 // ponytail: filtro por estado y paginación en memoria, no en la query — el volumen de
@@ -554,6 +724,103 @@ export async function listarRecibidas(
   return { total: filtradas.length, solicitudes: pagina.map(aResumenDto) };
 }
 
+function estadoVigente(solicitud: SolicitudConDetalle): NombreEstadoSolicitud {
+  return solicitud.historicoEstados[0]!.estadoSolicitud.nombre as NombreEstadoSolicitud;
+}
+
+const SOLICITUD_YA_RESUELTA = () =>
+  new AppError('SOLICITUD_YA_RESUELTA', 'Esta solicitud ya fue resuelta', 409);
+
+/** Una solicitud en un estado final no admite más cambios. */
+function exigirAbierta(solicitud: SolicitudConDetalle): void {
+  if (!estaAbierta(estadoVigente(solicitud))) throw SOLICITUD_YA_RESUELTA();
+}
+
+async function exigirEstado(nombre: NombreEstadoSolicitud) {
+  const estado = await repo.buscarEstadoSolicitudPorNombre(nombre);
+
+  if (!estado) {
+    throw new AppError('ERROR_INTERNO', `Falta el estado "${nombre}" en el catálogo`, 500);
+  }
+
+  return estado;
+}
+
+/**
+ * Quien publicó abre la revisión: una solicitud `Pendiente` pasa a `En_Revision`. Es
+ * idempotente: abrirla de nuevo, o con la solicitud ya más avanzada o terminada, devuelve el
+ * detalle tal cual en vez de fallar.
+ */
+export async function iniciarRevision(
+  solicitudId: number,
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<SolicitudDetalleDto> {
+  const actor = await resolverActor(usuarioId, ambito);
+  const solicitud = await exigirSolicitud(solicitudId, gestionablePor(actor));
+
+  if (estadoVigente(solicitud) !== ESTADO_SOLICITUD.PENDIENTE) {
+    return aDetalle(solicitud, 'publicador');
+  }
+
+  const enRevision = await exigirEstado(ESTADO_SOLICITUD.EN_REVISION);
+  const actualizada = await repo.transicionar(solicitudId, {
+    desde: [ESTADO_SOLICITUD.PENDIENTE],
+    estadoId: enRevision.id,
+    usuarioId,
+  });
+
+  // Otra persona del refugio la abrió o la resolvió un instante antes: se devuelve lo vigente.
+  if (!actualizada) {
+    return aDetalle(await exigirSolicitud(solicitudId, gestionablePor(actor)), 'publicador');
+  }
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Solicitud',
+    entidadId: solicitudId,
+    detalle: 'Pendiente -> En_Revision',
+  });
+
+  return aDetalle(actualizada, 'publicador');
+}
+
+/** Quien publicó terminó de revisarla: pasa a `Revisada` y el solicitante recibe el aviso. */
+export async function marcarRevisada(
+  solicitudId: number,
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<SolicitudDetalleDto> {
+  const actor = await resolverActor(usuarioId, ambito);
+  const solicitud = await exigirSolicitud(solicitudId, gestionablePor(actor));
+
+  const vigente = estadoVigente(solicitud);
+  if (vigente === ESTADO_SOLICITUD.REVISADA) return aDetalle(solicitud, 'publicador');
+  exigirAbierta(solicitud);
+
+  const revisada = await exigirEstado(ESTADO_SOLICITUD.REVISADA);
+  const actualizada = await repo.transicionar(solicitudId, {
+    desde: [ESTADO_SOLICITUD.PENDIENTE, ESTADO_SOLICITUD.EN_REVISION],
+    estadoId: revisada.id,
+    usuarioId,
+  });
+
+  if (!actualizada) throw SOLICITUD_YA_RESUELTA();
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'CAMBIAR_ESTADO',
+    entidad: 'Solicitud',
+    entidadId: solicitudId,
+    detalle: `${vigente} -> Revisada`,
+  });
+
+  await avisarSolicitudRevisada(actualizada);
+
+  return aDetalle(actualizada, 'publicador');
+}
+
 export async function resolverSolicitud(
   solicitudId: number,
   datos: ResolverSolicitudDto,
@@ -563,15 +830,18 @@ export async function resolverSolicitud(
   const actor = await resolverActor(usuarioId, ambito);
   const solicitud = await exigirSolicitud(solicitudId, gestionablePor(actor));
 
-  const vigenteAlLeer = solicitud.historicoEstados[0]!.estadoSolicitud;
-  if (vigenteAlLeer.nombre !== 'Pendiente') {
-    throw new AppError('SOLICITUD_YA_RESUELTA', 'Esta solicitud ya fue resuelta', 409);
+  exigirAbierta(solicitud);
+
+  const vigenteAlLeer = estadoVigente(solicitud);
+  if (datos.estado === 'Aprobada' && vigenteAlLeer !== ESTADO_SOLICITUD.REVISADA) {
+    throw new AppError(
+      'REVISION_PENDIENTE',
+      'Marcá la solicitud como revisada antes de aceptarla',
+      409,
+    );
   }
 
-  const nuevoEstado = await repo.buscarEstadoSolicitudPorNombre(datos.estado);
-  if (!nuevoEstado) {
-    throw new AppError('ERROR_INTERNO', `Falta el estado "${datos.estado}" en el catálogo`, 500);
-  }
+  const nuevoEstado = await exigirEstado(datos.estado);
 
   // Aprobar una solicitud de ADOPCIÓN no es sólo cambiar el estado: hay que darle la mascota
   // al adoptante. El tránsito es temporal (la mascota vuelve al refugio), así que sólo se
@@ -580,37 +850,218 @@ export async function resolverSolicitud(
     return aprobarAdopcion(solicitud, nuevoEstado.id, datos.comentario, usuarioId);
   }
 
-  // Revalida "Pendiente" atómicamente al escribir: si otro PATCH concurrente ya la
-  // resolvió entre la lectura de arriba y este punto, `resolverSiPendiente` devuelve
-  // `null` en vez de pisar su resultado.
-  const actualizada = await repo.resolverSiPendiente(
-    solicitudId,
-    nuevoEstado.id,
-    datos.comentario,
+  // Revalida el estado atómicamente al escribir: si otra acción concurrente ya la resolvió
+  // entre la lectura de arriba y este punto, `transicionar` devuelve `null` en vez de pisarla.
+  const actualizada = await repo.transicionar(solicitudId, {
+    desde: datos.estado === 'Aprobada' ? [ESTADO_SOLICITUD.REVISADA] : ESTADOS_SOLICITUD_ABIERTA,
+    estadoId: nuevoEstado.id,
+    motivo: datos.motivo,
     usuarioId,
-  );
+    respuesta: { comentario: datos.comentario },
+  });
 
-  if (!actualizada) {
-    throw new AppError('SOLICITUD_YA_RESUELTA', 'Esta solicitud ya fue resuelta', 409);
-  }
+  if (!actualizada) throw SOLICITUD_YA_RESUELTA();
 
   await registrarAuditoria({
     usuarioId,
     accion: datos.estado === 'Aprobada' ? 'APROBAR' : 'RECHAZAR',
     entidad: 'Solicitud',
     entidadId: solicitudId,
-    detalle: `${vigenteAlLeer.nombre} -> ${datos.estado}`,
+    detalle: `${vigenteAlLeer} -> ${datos.estado}${datos.motivo ? ` (${datos.motivo})` : ''}`,
   });
 
   await avisarSolicitudResuelta(actualizada);
 
-  return aDetalleDto(actualizada);
+  // No aceptada: la mascota deja de aparecer entre los favoritos de quien la pidió.
+  if (datos.estado === 'Rechazada') {
+    try {
+      await favoritos.quitarFavorito(solicitud.publicacion.mascota.id, solicitud.usuarioId);
+    } catch (err) {
+      console.error(
+        'No se pudo sacar la mascota de los favoritos del solicitante',
+        solicitudId,
+        err,
+      );
+    }
+  }
+
+  return aDetalle(actualizada, 'publicador');
+}
+
+/** El solicitante retira su propia solicitud mientras siga abierta. Libera su cupo. */
+export async function retirarSolicitud(
+  solicitudId: number,
+  usuarioId: number,
+  ambito: Ambito,
+): Promise<SolicitudDetalleDto> {
+  const actor = await resolverActor(usuarioId, ambito);
+  const solicitud = await exigirSolicitud(
+    solicitudId,
+    (s) => actor.ambito === 'PERSONAL' && s.usuarioId === actor.id,
+  );
+
+  exigirAbierta(solicitud);
+
+  const cancelada = await exigirEstado(ESTADO_SOLICITUD.CANCELADA);
+  const actualizada = await repo.transicionar(solicitudId, {
+    desde: ESTADOS_SOLICITUD_ABIERTA,
+    estadoId: cancelada.id,
+    motivo: 'RETIRADA_POR_SOLICITANTE',
+    usuarioId,
+  });
+
+  if (!actualizada) throw SOLICITUD_YA_RESUELTA();
+
+  await registrarAuditoria({
+    usuarioId,
+    accion: 'RETIRAR',
+    entidad: 'Solicitud',
+    entidadId: solicitudId,
+    detalle: `${estadoVigente(solicitud)} -> Cancelada`,
+  });
+
+  await avisarSolicitudRetirada(actualizada);
+
+  return aDetalle(actualizada, 'solicitante');
 }
 
 /**
- * HU-4.1: rechazada, o aprobada de un tránsito (la adopción aprobada tiene su propio aviso,
- * más completo, en `aprobarAdopcion` — a esta función ya no la alcanza porque
- * `resolverSolicitud` deriva ese caso antes de llegar a `resolverSiPendiente`).
+ * Cierra las solicitudes abiertas que se quedaron sin sentido (la mascota ya no está, la
+ * publicación se retiró, quien publicó se fue, venció) con la causa dada. Cada una se
+ * revalida al escribir: la que otra acción resolvió un instante antes se saltea.
+ * Devuelve los ids que se cerraron. Los avisos son best-effort.
+ */
+export async function cerrarSolicitudes(
+  abiertas: { id: number }[],
+  motivo: MotivoSolicitud,
+  usuarioId: number,
+): Promise<number[]> {
+  if (abiertas.length === 0) return [];
+
+  const cerrada = await exigirEstado(ESTADO_SOLICITUD.CERRADA);
+  const cerradas: SolicitudConDetalle[] = [];
+
+  for (const { id } of abiertas) {
+    const actualizada = await repo.transicionar(id, {
+      desde: ESTADOS_SOLICITUD_ABIERTA,
+      estadoId: cerrada.id,
+      motivo,
+      usuarioId,
+    });
+    if (!actualizada) continue;
+
+    await registrarAuditoria({
+      usuarioId,
+      accion: 'CERRAR',
+      entidad: 'Solicitud',
+      entidadId: id,
+      detalle: `Cerrada (${motivo})`,
+    });
+
+    cerradas.push(actualizada);
+  }
+
+  await Promise.all(cerradas.map((solicitud) => avisarSolicitudCerrada(solicitud, motivo)));
+
+  return cerradas.map((solicitud) => solicitud.id);
+}
+
+/**
+ * Cierra todas las abiertas de una publicación: para quien la deja fuera de circulación.
+ * Es una consecuencia de ese cambio, que ya se escribió: si falla se loguea y no lo revierte.
+ */
+export async function cerrarAbiertasDePublicacion(
+  publicacionId: number,
+  motivo: MotivoSolicitud,
+  usuarioId: number,
+): Promise<number[]> {
+  try {
+    const abiertas = await repo.listarAbiertasDePublicacion(publicacionId);
+    return await cerrarSolicitudes(abiertas, motivo, usuarioId);
+  } catch (err) {
+    console.error('No se pudieron cerrar las solicitudes de la publicación', publicacionId, err);
+    return [];
+  }
+}
+
+/** Al solicitante: su solicitud se cerró sola, con el texto de la causa. */
+export async function avisarSolicitudCerrada(
+  solicitud: SolicitudConDetalle,
+  motivo: MotivoSolicitud,
+): Promise<void> {
+  const nombreMascota = solicitud.publicacion.mascota.nombre ?? 'la mascota';
+
+  await notificaciones.notificar({
+    usuarioId: solicitud.usuarioId,
+    tipo: 'SOLICITUD_CERRADA',
+    mensaje: textoDeCierre(motivo, nombreMascota),
+    entidadTipo: 'SOLICITUD',
+    entidadId: solicitud.id,
+    canal: { push: true },
+  });
+}
+
+/** Sin push ni mail: no es una novedad de la que el refugio tenga que hacerse cargo. */
+async function avisarSolicitudRetirada(solicitud: SolicitudConDetalle): Promise<void> {
+  try {
+    const mascota = solicitud.publicacion.mascota;
+    const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
+    const solicitante = `${solicitud.usuario.nombre} ${solicitud.usuario.apellido}`;
+
+    await Promise.all(
+      destinatarios.map((destinatarioId) =>
+        notificaciones.notificar({
+          usuarioId: destinatarioId,
+          tipo: 'SOLICITUD_RETIRADA',
+          mensaje: `${solicitante} retiró su solicitud por ${mascota.nombre ?? 'la mascota'}`,
+          entidadTipo: 'SOLICITUD',
+          entidadId: solicitud.id,
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('No se pudo avisar el retiro de la solicitud', solicitud.id, err);
+  }
+}
+
+/** Deja el aviso en la sala de la solicitud. No lanza: el chat nunca frena un cambio de estado. */
+async function anunciarEnElChat(
+  solicitudId: number,
+  etapa: 'REVISADA' | 'APROBADA' | 'RECHAZADA',
+): Promise<void> {
+  try {
+    await chats.anunciarEstadoDeSolicitud(solicitudId, etapa);
+  } catch (err) {
+    console.error('No se pudo anunciar la solicitud en el chat', solicitudId, err);
+  }
+}
+
+/**
+ * Sin entusiasmo de más: revisada no es aceptada, y la persona no tiene que ilusionarse con
+ * un paso intermedio.
+ */
+async function avisarSolicitudRevisada(solicitud: SolicitudConDetalle): Promise<void> {
+  try {
+    const mascota = solicitud.publicacion.mascota;
+    const nombreMascota = mascota.nombre ?? 'la mascota';
+
+    await notificaciones.notificar({
+      usuarioId: solicitud.usuarioId,
+      tipo: 'SOLICITUD_REVISADA',
+      mensaje: `Ya revisaron tu solicitud por ${nombreMascota}. En cuanto tengan una decisión te avisamos.`,
+      entidadTipo: 'SOLICITUD',
+      entidadId: solicitud.id,
+      canal: { push: true },
+    });
+    await anunciarEnElChat(solicitud.id, 'REVISADA');
+  } catch (err) {
+    console.error('No se pudo avisar la revisión de la solicitud', solicitud.id, err);
+  }
+}
+
+/**
+ * Aprobada de un tránsito, o rechazada (la adopción aprobada tiene su propio aviso, más
+ * completo, en `aprobarAdopcion`: `resolverSolicitud` deriva ese caso antes de llegar acá).
  * Best-effort: la resolución de la solicitud ya se escribió, un aviso que falla no la revierte.
  */
 async function avisarSolicitudResuelta(solicitud: SolicitudConDetalle): Promise<void> {
@@ -628,14 +1079,16 @@ async function avisarSolicitudResuelta(solicitud: SolicitudConDetalle): Promise<
         entidadId: solicitud.id,
         canal: { mail: true, push: true },
       });
+      await anunciarEnElChat(solicitud.id, 'APROBADA');
       return;
     }
 
+    await anunciarEnElChat(solicitud.id, 'RECHAZADA');
     await notificaciones.notificar({
       usuarioId: solicitud.usuarioId,
       tipo: 'SOLICITUD_RECHAZADA',
-      mensaje: `Tu solicitud por ${nombreMascota} no fue aceptada esta vez`,
-      asuntoMail: `Tu solicitud por ${nombreMascota} fue rechazada`,
+      mensaje: `Tu solicitud por ${nombreMascota} no fue aceptada esta vez. Gracias por animarte a adoptar.`,
+      asuntoMail: `Novedades de tu solicitud por ${nombreMascota}`,
       entidadTipo: 'SOLICITUD',
       entidadId: solicitud.id,
       canal: { mail: true, push: true },
@@ -646,16 +1099,15 @@ async function avisarSolicitudResuelta(solicitud: SolicitudConDetalle): Promise<
 }
 
 /**
- * Avisos de una adopción aprobada (spec 004): al adoptante que ya puede coordinar, al
- * publicador porque le arranca el seguimiento, y a quienes tenían otra solicitud pendiente
- * sobre la misma publicación y `aprobarAdopcion` ya les rechazó (HU-7.4) — "la mascota que
- * solicitaste fue adoptada por otra persona". Best-effort, mismo criterio que
+ * Avisos de una adopción aprobada: al adoptante que ya puede coordinar, al publicador porque
+ * le arranca el seguimiento, y a quienes tenían otra solicitud abierta sobre la misma
+ * publicación y `aprobarAdopcion` ya les cerró. Best-effort, mismo criterio que
  * `avisarSolicitudResuelta`: la adopción ya quedó aprobada, un aviso que falla no la revierte.
  */
 async function avisarAdopcionAprobada(
   solicitud: SolicitudConDetalle,
   otrosPretendientes: { id: number; usuarioId: number }[],
-  idsRechazados: number[],
+  idsCerrados: number[],
 ): Promise<void> {
   try {
     const mascota = solicitud.publicacion.mascota;
@@ -670,6 +1122,7 @@ async function avisarAdopcionAprobada(
       entidadId: solicitud.id,
       canal: { mail: true, push: true },
     });
+    await anunciarEnElChat(solicitud.id, 'APROBADA');
 
     const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
     await Promise.all(
@@ -685,13 +1138,13 @@ async function avisarAdopcionAprobada(
       ),
     );
 
-    const rechazados = otrosPretendientes.filter((otra) => idsRechazados.includes(otra.id));
+    const cerrados = otrosPretendientes.filter((otra) => idsCerrados.includes(otra.id));
     await Promise.all(
-      rechazados.map((otra) =>
+      cerrados.map((otra) =>
         notificaciones.notificar({
           usuarioId: otra.usuarioId,
           tipo: 'SOLICITUD_MASCOTA_ADOPTADA_POR_OTRO',
-          mensaje: `${nombreMascota} ya fue adoptada por otra persona`,
+          mensaje: textoDeCierre('ADOPTADA_POR_OTRA_PERSONA', nombreMascota),
           entidadTipo: 'SOLICITUD',
           entidadId: otra.id,
           canal: { push: true },
@@ -704,7 +1157,7 @@ async function avisarAdopcionAprobada(
     const yaAvisados = new Set([
       solicitud.usuarioId,
       ...destinatarios,
-      ...rechazados.map((otra) => otra.usuarioId),
+      ...cerrados.map((otra) => otra.usuarioId),
     ]);
     const conFavorito = await favoritos.listarUsuariosConFavorito(mascota.id);
 
@@ -715,7 +1168,7 @@ async function avisarAdopcionAprobada(
           notificaciones.notificar({
             usuarioId,
             tipo: 'FAVORITO_ADOPTADO',
-            mensaje: `${nombreMascota}, que tenías en favoritos, ya fue adoptada.`,
+            mensaje: `${nombreMascota}, que tenías en favoritos, ya encontró su hogar.`,
             entidadTipo: 'FAVORITOS',
             entidadId: mascota.id,
             canal: { push: true },
@@ -725,6 +1178,14 @@ async function avisarAdopcionAprobada(
   } catch (err) {
     console.error('No se pudo avisar la adopción aprobada', solicitud.id, err);
   }
+
+  // Ya encontró su hogar: sale de los favoritos de todos, también del de quien la adoptó. Va
+  // después de avisarles, mientras todavía se sabe quiénes la tenían.
+  try {
+    await favoritos.retirarDeTodosLosFavoritos(solicitud.publicacion.mascota.id);
+  } catch (err) {
+    console.error('No se pudo sacar la mascota adoptada de los favoritos', solicitud.id, err);
+  }
 }
 
 // ─────────────── Jobs programados (spec 004, entregable 4) ───────────────
@@ -732,26 +1193,45 @@ async function avisarAdopcionAprobada(
 const DIAS_PENDIENTE_MUCHO = 3;
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
-/** "Solicitud pendiente hace muchos días sin responder", al publicador. Un aviso por solicitud. */
+/**
+ * Al publicador: una solicitud sin atender hace muchos días (`Pendiente`, desde que llegó) o
+ * ya revisada y esperando su decisión (`Revisada`, desde que se revisó). Un aviso por
+ * solicitud y por situación.
+ */
 export async function avisarPendientesHaceMucho(ahora: Date = new Date()): Promise<void> {
   const solicitudes = await repo.listarSinRespuestaConDetalle();
   const limite = DIAS_PENDIENTE_MUCHO * MS_POR_DIA;
 
   for (const solicitud of solicitudes) {
-    if (solicitud.historicoEstados[0]?.estadoSolicitud.nombre !== 'Pendiente') continue;
-    if (solicitud.fechaAlta.getTime() + limite > ahora.getTime()) continue;
+    const vigente = solicitud.historicoEstados[0];
+    const nombreEstado = vigente?.estadoSolicitud.nombre;
+    if (!vigente || (nombreEstado !== 'Pendiente' && nombreEstado !== 'Revisada')) continue;
+
+    const desde = nombreEstado === 'Pendiente' ? solicitud.fechaAlta : vigente.fechaAlta;
+    if (desde.getTime() + limite > ahora.getTime()) continue;
 
     const mascota = solicitud.publicacion.mascota;
     const nombreMascota = mascota.nombre ?? 'la mascota';
     const destinatarios = await destinatariosPublicador(mascota, solicitud.publicacion.usuarioId);
 
+    const aviso =
+      nombreEstado === 'Pendiente'
+        ? {
+            tipo: 'SOLICITUD_PENDIENTE_HACE_MUCHO',
+            mensaje: `Tenés una solicitud por ${nombreMascota} sin responder hace varios días`,
+            asuntoMail: `Solicitud pendiente: ${nombreMascota}`,
+          }
+        : {
+            tipo: 'SOLICITUD_REVISADA_SIN_DECISION',
+            mensaje: `Tenés una solicitud por ${nombreMascota} esperando tu decisión hace varios días`,
+            asuntoMail: `Solicitud esperando tu decisión: ${nombreMascota}`,
+          };
+
     await Promise.all(
       destinatarios.map((usuarioId) =>
         notificaciones.notificarUnaVez({
           usuarioId,
-          tipo: 'SOLICITUD_PENDIENTE_HACE_MUCHO',
-          mensaje: `Tenés una solicitud por ${nombreMascota} sin responder hace varios días`,
-          asuntoMail: `Solicitud pendiente: ${nombreMascota}`,
+          ...aviso,
           entidadTipo: 'SOLICITUD',
           entidadId: solicitud.id,
           canal: { mail: true },
@@ -822,9 +1302,9 @@ export async function avisarTransitosProgramados(ahora: Date = new Date()): Prom
 }
 
 /**
- * Aprobación de una adopción (HU-7.4): resuelve la solicitud, crea la mascota propia del
- * adoptante, pasa la mascota publicada a "Adoptado", finaliza la publicación y rechaza las
- * demás solicitudes pendientes — todo en una transacción (`repo.aprobarAdopcion`).
+ * Aprobación de una adopción: aprueba la solicitud, crea la mascota propia del adoptante,
+ * pasa la mascota publicada a "Adoptado", finaliza la publicación y cierra las demás
+ * solicitudes abiertas — todo en una transacción (`repo.aprobarAdopcion`).
  */
 async function aprobarAdopcion(
   solicitud: SolicitudConDetalle,
@@ -832,13 +1312,13 @@ async function aprobarAdopcion(
   comentario: string | null,
   usuarioId: number,
 ): Promise<SolicitudDetalleDto> {
-  const [estadoRechazada, estadoMascotaAdoptado, estadoPublicacionFinalizada] = await Promise.all([
-    repo.buscarEstadoSolicitudPorNombre('Rechazada'),
+  const [estadoCerrada, estadoMascotaAdoptado, estadoPublicacionFinalizada] = await Promise.all([
+    repo.buscarEstadoSolicitudPorNombre(ESTADO_SOLICITUD.CERRADA),
     repo.buscarEstadoMascotaPorNombre('Adoptado'),
     repo.buscarEstadoPublicacionPorNombre('Finalizada'),
   ]);
 
-  if (!estadoRechazada || !estadoMascotaAdoptado || !estadoPublicacionFinalizada) {
+  if (!estadoCerrada || !estadoMascotaAdoptado || !estadoPublicacionFinalizada) {
     throw new AppError(
       'ERROR_INTERNO',
       'Faltan estados en el catálogo para aprobar la adopción',
@@ -848,20 +1328,19 @@ async function aprobarAdopcion(
 
   const mascota = solicitud.publicacion.mascota;
 
-  // Antes de la transacción: a esta altura todavía siguen "Pendiente" (spec 004, para saber
-  // a quién de ellas avisarle después que la mascota ya fue adoptada por otro).
-  const otrosPretendientes = await repo.listarOtrasPendientesDePublicacion(
+  // Antes de la transacción, a esta altura siguen abiertas: hay que saber a quiénes avisarles
+  // después que la mascota ya encontró su hogar.
+  const otrosPretendientes = await repo.listarAbiertasDePublicacion(
     solicitud.publicacionId,
     solicitud.id,
   );
 
   const resultado = await repo.aprobarAdopcion(solicitud.id, usuarioId, {
     estadoAprobadaId,
-    estadoRechazadaId: estadoRechazada.id,
+    estadoCerradaId: estadoCerrada.id,
     estadoMascotaAdoptadoId: estadoMascotaAdoptado.id,
     estadoPublicacionFinalizadaId: estadoPublicacionFinalizada.id,
     comentario,
-    comentarioRechazo: COMENTARIO_RECHAZO_POR_ADOPCION,
     publicacionId: solicitud.publicacionId,
     mascotaOrigenId: mascota.id,
     mascotaOrigen: {
@@ -871,6 +1350,7 @@ async function aprobarAdopcion(
       peso: mascota.peso,
       tamanio: mascota.tamanio,
       castrado: mascota.castrado,
+      desparasitado: mascota.desparasitado,
       descripcion: mascota.descripcion,
       imagenUrl: mascota.imagenUrl,
       razaId: mascota.razaId,
@@ -878,16 +1358,14 @@ async function aprobarAdopcion(
     adoptanteId: solicitud.usuarioId,
   });
 
-  if (!resultado) {
-    throw new AppError('SOLICITUD_YA_RESUELTA', 'Esta solicitud ya fue resuelta', 409);
-  }
+  if (!resultado) throw SOLICITUD_YA_RESUELTA();
 
   await registrarAuditoria({
     usuarioId,
     accion: 'APROBAR',
     entidad: 'Solicitud',
     entidadId: solicitud.id,
-    detalle: `Pendiente -> Aprobada (adopción, mascota ${mascota.id} -> usuario ${solicitud.usuarioId})`,
+    detalle: `Revisada -> Aprobada (adopción, mascota ${mascota.id} -> usuario ${solicitud.usuarioId})`,
   });
 
   await registrarAuditoria({
@@ -914,21 +1392,21 @@ async function aprobarAdopcion(
     detalle: 'Finalizada (adopción aprobada)',
   });
 
-  for (const rechazadaId of resultado.solicitudesRechazadas) {
+  for (const cerradaId of resultado.solicitudesCerradas) {
     await registrarAuditoria({
       usuarioId,
-      accion: 'RECHAZAR',
+      accion: 'CERRAR',
       entidad: 'Solicitud',
-      entidadId: rechazadaId,
-      detalle: 'Rechazada al aprobarse otra solicitud de la misma publicación',
+      entidadId: cerradaId,
+      detalle: 'Cerrada (ADOPTADA_POR_OTRA_PERSONA) al aprobarse otra solicitud de la publicación',
     });
   }
 
   await avisarAdopcionAprobada(
     resultado.solicitud,
     otrosPretendientes,
-    resultado.solicitudesRechazadas,
+    resultado.solicitudesCerradas,
   );
 
-  return aDetalleDto(resultado.solicitud);
+  return aDetalle(resultado.solicitud, 'publicador');
 }

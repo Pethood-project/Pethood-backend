@@ -978,6 +978,7 @@ describe('asegurarChatDeSolicitud — la sala que nace de una solicitud', () => 
   const SOLICITANTE = 41;
   const MIEMBRO_REFUGIO = 7;
   const CHAT_NUEVO = 300;
+  const SALUDO = '¡Hola! Soy Ana, vi a Max y me encantaría conocerlo.';
 
   /** Lo que devuelve `buscarSolicitudParaChat`. */
   function solicitud(opciones: { deRefugio?: boolean; duenio?: number } = {}) {
@@ -987,6 +988,7 @@ describe('asegurarChatDeSolicitud — la sala que nace de una solicitud', () => 
       id: SOLICITUD,
       fechaAlta: FECHA,
       usuarioId: SOLICITANTE,
+      motivacion: SALUDO,
       tipoSolicitud: { nombre: 'Adopcion' },
       historicoEstados: [{ estadoSolicitud: { nombre: 'Pendiente' } }],
       publicacion: {
@@ -1098,13 +1100,52 @@ describe('asegurarChatDeSolicitud — la sala que nace de una solicitud', () => 
     expect(repo.buscarChatEntre).toHaveBeenCalledWith(SOLICITANTE, { usuarioId: MIEMBRO_REFUGIO });
   });
 
-  it('un reintento de la misma solicitud no deja dos tarjetas', async () => {
+  it('un reintento de la misma solicitud no deja dos tarjetas ni repite el saludo', async () => {
     vi.mocked(repo.buscarMensajeDeSolicitud).mockResolvedValue({ chatId: CHAT } as never);
 
     await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBe(CHAT);
 
     expect(repo.crearChatDeSolicitud).not.toHaveBeenCalled();
     expect(repo.crearMensaje).not.toHaveBeenCalled();
+  });
+
+  it('el saludo va después de la tarjeta, como mensaje del solicitante', async () => {
+    await service.asegurarChatDeSolicitud(SOLICITUD);
+
+    const llamadas = vi.mocked(repo.crearMensaje).mock.calls.map(([datos]) => datos);
+    expect(llamadas).toHaveLength(2);
+    expect(llamadas[0]).toMatchObject({ tipo: 'SOLICITUD', usuarioId: USUARIO_SISTEMA_ID });
+    expect(llamadas[1]).toEqual({
+      chatId: CHAT_NUEVO,
+      usuarioId: SOLICITANTE,
+      contenido: SALUDO,
+      imagenes: [],
+    });
+  });
+
+  it('el saludo le llega al refugio como cualquier mensaje: por socket y con aviso', async () => {
+    await service.asegurarChatDeSolicitud(SOLICITUD);
+
+    // La tarjeta y el saludo.
+    expect(emisor.emitirMensajeNuevo).toHaveBeenCalledTimes(2);
+  });
+
+  it('un saludo que no se pudo mandar no rompe: la sala y la tarjeta quedan', async () => {
+    vi.mocked(repo.crearMensaje)
+      .mockResolvedValueOnce({
+        ...mensaje({ id: 500, contenido: '' }),
+        chatId: CHAT_NUEVO,
+        usuarioId: USUARIO_SISTEMA_ID,
+        tipo: 'SOLICITUD' as const,
+        solicitudId: SOLICITUD,
+      } as never)
+      .mockRejectedValueOnce(new Error('base caída'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBe(CHAT_NUEVO);
+
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it('sin contraparte activa no hay conversación posible', async () => {
@@ -1119,5 +1160,102 @@ describe('asegurarChatDeSolicitud — la sala que nace de una solicitud', () => 
     vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue(null as never);
 
     await expect(service.asegurarChatDeSolicitud(SOLICITUD)).resolves.toBeNull();
+  });
+});
+
+describe('anunciarEstadoDeSolicitud — la línea que avisa que la solicitud avanzó', () => {
+  const SOLICITUD = 90;
+  const SOLICITANTE = 41;
+  const MIEMBRO_REFUGIO = 7;
+
+  beforeEach(() => {
+    vi.mocked(repo.buscarSolicitudParaChat).mockResolvedValue({
+      id: SOLICITUD,
+      fechaAlta: FECHA,
+      usuarioId: SOLICITANTE,
+      motivacion: 'Hola',
+      tipoSolicitud: { nombre: 'Adopcion' },
+      historicoEstados: [{ estadoSolicitud: { nombre: 'Aprobada' } }],
+      publicacion: {
+        id: 12,
+        imagenUrl: '/api/v1/archivos/publicaciones/max.jpg',
+        mascota: {
+          id: 5,
+          nombre: 'Max',
+          fechaNacimiento: FECHA_VIEJA,
+          imagenUrl: null,
+          refugioId: REFUGIO,
+          usuarioId: 99,
+          raza: { especie: { nombre: 'Perro' } },
+        },
+      },
+    } as never);
+    vi.mocked(repo.buscarMensajeDeSolicitud).mockResolvedValue({ chatId: CHAT } as never);
+    vi.mocked(repo.marcasDeParticipantes).mockResolvedValue([
+      { usuarioId: SOLICITANTE, ultimaLectura: null, ultimaEntrega: null },
+      { usuarioId: MIEMBRO_REFUGIO, ultimaLectura: null, ultimaEntrega: null },
+    ]);
+    vi.mocked(repo.crearMensaje).mockResolvedValue({
+      ...mensaje({ id: 600, contenido: 'La solicitud fue aceptada' }),
+      chatId: CHAT,
+      usuarioId: USUARIO_SISTEMA_ID,
+      tipo: 'SOLICITUD_ESTADO' as const,
+      solicitudId: SOLICITUD,
+    } as never);
+  });
+
+  it('deja un mensaje de SISTEMA en la sala de la solicitud', async () => {
+    await service.anunciarEstadoDeSolicitud(SOLICITUD, 'APROBADA');
+
+    expect(repo.crearMensaje).toHaveBeenCalledWith({
+      chatId: CHAT,
+      usuarioId: USUARIO_SISTEMA_ID,
+      contenido: 'La solicitud fue aceptada',
+      imagenes: [],
+      tipo: 'SOLICITUD_ESTADO',
+      solicitudId: SOLICITUD,
+    });
+  });
+
+  it('dice lo que pasó con tacto: revisada, aceptada o no aceptada', async () => {
+    await service.anunciarEstadoDeSolicitud(SOLICITUD, 'REVISADA');
+    await service.anunciarEstadoDeSolicitud(SOLICITUD, 'RECHAZADA');
+
+    const textos = vi.mocked(repo.crearMensaje).mock.calls.map(([datos]) => datos.contenido);
+    expect(textos).toEqual(['La solicitud fue revisada', 'La solicitud no fue aceptada']);
+  });
+
+  it('les llega a los dos lados por socket, con la mascota y su foto', async () => {
+    await service.anunciarEstadoDeSolicitud(SOLICITUD, 'APROBADA');
+
+    expect(emisor.emitirMensajeNuevo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tipo: 'SOLICITUD_ESTADO',
+        solicitud: expect.objectContaining({
+          id: SOLICITUD,
+          usuarioId: SOLICITANTE,
+          mascota: expect.objectContaining({ nombre: 'Max' }),
+        }),
+      }),
+      [SOLICITANTE, MIEMBRO_REFUGIO],
+    );
+  });
+
+  it('sin sala todavía no hay dónde anunciar: no hace nada', async () => {
+    vi.mocked(repo.buscarMensajeDeSolicitud).mockResolvedValue(null);
+
+    await service.anunciarEstadoDeSolicitud(SOLICITUD, 'APROBADA');
+
+    expect(repo.crearMensaje).not.toHaveBeenCalled();
+  });
+
+  it('si la base falla no lanza: el cambio de estado ya está escrito', async () => {
+    vi.mocked(repo.crearMensaje).mockRejectedValue(new Error('base caída'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(service.anunciarEstadoDeSolicitud(SOLICITUD, 'APROBADA')).resolves.toBeUndefined();
+
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });

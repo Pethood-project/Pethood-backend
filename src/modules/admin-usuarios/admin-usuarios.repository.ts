@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma';
 import { datosBaja, datosModificacion } from '../../shared/auditoria';
+import { estaAbierta } from '../../shared/requestStates';
 import { ROL_DB } from '../../shared/roles';
 
 const includeUsuario = {
@@ -292,8 +293,8 @@ export async function resumenRefugio(refugioId: number) {
       }),
     ]);
 
-  const solicitudesPendientes = solicitudesConEstado.filter(
-    (s) => s.historicoEstados[0]?.estadoSolicitud.nombre === 'Pendiente',
+  const solicitudesPendientes = solicitudesConEstado.filter((s) =>
+    estaAbierta(s.historicoEstados[0]?.estadoSolicitud.nombre),
   ).length;
 
   return {

@@ -1,14 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../../src/middlewares/errorHandler';
+import * as favoritos from '../../../src/modules/favoritos/favoritos.service';
+import * as notificaciones from '../../../src/modules/notificaciones/notificaciones.service';
 import * as repo from '../../../src/modules/publicaciones/publicaciones.repository';
 import { MARCADOR_FOTO_NUEVA } from '../../../src/modules/publicaciones/publicaciones.dto';
 import * as service from '../../../src/modules/publicaciones/publicaciones.service';
+import * as solicitudes from '../../../src/modules/solicitudes/solicitudes.service';
 import { registrarAuditoria } from '../../../src/shared/logAuditoria';
 import { borrarImagenes, guardarImagenes } from '../../../src/shared/storage';
 
 vi.mock('../../../src/modules/publicaciones/publicaciones.repository');
 vi.mock('../../../src/shared/logAuditoria');
 vi.mock('../../../src/shared/storage');
+// Los avisos encolan en Redis y la solicitud toca la base: estos tests no los ejercitan.
+vi.mock('../../../src/modules/solicitudes/solicitudes.service');
+vi.mock('../../../src/modules/notificaciones/notificaciones.service');
+vi.mock('../../../src/modules/favoritos/favoritos.service');
 
 const USUARIO = 7;
 const PUBLICACION = 40;
@@ -52,7 +59,6 @@ function publicacionActiva(duenio: number, refugioId: number | null = null) {
     ubicacion: 'CABA',
     requisitos: [],
     personalidad: [],
-    desparasitado: true,
     imagenes: [],
     fechaAlta: new Date('2026-08-19T15:00:00.000Z'),
     mascotaId: 8,
@@ -266,7 +272,6 @@ describe('crearPublicacion — estado inicial', () => {
     ubicacion: 'CABA',
     requisitos: [],
     personalidad: [],
-    desparasitado: false,
   };
   const CONTEXTO = { usuarioId: USUARIO, ambito: 'PERSONAL' as const, archivos: [] };
 
@@ -329,11 +334,15 @@ describe('sincronizarConEstadoMascota — la publicación sigue a la mascota', (
   function publicacionEn(estado: keyof typeof ESTADOS_PUBLICACION) {
     return {
       id: PUBLICACION,
+      mascota: { nombre: 'Max' },
       historicoEstados: [{ estadoPublicacion: ESTADOS_PUBLICACION[estado] }],
     };
   }
 
-  beforeEach(catalogoPorNombre);
+  beforeEach(() => {
+    catalogoPorNombre();
+    vi.mocked(favoritos.listarUsuariosConFavorito).mockResolvedValue([61, 62]);
+  });
 
   it.each([
     ['Adoptado', 'Activa', 3],
@@ -347,6 +356,60 @@ describe('sincronizarConEstadoMascota — la publicación sigue a la mascota', (
 
     expect(repo.cambiarEstado).toHaveBeenCalledWith(PUBLICACION, id, USUARIO);
   });
+
+  it.each([
+    ['Adoptado', 'ADOPTADA_POR_OTRA_PERSONA'],
+    ['Fallecido', 'MASCOTA_FALLECIDA'],
+  ] as const)('mascota %s → cierra las solicitudes abiertas con %s', async (mascota, motivo) => {
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Activa') as never);
+
+    await service.sincronizarConEstadoMascota(8, mascota, USUARIO);
+
+    expect(solicitudes.cerrarAbiertasDePublicacion).toHaveBeenCalledWith(
+      PUBLICACION,
+      motivo,
+      USUARIO,
+    );
+  });
+
+  it('mascota Fallecido → avisa a quienes la tenían en favoritos y la saca de ahí', async () => {
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Activa') as never);
+
+    await service.sincronizarConEstadoMascota(8, 'Fallecido', USUARIO);
+
+    expect(notificaciones.notificar).toHaveBeenCalledTimes(2);
+    expect(notificaciones.notificar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usuarioId: 61,
+        tipo: 'FAVORITO_FALLECIDO',
+        mensaje: expect.stringContaining('Max'),
+      }),
+    );
+    expect(favoritos.retirarDeTodosLosFavoritos).toHaveBeenCalledWith(8);
+  });
+
+  it('mascota Adoptado por fuera de una solicitud → avisa que ya encontró su hogar y la saca', async () => {
+    vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Activa') as never);
+
+    await service.sincronizarConEstadoMascota(8, 'Adoptado', USUARIO);
+
+    expect(notificaciones.notificar).toHaveBeenCalledWith(
+      expect.objectContaining({ usuarioId: 62, tipo: 'FAVORITO_ADOPTADO' }),
+    );
+    expect(favoritos.retirarDeTodosLosFavoritos).toHaveBeenCalledWith(8);
+  });
+
+  it.each(['En_Transito', 'En_Tratamiento'])(
+    'mascota %s → solo pausa: las solicitudes siguen abiertas',
+    async (mascota) => {
+      vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Activa') as never);
+
+      await service.sincronizarConEstadoMascota(8, mascota, USUARIO);
+
+      expect(solicitudes.cerrarAbiertasDePublicacion).not.toHaveBeenCalled();
+      expect(favoritos.retirarDeTodosLosFavoritos).not.toHaveBeenCalled();
+    },
+  );
 
   it('mascota que sale de tratamiento → la pausada NO se reactiva sola', async () => {
     vi.mocked(repo.buscarEnCursoDeMascota).mockResolvedValue(publicacionEn('Pausada') as never);
@@ -541,7 +604,6 @@ describe('editarPublicacion', () => {
     ubicacion: 'Godoy Cruz',
     requisitos: ['Casa con patio'],
     personalidad: ['Tranquilo'],
-    desparasitado: true,
     imagenes: [] as string[],
   };
   const CONTEXTO = { usuarioId: USUARIO, ambito: 'PERSONAL' as const, archivos: [] };
@@ -673,6 +735,27 @@ describe('cambiarEstadoPublicacion — pausar, reactivar, finalizar', () => {
     await service.cambiarEstadoPublicacion(PUBLICACION, accion, USUARIO, 'PERSONAL');
 
     expect(repo.cambiarEstado).toHaveBeenCalledWith(PUBLICACION, destino, USUARIO);
+  });
+
+  it('finalizar cierra las solicitudes abiertas como publicación retirada', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionEnEstado('Activa') as never);
+
+    await service.cambiarEstadoPublicacion(PUBLICACION, 'FINALIZAR', USUARIO, 'PERSONAL');
+
+    expect(solicitudes.cerrarAbiertasDePublicacion).toHaveBeenCalledWith(
+      PUBLICACION,
+      'PUBLICACION_RETIRADA',
+      USUARIO,
+    );
+  });
+
+  it('pausar no cierra las solicitudes: es reversible', async () => {
+    vi.mocked(repo.buscarActivaPorId).mockResolvedValue(publicacionEnEstado('Activa') as never);
+    vi.mocked(solicitudes.listarAbiertasDePublicacion).mockResolvedValue([]);
+
+    await service.cambiarEstadoPublicacion(PUBLICACION, 'PAUSAR', USUARIO, 'PERSONAL');
+
+    expect(solicitudes.cerrarAbiertasDePublicacion).not.toHaveBeenCalled();
   });
 
   it.each([

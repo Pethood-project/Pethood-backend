@@ -63,7 +63,6 @@ const camposEditables = {
   longitud: coordenadaOpcionalSchema('La longitud', -180, 180),
   requisitos: listaSchema(LIMITES.publicacion.requisito.max, 'Cada requisito'),
   personalidad: listaSchema(LIMITES.publicacion.personalidad.max, 'Cada rasgo'),
-  desparasitado: booleanoSchema(),
 };
 
 export const crearPublicacionSchema = z.object({
@@ -341,7 +340,6 @@ export interface PublicacionCreadaDto {
   ubicacion: string | null;
   requisitos: string[];
   personalidad: string[];
-  desparasitado: boolean;
   imagenes: string[];
   mascotaId: number;
   usuarioId: number;

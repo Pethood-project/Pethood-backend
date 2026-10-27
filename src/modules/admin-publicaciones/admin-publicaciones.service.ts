@@ -4,6 +4,7 @@ import { aFechaISO } from '../../shared/validation/dates';
 import * as notificaciones from '../notificaciones/notificaciones.service';
 import { TRANSICIONES } from '../publicaciones/publicaciones.service';
 import { deObjeto } from '../reportes/reportes.service';
+import * as solicitudes from '../solicitudes/solicitudes.service';
 import type { EstadoBody, FiltrosPublicaciones } from './admin-publicaciones.dto';
 import * as repo from './admin-publicaciones.repository';
 import type { PublicacionAdmin } from './admin-publicaciones.repository';
@@ -58,7 +59,7 @@ export async function obtener(id: number) {
     ubicacion: pub.ubicacion,
     requisitos: pub.requisitos,
     personalidad: pub.personalidad,
-    desparasitado: pub.desparasitado,
+    desparasitado: pub.mascota.desparasitado,
     imagenes: pub.imagenes,
     mascota: {
       id: mascota.id,
@@ -117,6 +118,11 @@ export async function cambiarEstado(adminId: number, id: number, body: EstadoBod
     detalle: `estado=${transicion.hacia} (admin) motivo=${body.motivo}`,
   });
 
+  // Finalizar es definitivo: lo que se había pedido sobre la publicación se cierra con su causa.
+  if (transicion.hacia === 'Finalizada') {
+    await solicitudes.cerrarAbiertasDePublicacion(id, 'PUBLICACION_RETIRADA', adminId);
+  }
+
   return obtener(id);
 }
 
@@ -144,6 +150,8 @@ export async function darDeBaja(adminId: number, id: number, motivo: string) {
     entidadId: id,
     detalle: `motivo=${motivo}`,
   });
+
+  await solicitudes.cerrarAbiertasDePublicacion(id, 'PUBLICACION_RETIRADA', adminId);
 
   return obtener(id);
 }

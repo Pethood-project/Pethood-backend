@@ -149,13 +149,25 @@ export const LIMITES = {
   },
 
   solicitud: {
-    /** El comentario del refugio al aceptar/rechazar (HU-7.4). */
+    /** El comentario del refugio al aceptar/rechazar. */
     comentario: { max: 500 },
     /**
-     * Paso 3 de GUI-7.1.1. El mínimo de 20 es de esta HU: la columna es NOT NULL y un
-     * "quiero adoptarlo" de tres palabras no le sirve al refugio para decidir.
+     * El saludo de quien solicita, que sale como primer mensaje del chat. El mínimo de 20
+     * evita un "quiero adoptarlo" de tres palabras; el máximo lo mantiene breve.
      */
-    motivacion: { min: 20, max: 500 },
+    motivacion: { min: 20, max: 300 },
+    /** La nota privada del refugio sobre una solicitud. */
+    nota: { max: 1000 },
+  },
+
+  /** Preguntas propias del refugio en el formulario de solicitud, y sus respuestas. */
+  preguntaAdopcion: {
+    texto: { min: 1, max: 200 },
+    /** Opciones de una pregunta de tipo OPCIONES. */
+    opciones: { minimo: 2, maximo: 6, largo: 60 },
+    /** Preguntas activas por refugio: un formulario largo espanta a quien quiere adoptar. */
+    maximoActivas: 5,
+    respuesta: { max: 300 },
   },
 
   /** Paso 2 de GUI-7.1.1: las respuestas sobre el hogar del solicitante. */
