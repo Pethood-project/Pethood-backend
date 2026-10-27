@@ -196,6 +196,8 @@ export const LIMITES = {
   resena: {
     puntuacion: { min: 1, max: 5 },
     comentario: { max: 500 },
+    /** Tamaño de página del historial de reseñas y su techo (paginación por cursor). */
+    pagina: { porDefecto: 10, maximo: 50 },
   },
 
   /**

@@ -21,6 +21,7 @@ import type {
   FlujoResena,
   ResenaDto,
   ResumenResenasDto,
+  ResumenResenasPaginadoDto,
   TransaccionElegibleDto,
 } from './resenas.dto';
 import * as notificaciones from '../notificaciones/notificaciones.service';
@@ -80,23 +81,63 @@ function aResenaDto(resena: ResenaConAutor): ResenaDto {
   };
 }
 
-/**
- * Promedio (redondeado a un decimal), cantidad, desglose y reseñas. Se calcula sobre la
- * lista ya traída: el volumen por usuario o refugio es chico y así el desglose y el listado
- * no pueden discrepar.
- */
-function resumir(resenas: ResenaConAutor[]): ResumenResenasDto {
-  const cantidad = resenas.length;
-  const total = resenas.reduce((suma, resena) => suma + resena.puntuacion, 0);
+/** Promedio (un decimal), cantidad y desglose de 5 a 1 a partir de cuántas hay de cada puntuación. */
+function estadisticas(conteos: { puntuacion: number; cantidad: number }[]) {
+  const cantidad = conteos.reduce((suma, fila) => suma + fila.cantidad, 0);
+  const total = conteos.reduce((suma, fila) => suma + fila.puntuacion * fila.cantidad, 0);
 
   return {
     promedio: cantidad === 0 ? null : Math.round((total / cantidad) * 10) / 10,
     cantidad,
     distribucion: [5, 4, 3, 2, 1].map((puntuacion) => ({
       puntuacion,
-      cantidad: resenas.filter((resena) => resena.puntuacion === puntuacion).length,
+      cantidad: conteos.find((fila) => fila.puntuacion === puntuacion)?.cantidad ?? 0,
     })),
-    resenas: resenas.map(aResenaDto),
+  };
+}
+
+/**
+ * Promedio (redondeado a un decimal), cantidad, desglose y reseñas. Se calcula sobre la
+ * lista ya traída: el volumen por usuario o refugio es chico y así el desglose y el listado
+ * no pueden discrepar.
+ */
+function resumir(resenas: ResenaConAutor[]): ResumenResenasDto {
+  const conteos = [1, 2, 3, 4, 5].map((puntuacion) => ({
+    puntuacion,
+    cantidad: resenas.filter((resena) => resena.puntuacion === puntuacion).length,
+  }));
+
+  return { ...estadisticas(conteos), resenas: resenas.map(aResenaDto) };
+}
+
+/**
+ * Una página del historial por cursor. El promedio y el desglose salen de un conteo sobre
+ * todas las reseñas (no de la página), así que no cambian al pedir la siguiente.
+ */
+async function resumirPagina(
+  receptor: repo.ReceptorResenas,
+  limite: number,
+  cursor?: number,
+): Promise<ResumenResenasPaginadoDto> {
+  // Un cursor que no es de este receptor paginaría desde ningún lado y el cliente creería que
+  // ya no hay más: se corta antes, igual que en el portal de mascotas perdidas.
+  if (cursor !== undefined && !(await repo.existeDeReceptor(receptor, cursor))) {
+    throw new AppError('CURSOR_INVALIDO', 'No pudimos seguir cargando las reseñas', 400);
+  }
+
+  const [conteos, filas] = await Promise.all([
+    repo.contarPorPuntuacion(receptor),
+    repo.listarPaginaDeReceptor(receptor, limite, cursor),
+  ]);
+
+  const hayMas = filas.length > limite;
+  const pagina = hayMas ? filas.slice(0, limite) : filas;
+
+  return {
+    ...estadisticas(conteos),
+    resenas: pagina.map(aResenaDto),
+    hayMas,
+    proximoCursor: hayMas ? pagina[pagina.length - 1]!.id : null,
   };
 }
 
@@ -234,6 +275,30 @@ export async function listarDeUsuario(usuarioId: number): Promise<ResumenResenas
 /** HU-10.5. Historial y promedio de un refugio. */
 export async function listarDeRefugio(refugioId: number): Promise<ResumenResenasDto> {
   return resumir(await repo.listarDeRefugio(refugioId));
+}
+
+/** HU-10.5. Igual que `listarDeUsuario`, pero una página por cursor. */
+export async function listarPaginaDeUsuario(
+  usuarioId: number,
+  limite: number,
+  cursor?: number,
+): Promise<ResumenResenasPaginadoDto> {
+  const usuario = await repo.buscarUsuario(usuarioId);
+
+  if (!usuario) {
+    throw new AppError('NO_ENCONTRADO', 'El usuario no existe', 404);
+  }
+
+  return resumirPagina({ usuarioReportadoId: usuarioId }, limite, cursor);
+}
+
+/** HU-10.5. Igual que `listarDeRefugio`, pero una página por cursor. */
+export function listarPaginaDeRefugio(
+  refugioId: number,
+  limite: number,
+  cursor?: number,
+): Promise<ResumenResenasPaginadoDto> {
+  return resumirPagina({ refugioReportadoId: refugioId }, limite, cursor);
 }
 
 /**

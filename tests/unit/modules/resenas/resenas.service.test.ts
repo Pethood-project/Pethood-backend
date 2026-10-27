@@ -10,6 +10,9 @@ vi.mock('../../../../src/modules/resenas/resenas.repository', () => ({
   darDeBaja: vi.fn(),
   listarDeUsuario: vi.fn(),
   listarDeRefugio: vi.fn(),
+  listarPaginaDeReceptor: vi.fn(),
+  existeDeReceptor: vi.fn(),
+  contarPorPuntuacion: vi.fn(),
   listarTransaccionesDelActor: vi.fn(),
   listarSolicitudesResenadas: vi.fn(),
 }));
@@ -19,7 +22,11 @@ vi.mock('../../../../src/shared/logAuditoria', () => ({
 }));
 
 import * as repo from '../../../../src/modules/resenas/resenas.repository';
-import { crearResena, listarDeUsuario } from '../../../../src/modules/resenas/resenas.service';
+import {
+  crearResena,
+  listarDeUsuario,
+  listarPaginaDeRefugio,
+} from '../../../../src/modules/resenas/resenas.service';
 
 const mockedRepo = vi.mocked(repo);
 
@@ -149,5 +156,68 @@ describe('listarDeUsuario', () => {
     expect(resumen.cantidad).toBe(2);
     expect(resumen.distribucion.find((fila) => fila.puntuacion === 5)?.cantidad).toBe(1);
     expect(resumen.resenas).toHaveLength(2);
+  });
+});
+
+describe('listarPaginaDeRefugio', () => {
+  function fila(id: number, puntuacion: number) {
+    return {
+      id,
+      puntuacion,
+      comentario: null,
+      fechaAlta: new Date(),
+      refugioReportadoId: 9,
+      usuarioReportadoId: null,
+      usuarioAutorId: 5,
+      autor: { id: 5, nombre: 'Ana', apellido: 'Pérez', imagenUrl: null },
+      solicitud: null,
+    };
+  }
+
+  it('calcula promedio y desglose sobre todas y corta la página en el límite', async () => {
+    mockedRepo.contarPorPuntuacion.mockResolvedValue([
+      { puntuacion: 5, cantidad: 2 },
+      { puntuacion: 4, cantidad: 1 },
+    ]);
+    // Se piden limite + 1 filas: la cuarta solo sirve para saber que hay más.
+    mockedRepo.listarPaginaDeReceptor.mockResolvedValue([
+      fila(30, 5),
+      fila(20, 4),
+      fila(10, 5),
+    ] as never);
+
+    const resumen = await listarPaginaDeRefugio(9, 2);
+
+    expect(resumen.promedio).toBe(4.7);
+    expect(resumen.cantidad).toBe(3);
+    expect(resumen.distribucion.find((f) => f.puntuacion === 5)?.cantidad).toBe(2);
+    expect(resumen.resenas.map((r) => r.id)).toEqual([30, 20]);
+    expect(resumen.hayMas).toBe(true);
+    expect(resumen.proximoCursor).toBe(20);
+    expect(mockedRepo.listarPaginaDeReceptor).toHaveBeenCalledWith(
+      { refugioReportadoId: 9 },
+      2,
+      undefined,
+    );
+  });
+
+  it('en la última página no hay más ni próximo cursor', async () => {
+    mockedRepo.existeDeReceptor.mockResolvedValue(true);
+    mockedRepo.contarPorPuntuacion.mockResolvedValue([{ puntuacion: 5, cantidad: 1 }]);
+    mockedRepo.listarPaginaDeReceptor.mockResolvedValue([fila(10, 5)] as never);
+
+    const resumen = await listarPaginaDeRefugio(9, 2, 20);
+
+    expect(resumen.hayMas).toBe(false);
+    expect(resumen.proximoCursor).toBeNull();
+  });
+
+  it('rechaza un cursor que no es una reseña de ese refugio', async () => {
+    mockedRepo.existeDeReceptor.mockResolvedValue(false);
+
+    await expect(listarPaginaDeRefugio(9, 2, 999)).rejects.toMatchObject({
+      codigo: 'CURSOR_INVALIDO',
+    });
+    expect(mockedRepo.listarPaginaDeReceptor).not.toHaveBeenCalled();
   });
 });
