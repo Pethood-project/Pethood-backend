@@ -14,6 +14,8 @@
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../middlewares/errorHandler';
 import { esMascotaPropia } from '../../shared/ambito';
+import { USUARIO_SISTEMA_ID } from '../../shared/auditoria';
+import { ESTADO_SOLICITUD, estaAbierta } from '../../shared/requestStates';
 import { aFechaISO } from '../../shared/validation/dates';
 import type { FavoritoAgregadoDto, ListaFavoritosDto, MascotaFavoritaDto } from './favoritos.dto';
 import * as repo from './favoritos.repository';
@@ -53,6 +55,16 @@ function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
       solicitud.historicoEstados?.[0]?.estadoSolicitud.nombre === 'Aprobada',
   );
 
+  // "Abierta" se juzga por el estado vigente: una retirada o cerrada no pasa por
+  // `fechaRespuesta` y seguiría pareciendo viva.
+  const estadoDe = (solicitud: (typeof solicitudes)[number]): string | undefined =>
+    solicitud.historicoEstados?.[0]?.estadoSolicitud.nombre;
+  const abierta = solicitudes.find((solicitud) => estaAbierta(estadoDe(solicitud)));
+  // La más reciente es la que cuenta: si la retiró, la tarjeta lo dice en vez de ofrecer otra.
+  const ultima = solicitudes[0];
+  const canceladaId =
+    !abierta && ultima && estadoDe(ultima) === ESTADO_SOLICITUD.CANCELADA ? ultima.id : null;
+
   return {
     id: mascota.id,
     nombre: mascota.nombre,
@@ -65,7 +77,8 @@ function aTarjetaDto(favorito: FavoritoConMascota): MascotaFavoritaDto {
     estado: { id: estado.id, nombre: estado.nombre },
     refugio: mascota.refugio ? { id: mascota.refugio.id, nombre: mascota.refugio.nombre } : null,
     publicacionId: publicacion?.id ?? null,
-    solicitudAbiertaId: solicitudes.find((solicitud) => !solicitud.fechaRespuesta)?.id ?? null,
+    solicitudAbiertaId: abierta?.id ?? null,
+    solicitudCanceladaId: canceladaId,
     adoptadaPorMi,
     fechaAgregado: favorito.fechaAlta.toISOString(),
   };
@@ -133,6 +146,14 @@ export async function quitarFavorito(mascotaId: number, usuarioId: number): Prom
   if (!favorito) return;
 
   await repo.darDeBaja(favorito.id, usuarioId);
+}
+
+/**
+ * La mascota ya no está en circulación (la adoptaron o falleció): sale de los favoritos de todos.
+ * Quien llama avisa antes, mientras todavía se sabe quiénes la tenían.
+ */
+export function retirarDeTodosLosFavoritos(mascotaId: number): Promise<number> {
+  return repo.darDeBajaTodosDeMascota(mascotaId, USUARIO_SISTEMA_ID);
 }
 
 /** Para `publicaciones.service.ts` (spec 004): a quién avisarle si una mascota que guardó deja de estar disponible. */

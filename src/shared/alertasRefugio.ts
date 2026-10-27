@@ -7,8 +7,7 @@
  * no coincidir.
  */
 
-/** Solicitud sin resolver todavía. */
-export const ESTADOS_SOLICITUD_ABIERTA: readonly string[] = ['Pendiente', 'En_Revision'];
+import { estaAbierta } from './requestStates';
 
 /** A partir de cuántos días sin cambiar de estado una solicitud abierta está demorada. */
 export const UMBRAL_DEMORA_SOLICITUD_DIAS = 5;
@@ -32,8 +31,7 @@ export function esSolicitudDemorada(
   hoy: Date = new Date(),
 ): boolean {
   return (
-    ESTADOS_SOLICITUD_ABIERTA.includes(vigente.nombre) &&
-    diasDesde(vigente.desde, hoy) >= UMBRAL_DEMORA_SOLICITUD_DIAS
+    estaAbierta(vigente.nombre) && diasDesde(vigente.desde, hoy) >= UMBRAL_DEMORA_SOLICITUD_DIAS
   );
 }
 

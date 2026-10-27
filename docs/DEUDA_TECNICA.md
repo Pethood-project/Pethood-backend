@@ -4,7 +4,7 @@ Registro de lo que sabemos que está a medias, mal resuelto o postergado, **en l
 (`pethood-backend` y `pethood-frontend`). Vive acá, junto al resto de los documentos rectores,
 porque la mayor parte de la deuda es transversal y no tiene un módulo dueño.
 
-> Última revisión: **2026-10-12**
+> Última revisión: **2026-10-22**
 
 ## Cómo se usa
 
@@ -70,6 +70,11 @@ viejo que diga «ítem 7» siga apuntando a lo mismo.
 | 40 | `usuarios.repository.ts` importa `config/prisma.ts`, un `PrismaClient` DISTINTO del de `shared/prisma.ts` que usa el resto de los módulos — dos pools de conexión en vez de uno | Media | backend |
 | 41 | Documentos de identidad: archivos huérfanos al reemplazar y expuestos si se activa R2 | Media | backend |
 | 42 | `LogAuditoria` es un archivo efímero y ahora respalda el rollback de documentos | Media | backend |
+| 43 | El seguimiento de un tránsito ignora el período que declaró el adoptante (usa 180 días fijos) | Media | backend |
+| 44 | El backend tiene dos configuraciones de ESLint y probablemente solo corre la más corta | Baja | backend |
+| 45 | `apps/mobile/NUL` sin ignorar en el frontend: un nombre reservado de Windows | Baja | frontend |
+| 46 | El índice de `docs/specs/README.md` no coincide con el estado real de las specs | Baja | docs |
+| 47 | Los dashboards cuentan transiciones de estado, no el estado vigente de cada solicitud | Media | backend |
 
 ---
 
@@ -423,6 +428,11 @@ sigue viendo como en curso. Si finaliza, nada le avisa al solicitante.
 **Cómo se arregla.** Definir con el equipo qué pasa con ellas (¿se cancelan al finalizar?
 ¿se bloquea finalizar con solicitudes abiertas, como la baja de mascota?) y aplicarlo en
 `cambiarEstadoPublicacion`.
+
+**Plan (2026-10-22).** Finalizar o retirar una publicación pasa a cerrar sus solicitudes
+abiertas con el estado `Cerrada` y una causa (`docs/ideas/adoption-process-improvements.md`,
+F1). **Pausar sigue sin tocarlas**: es reversible, así que solo se avisa. Cuando se implemente
+el cierre, esta ficha queda reducida a la pausa.
 
 ---
 
@@ -829,4 +839,62 @@ quién era.
 plataforma) antes de depender de esto en producción. Alternativa chica: no pisar la columna al
 reemplazar/revocar, sino guardar el historial de documentos en una tabla propia (`usuario_id`,
 `tipo`, `url`, `fecha_baja`), que además cumple la regla de bajas lógicas del proyecto.
+
+## 43. El seguimiento de un tránsito ignora el período que declaró el adoptante — Media
+
+**Qué pasa.** Desde HU-7.1 `Solicitud` guarda `fechaInicioTransito` y `fechaFinTransito`, y los
+avisos de «tránsito por comenzar» y «por vencer» (`solicitudes.service.ts`) ya los usan. Pero
+`seguimiento.secuencia.ts` sigue con `DIAS_TRANSITO_POR_DEFECTO = 180` y ningún llamador le pasa
+otra duración: un tránsito de 30 días sigue generando pedidos de seguimiento hasta el día 180, y
+el «fin del tránsito» que dispara la baja de los pedidos se calcula con esos 180 días. La spec
+011 (§9, nota del 2026-09-02) todavía dice que el modelo no tiene fecha de fin: quedó vieja.
+
+**Cómo se arregla.** Calcular la duración con las fechas de la solicitud al sincronizar, dejar los
+180 días solo para solicitudes sin período (las anteriores a HU-7.1) y actualizar la spec 011.
+
+## 44. El backend tiene dos configuraciones de ESLint y probablemente solo corre la más corta — Baja
+
+**Qué pasa.** Conviven `eslint.config.js` (CommonJS, ~600 bytes) y `eslint.config.mjs` (~3 KB,
+con `globals` y más reglas). El script es `eslint src`. Con la configuración plana de ESLint 9 se
+toma la primera que encuentra y `.js` va antes que `.mjs`, así que la más completa quedaría sin
+efecto. **Falta confirmarlo** (`npx eslint --debug src` dice qué archivo carga).
+
+**Cómo se arregla.** Quedarse con una sola, borrar la otra y corregir lo que aparezca en
+`npm run lint`.
+
+## 45. `apps/mobile/NUL` sin ignorar en el frontend: un nombre reservado de Windows — Baja
+
+**Qué pasa.** En `apps/mobile/` hay un archivo llamado `NUL` (se genera cuando un comando
+redirige a `NUL` desde Git Bash en lugar de a `/dev/null`). `git status` lo muestra sin
+trackear y no está en `.gitignore`. `NUL` es un nombre reservado de Windows: si alguien lo
+commitea por error, el checkout falla en las máquinas Windows del equipo.
+
+**Cómo se arregla.** Borrarlo (en Windows hace falta la ruta extendida, `del \\?\<ruta>\NUL`) y
+agregar `NUL` al `.gitignore` del frontend.
+
+## 46. El índice de `docs/specs/README.md` no coincide con el estado real de las specs — Baja
+
+**Qué pasa.** El índice marca la 003 como `BORRADOR` cuando el archivo dice `APROBADA` (y
+describe en detalle lo implementado), y llama a la 002 «Publicación de Mascotas — pendiente»
+cuando `002-admin-usuarios-refugios.md` existe. El README es lo primero que se lee para saber
+qué está aprobado, así que un estado viejo ahí lleva a leer o a ignorar la spec equivocada.
+
+**Cómo se arregla.** Revisar fila por fila contra el encabezado de cada archivo y, de ahí en
+más, actualizar el índice en el mismo PR que cambia el estado de una spec.
+
+## 47. Los dashboards cuentan transiciones de estado, no el estado vigente de cada solicitud — Media
+
+**Qué pasa.** `contarSolicitudesPorEstado` (`dashboard-admin.repository.ts` y
+`dashboard-refugio.repository.ts`) hace un `groupBy` sobre `Solicitud_Estado`, cuyas filas se
+conservan todas (el histórico no se da de baja al cambiar de estado). El comentario dice «estado
+vigente = última fila», pero la consulta cuenta **cada fila**: una solicitud aprobada suma en
+`Pendiente` y en `Aprobada`. En el del refugio, además, filtra por la fecha de la fila, así que
+mide «cuántas entraron a cada estado en el período», que es una métrica válida pero no es la
+que dice el comentario ni la que un panel de «solicitudes por estado» sugiere. Con los estados
+nuevos (`Revisada`, `Cerrada`) la diferencia se nota más: cada solicitud deja más filas.
+
+**Cómo se arregla.** Decidir qué se quiere mostrar. Si es el estado actual de cada solicitud,
+contar la fila vigente (la más nueva por solicitud). Si son entradas por período, renombrar el
+panel y el comentario. Con la causa en `solicitud_estado_motivo` ya se pueden armar métricas
+claras de rechazos, cancelaciones y cierres.
 

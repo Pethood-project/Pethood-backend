@@ -36,6 +36,7 @@ vi.mock('../../../../src/shared/imagenPerfil', () => ({
   persistirImagenPerfil: vi.fn(),
 }));
 
+import * as notificaciones from '../../../../src/modules/notificaciones/notificaciones.service';
 import * as repo from '../../../../src/modules/usuarios/usuarios.repository';
 import {
   actualizarPerfil,
@@ -229,12 +230,33 @@ describe('usuarios.service', () => {
       perfilFake({ googleId: 'google-abc', contrasena: null }),
     );
     mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 4 } as never);
-    mockedRepo.buscarEstadoSolicitudPorNombre.mockResolvedValue({ id: 5 } as never);
-    mockedRepo.darDeBajaCuenta.mockResolvedValue(undefined);
+    mockedRepo.buscarEstadoSolicitudPorNombre.mockImplementation(((nombre: string) =>
+      Promise.resolve({ id: nombre === 'Cancelada' ? 5 : 6 })) as never);
+    mockedRepo.darDeBajaCuenta.mockResolvedValue([]);
 
     await darDeBajaCuenta(10);
 
-    expect(mockedRepo.darDeBajaCuenta).toHaveBeenCalledWith(10, 4, 5);
+    expect(mockedRepo.darDeBajaCuenta).toHaveBeenCalledWith(10, 4, 5, 6);
+  });
+
+  it('avisa, sin culpar a nadie, a quienes esperaban respuesta de quien cerró su cuenta', async () => {
+    mockedRepo.buscarPerfil.mockResolvedValue(perfilFake());
+    mockedRepo.buscarEstadoUsuarioPorNombre.mockResolvedValue({ id: 4 } as never);
+    mockedRepo.buscarEstadoSolicitudPorNombre.mockResolvedValue({ id: 5 } as never);
+    mockedRepo.darDeBajaCuenta.mockResolvedValue([
+      { id: 77, usuarioId: 31, nombreMascota: 'Toby' },
+    ]);
+
+    await darDeBajaCuenta(10);
+
+    expect(notificaciones.notificar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usuarioId: 31,
+        tipo: 'SOLICITUD_CERRADA',
+        entidadId: 77,
+        mensaje: expect.stringContaining('Quien publicó a Toby cerró su cuenta'),
+      }),
+    );
   });
 
   it('no deja dar de baja una cuenta de administrador', async () => {

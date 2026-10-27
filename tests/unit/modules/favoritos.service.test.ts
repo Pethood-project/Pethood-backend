@@ -34,6 +34,8 @@ function favoritoConMascota(opciones: {
   publicacionId?: number | null;
   /** Solicitud viva del usuario sobre esa publicación, si la tiene. */
   solicitudId?: number | null;
+  /** Estado vigente de esa solicitud. Por defecto, abierta. */
+  estadoSolicitud?: string;
   /** Refugio dueño; `null` es la mascota de un adoptante particular. */
   refugio?: { id: number; nombre: string } | null;
 }) {
@@ -45,6 +47,7 @@ function favoritoConMascota(opciones: {
     fechaNacimiento = new Date(2022, 2, 15),
     publicacionId = 5,
     solicitudId = null,
+    estadoSolicitud = 'Pendiente',
     refugio = null,
   } = opciones;
 
@@ -69,7 +72,15 @@ function favoritoConMascota(opciones: {
           : [
               {
                 id: publicacionId,
-                solicitudes: solicitudId === null ? [] : [{ id: solicitudId }],
+                solicitudes:
+                  solicitudId === null
+                    ? []
+                    : [
+                        {
+                          id: solicitudId,
+                          historicoEstados: [{ estadoSolicitud: { nombre: estadoSolicitud } }],
+                        },
+                      ],
               },
             ],
     },
@@ -260,7 +271,29 @@ describe('listarFavoritos', () => {
 
     const { favoritos } = await service.listarFavoritos(USUARIO);
 
-    expect(favoritos[0]).toMatchObject({ publicacionId: 88, solicitudAbiertaId: 1042 });
+    expect(favoritos[0]).toMatchObject({
+      publicacionId: 88,
+      solicitudAbiertaId: 1042,
+      solicitudCanceladaId: null,
+    });
+  });
+
+  it('una solicitud retirada ya no es abierta: la tarjeta dice que se canceló', async () => {
+    vi.mocked(repo.listarVisiblesDeUsuario).mockResolvedValue([
+      favoritoConMascota({
+        id: 1,
+        mascotaId: 42,
+        fechaAlta: FECHA_AGREGADO,
+        estado: { id: 1, nombre: 'Disponible' },
+        publicacionId: 88,
+        solicitudId: 1042,
+        estadoSolicitud: 'Cancelada',
+      }),
+    ] as never);
+
+    const { favoritos } = await service.listarFavoritos(USUARIO);
+
+    expect(favoritos[0]).toMatchObject({ solicitudAbiertaId: null, solicitudCanceladaId: 1042 });
   });
 
   // La tarjeta de favoritos de Inicio muestra de qué refugio es la mascota.

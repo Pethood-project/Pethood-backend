@@ -13,6 +13,7 @@ import { borrarImagenes, guardarImagen } from '../../shared/storage';
 import { firmarUrlArchivo } from '../../shared/urlFirmada';
 import type { ArchivoSubida } from '../../shared/r2';
 import * as notificaciones from '../notificaciones/notificaciones.service';
+import { textoDeCierre } from '../solicitudes/solicitudes.messages';
 import type {
   PerfilPublicoUsuarioDto,
   ActualizarPerfilBody,
@@ -344,12 +345,13 @@ export async function darDeBajaCuenta(usuarioId: number): Promise<void> {
     );
   }
 
-  const [estadoInactivo, estadoCancelada] = await Promise.all([
+  const [estadoInactivo, estadoCancelada, estadoCerrada] = await Promise.all([
     repo.buscarEstadoUsuarioPorNombre(ESTADO_USUARIO.INACTIVO),
     repo.buscarEstadoSolicitudPorNombre('Cancelada'),
+    repo.buscarEstadoSolicitudPorNombre('Cerrada'),
   ]);
 
-  if (!estadoInactivo || !estadoCancelada) {
+  if (!estadoInactivo || !estadoCancelada || !estadoCerrada) {
     throw new AppError(
       'ERROR_INTERNO',
       'No pudimos dar de baja la cuenta. Intentalo de nuevo.',
@@ -357,7 +359,26 @@ export async function darDeBajaCuenta(usuarioId: number): Promise<void> {
     );
   }
 
-  await repo.darDeBajaCuenta(usuarioId, estadoInactivo.id, estadoCancelada.id);
+  const cerradas = await repo.darDeBajaCuenta(
+    usuarioId,
+    estadoInactivo.id,
+    estadoCancelada.id,
+    estadoCerrada.id,
+  );
+
+  // Las personas que esperaban respuesta de este usuario se enteran de por qué se cerró.
+  await Promise.all(
+    cerradas.map((solicitud) =>
+      notificaciones.notificar({
+        usuarioId: solicitud.usuarioId,
+        tipo: 'SOLICITUD_CERRADA',
+        mensaje: textoDeCierre('PUBLICANTE_CERRO_CUENTA', solicitud.nombreMascota ?? 'la mascota'),
+        entidadTipo: 'SOLICITUD',
+        entidadId: solicitud.id,
+        canal: { push: true },
+      }),
+    ),
+  );
 
   await registrarAuditoria({
     usuarioId,

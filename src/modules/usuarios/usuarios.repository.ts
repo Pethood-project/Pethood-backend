@@ -3,8 +3,7 @@ import { prisma } from '../../config/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { AppError } from '../../middlewares/errorHandler';
 import type { Ambito } from '../../shared/ambito';
-
-const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'] as const;
+import { estaAbierta } from '../../shared/requestStates';
 
 const includePerfil = {
   estado: true,
@@ -228,30 +227,42 @@ export function buscarEstadoSolicitudPorNombre(nombre: string) {
   return prisma.estadoSolicitud.findFirst({ where: { nombre, fechaBaja: null } });
 }
 
+/** Solicitud de otra persona que se cerró porque quien publicó cerró su cuenta. */
+export interface SolicitudCerradaPorBaja {
+  id: number;
+  usuarioId: number;
+  nombreMascota: string | null;
+}
+
 /**
- * HU-1.8: cierra trámites abiertos del usuario y deja la cuenta Inactiva (baja lógica).
+ * Cierra los trámites abiertos del usuario y deja la cuenta Inactiva (baja lógica).
  *
  * En la misma transacción:
- * - cancela solicitudes Pendiente/En_Revision que envió o que le llegaron sobre mascotas
- *   particulares (las del refugio las siguen viendo los demás miembros);
+ * - las solicitudes abiertas que envió quedan Canceladas, y las que le llegaron sobre
+ *   mascotas particulares quedan Cerradas (las del refugio las siguen viendo los demás
+ *   miembros). Ninguna se da de baja: se siguen viendo con su estado final;
  * - retira publicaciones y mascotas particulares;
  * - limpia favoritos;
  * - marca al usuario con estado Inactivo + fechaBaja.
+ *
+ * Devuelve las solicitudes de otras personas que se cerraron, para avisarles.
  */
 export async function darDeBajaCuenta(
   usuarioId: number,
   estadoInactivoId: number,
   estadoCanceladaId: number,
-): Promise<void> {
+  estadoCerradaId: number,
+): Promise<SolicitudCerradaPorBaja[]> {
   const baja = datosBaja(usuarioId);
 
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const solicitudes = await tx.solicitud.findMany({
       where: {
         fechaBaja: null,
         OR: [{ usuarioId }, { publicacion: { usuarioId, mascota: { refugioId: null } } }],
       },
       include: {
+        publicacion: { select: { mascota: { select: { nombre: true } } } },
         historicoEstados: {
           where: { fechaBaja: null },
           include: { estadoSolicitud: true },
@@ -261,25 +272,34 @@ export async function darDeBajaCuenta(
       },
     });
 
-    const abiertas = solicitudes.filter((solicitud) => {
-      const vigente = solicitud.historicoEstados[0]?.estadoSolicitud.nombre;
-      return (
-        vigente !== undefined && (ESTADOS_SOLICITUD_ABIERTA as readonly string[]).includes(vigente)
-      );
-    });
+    const abiertas = solicitudes.filter((solicitud) =>
+      estaAbierta(solicitud.historicoEstados[0]?.estadoSolicitud.nombre),
+    );
+    const cerradasDeOtros: SolicitudCerradaPorBaja[] = [];
 
     for (const solicitud of abiertas) {
+      const laEnvioElUsuario = solicitud.usuarioId === usuarioId;
+
       await tx.solicitud.update({
         where: { id: solicitud.id },
-        data: baja,
+        data: datosModificacion(usuarioId),
       });
       await tx.solicitudEstado.create({
         data: {
           solicitudId: solicitud.id,
-          estadoSolicitudId: estadoCanceladaId,
+          estadoSolicitudId: laEnvioElUsuario ? estadoCanceladaId : estadoCerradaId,
+          motivo: laEnvioElUsuario ? 'CUENTA_CERRADA_SOLICITANTE' : 'PUBLICANTE_CERRO_CUENTA',
           ...datosAlta(usuarioId),
         },
       });
+
+      if (!laEnvioElUsuario) {
+        cerradasDeOtros.push({
+          id: solicitud.id,
+          usuarioId: solicitud.usuarioId,
+          nombreMascota: solicitud.publicacion.mascota.nombre,
+        });
+      }
     }
 
     const mascotas = await tx.mascota.findMany({
@@ -308,6 +328,8 @@ export async function darDeBajaCuenta(
       where: { id: usuarioId },
       data: { estadoId: estadoInactivoId, ...baja },
     });
+
+    return cerradasDeOtros;
   });
 }
 

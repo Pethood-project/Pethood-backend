@@ -11,6 +11,7 @@ export interface DatosNuevaMascota {
   peso: number;
   tamanio: TamanioMascota;
   castrado: boolean;
+  desparasitado: boolean;
   descripcion: string | null;
   imagenUrl: string;
   razaId: number;
@@ -95,6 +96,7 @@ export interface DatosEdicionMascota {
   peso?: number;
   tamanio?: TamanioMascota;
   castrado?: boolean;
+  desparasitado?: boolean;
   descripcion?: string | null;
   imagenUrl?: string;
   razaId?: number;

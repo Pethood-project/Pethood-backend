@@ -102,6 +102,18 @@ export function crear(usuarioId: number, mascotaId: number) {
   });
 }
 
+/** Saca la mascota de los favoritos de todos: ya no está en circulación. Devuelve cuántos eran. */
+export async function darDeBajaTodosDeMascota(
+  mascotaId: number,
+  usuarioBaja: number,
+): Promise<number> {
+  const { count } = await prisma.favorito.updateMany({
+    where: { mascotaId, fechaBaja: null },
+    data: datosBaja(usuarioBaja),
+  });
+  return count;
+}
+
 /** Baja lógica: la fila queda como histórico y deja de contar para el listado. */
 export function darDeBaja(favoritoId: number, usuarioBaja: number) {
   return prisma.favorito.update({

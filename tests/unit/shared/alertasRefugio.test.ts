@@ -19,6 +19,13 @@ describe('esSolicitudDemorada', () => {
   it('abierta con 5 días o más en su estado: demorada', () => {
     expect(esSolicitudDemorada({ nombre: 'Pendiente', desde: hace(5) }, HOY)).toBe(true);
     expect(esSolicitudDemorada({ nombre: 'En_Revision', desde: hace(9) }, HOY)).toBe(true);
+    // Ya revisada y esperando la decisión del refugio.
+    expect(esSolicitudDemorada({ nombre: 'Revisada', desde: hace(6) }, HOY)).toBe(true);
+  });
+
+  it('una cerrada o cancelada ya no espera nada: nunca está demorada', () => {
+    expect(esSolicitudDemorada({ nombre: 'Cerrada', desde: hace(40) }, HOY)).toBe(false);
+    expect(esSolicitudDemorada({ nombre: 'Cancelada', desde: hace(40) }, HOY)).toBe(false);
   });
 
   it('abierta hace menos de 5 días, o ya resuelta: no', () => {

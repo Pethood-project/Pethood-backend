@@ -31,7 +31,7 @@
 | 6 | Seguimiento pedido o vencido | HU-4.4 | `seguimiento.service.ts` (~l.255, tipo `SEGUIMIENTO_VENCIDO`) | Adoptante |
 | 7 | Pregunta del refugio fuera de secuencia | HU-4.4 | `seguimiento.service.ts` `enviarPregunta` (~l.552, `SEGUIMIENTO_PREGUNTA_REFUGIO`) | Adoptante |
 | 8 | Actualización del seguimiento subida | HU-4.5 | `seguimiento.service.ts` `subirActualizacion` (~l.682) | Refugio |
-| 9 | Solicitud cancelada por vencimiento | HU-7.6 | `jobs/cancelar-solicitudes-vencidas.job.ts` | Solicitante (hoy no se le avisa) |
+| 9 | Solicitud cerrada por vencimiento | HU-7.6 | `jobs/cancelar-solicitudes-vencidas.job.ts` | Quien publicó (mail). El solicitante recibe el push y la bandeja de la causa `VENCIDA_SIN_RESPUESTA` |
 
 ### C. Moderación y administración
 

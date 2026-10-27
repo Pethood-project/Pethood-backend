@@ -1,13 +1,11 @@
 import { AppError } from '../../middlewares/errorHandler';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import { estaAbierta } from '../../shared/requestStates';
 import { aFechaISO } from '../../shared/validation/dates';
 import * as notificaciones from '../notificaciones/notificaciones.service';
 import type { FiltrosMascotas } from './admin-mascotas.dto';
 import * as repo from './admin-mascotas.repository';
 import type { MascotaAdmin } from './admin-mascotas.repository';
-
-/** Trámites abiertos: frenan la baja (mismo criterio que la baja del dueño). */
-const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'];
 
 function aItemDto(m: MascotaAdmin) {
   const estado = m.historicoEstados[0]?.estadoMascota;
@@ -73,7 +71,7 @@ export async function darDeBaja(adminId: number, id: number, motivo: string) {
   const solicitudes = await repo.listarSolicitudesDeMascota(id);
   const hayAbiertas = solicitudes.some((s) => {
     const estado = s.historicoEstados[0]?.estadoSolicitud;
-    return estado !== undefined && ESTADOS_SOLICITUD_ABIERTA.includes(estado.nombre);
+    return estaAbierta(estado?.nombre);
   });
   if (hayAbiertas) {
     throw new AppError(

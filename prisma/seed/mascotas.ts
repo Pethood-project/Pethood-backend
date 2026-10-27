@@ -27,7 +27,6 @@ interface DefPublicacion {
   tagline: string;
   requisitos: string[];
   personalidad: string[];
-  desparasitado?: boolean;
   /** Antigüedad de la publicación: cubre los 4 buckets del dashboard (0-15/15-30/30-60/+60). */
   diasAtras: number;
   /** Publicación cerrada (baja lógica) por el refugio, ej. después de concretar la adopción. */
@@ -55,6 +54,8 @@ interface DefMascota {
   peso: number;
   edad: { anios: number; meses?: number };
   castrado: boolean;
+  /** Por defecto sí: la mayoría de las mascotas de demo están al día. */
+  desparasitado?: boolean;
   descripcion: string;
   fotos: string[];
   /** Histórico de estados, del más viejo al vigente: [estado, hace cuántos días]. */
@@ -890,6 +891,7 @@ export async function seedMascotas(catalogos: Catalogos, actores: Actores): Prom
           tamanio: def.tamanio,
           peso: def.peso,
           castrado: def.castrado,
+          desparasitado: def.desparasitado ?? true,
           descripcion: def.descripcion,
           imagenUrl: imagenes[0],
           razaId: id(catalogos.razas, def.raza),
@@ -916,7 +918,6 @@ export async function seedMascotas(catalogos: Catalogos, actores: Actores): Prom
             ubicacion: def.refugio ? 'Mendoza' : (duenio.localidad ?? 'Mendoza'),
             requisitos: def.publicacion.requisitos,
             personalidad: def.publicacion.personalidad,
-            desparasitado: def.publicacion.desparasitado ?? true,
             imagenes,
             imagenUrl: imagenes[0],
             mascotaId: mascota.id,

@@ -3,6 +3,8 @@
 **Estado:** APROBADA
 **Sprint:** 3 · **Responsable:** (asignar) · **Última actualización:** 2026-09-09
 
+> **Enmienda en curso — spec 030 (BORRADOR, 2026-10-22).** Agrega los estados `Revisada` y `Cerrada` con causa, el retiro de la solicitud, el saludo como primer mensaje del chat, las preguntas del refugio y la revisión guiada. Cambia las reglas 1, 6 y 7 de §6 y la baja lógica de HU-7.6. Mientras la 030 no esté implementada, esta spec sigue siendo la vigente.
+
 ## 1. Objetivo
 
 Permitir que un adoptante solicite adoptar una mascota publicada y guarde publicaciones en favoritos, y que el refugio gestione las solicitudes que recibe sobre sus mascotas.

@@ -3,6 +3,7 @@ import { direccionDesdeCampos, geocodificarDireccion } from '../../shared/geocod
 import { resolverCoordenadasDeMapsUrl } from '../../shared/geo';
 import { persistirImagenPerfil } from '../../shared/imagenPerfil';
 import { registrarAuditoria } from '../../shared/logAuditoria';
+import { estaAbierta } from '../../shared/requestStates';
 import type { ArchivoSubida } from '../../shared/r2';
 import type {
   ActualizarPerfilRefugioBody,
@@ -12,9 +13,6 @@ import type {
 } from './perfil-refugio.dto';
 import type { RefugioConEstado } from './perfil-refugio.repository';
 import * as repo from './perfil-refugio.repository';
-
-/** Las que todavía esperan una respuesta del refugio. */
-const ESTADOS_SOLICITUD_ABIERTA = ['Pendiente', 'En_Revision'];
 
 /**
  * Hoy cualquier miembro del refugio edita su perfil. Cuando existan roles dentro del
@@ -68,9 +66,7 @@ async function armarPerfil(refugio: RefugioConEstado, usuarioId: number): Promis
     estadisticas: {
       enRefugio,
       adopciones,
-      solicitudesAbiertas: estadosSolicitudes.filter((estado) =>
-        ESTADOS_SOLICITUD_ABIERTA.includes(estado),
-      ).length,
+      solicitudesAbiertas: estadosSolicitudes.filter((estado) => estaAbierta(estado)).length,
     },
     valoracion: {
       promedio: valoracion.promedio === null ? null : Math.round(valoracion.promedio * 10) / 10,

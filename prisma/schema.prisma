@@ -50,6 +50,7 @@ enum GeneroMascota {
 enum TipoMensaje {
   TEXTO
   SOLICITUD
+  SOLICITUD_ESTADO
   ANIMAL_PERDIDO
   MASCOTA
   UBICACION_REFUGIO
@@ -61,6 +62,35 @@ enum TamanioMascota {
   PEQUENO
   MEDIANO
   GRANDE
+}
+
+// Cómo se responde una pregunta propia del refugio en el formulario de solicitud.
+enum TipoPreguntaAdopcion {
+  TEXTO
+  SI_NO
+  OPCIONES
+
+  @@map("tipo_pregunta_adopcion")
+}
+
+// Causa con la que una solicitud llega a un estado final. Va en la fila del histórico
+// (SolicitudEstado) y no en Solicitud: pertenece a la transición, junto con quién y cuándo.
+// Cada valor corresponde a un solo estado (Rechazada, Cancelada o Cerrada); el service
+// valida el cruce. Es un enum y no un catálogo porque el código ramifica por él.
+enum MotivoSolicitud {
+  NO_CUMPLE_REQUISITOS
+  MASCOTA_CON_HOGAR
+  SIN_CONTACTO
+  OTRO
+  RETIRADA_POR_SOLICITANTE
+  CUENTA_CERRADA_SOLICITANTE
+  ADOPTADA_POR_OTRA_PERSONA
+  MASCOTA_FALLECIDA
+  PUBLICACION_RETIRADA
+  PUBLICANTE_CERRO_CUENTA
+  VENCIDA_SIN_RESPUESTA
+
+  @@map("motivo_solicitud")
 }
 
 // ─────────────── CATÁLOGOS ───────────────
@@ -78,9 +108,10 @@ model Especie {
   usuarioBaja         Int?      @map("especie_usuario_baja")
   fechaBaja           DateTime? @map("especie_fecha_baja")
 
-  razas            Raza[]
-  animalesPerdidos AnimalPerdido[]
-  vacunas          VacunaEspecie[]
+  razas             Raza[]
+  animalesPerdidos  AnimalPerdido[]
+  vacunas           VacunaEspecie[]
+  preguntasAdopcion PreguntaAdopcion[]
 
   @@map("especie")
 }
@@ -448,6 +479,7 @@ model Refugio {
   conexionMercadoPago  ConexionMercadoPago?
   resenasComoReportado Resena[]             @relation("ResenaReportado")
   chats                Chat[]
+  preguntasAdopcion    PreguntaAdopcion[]
 
   @@map("refugio")
 }
@@ -468,6 +500,7 @@ model Mascota {
   peso            Decimal?        @map("mascota_peso") @db.Decimal(4, 1)
   tamanio         TamanioMascota? @map("mascota_tamanio")
   castrado        Boolean         @default(false) @map("mascota_castrado")
+  desparasitado   Boolean         @default(false) @map("mascota_desparasitado")
   descripcion     String?         @map("mascota_descripcion")
   imagenUrl       String?         @map("mascota_imagen_url")
   razaId          Int             @map("raza_id")
@@ -491,6 +524,9 @@ model Mascota {
   historiaClinica  HistoriaClinica[]
   reportesPerdido  AnimalPerdido[]
   mensajes         Mensaje[]
+
+  // La solicitud de adopción de la que nació esta mascota, si es una adoptada.
+  solicitudDeAdopcion Solicitud[] @relation("MascotaAdoptada")
 
   @@map("mascota")
 }
@@ -533,7 +569,6 @@ model Publicacion {
   ubicacionLongitud Decimal? @map("publicacion_ubicacion_longitud") @db.Decimal(9, 6)
   requisitos        String[] @map("publicacion_requisitos")
   personalidad      String[] @map("publicacion_personalidad")
-  desparasitado     Boolean  @default(false) @map("publicacion_desparasitado")
   imagenes          String[] @map("publicacion_imagenes")
   imagenUrl         String?  @map("publicacion_imagen_url")
   mascotaId         Int      @map("mascota_id")
@@ -616,6 +651,10 @@ model Solicitud {
   fechaRespuesta DateTime? @map("solicitud_fecha_respuesta")
   comentario     String?   @map("solicitud_comentario")
 
+  // Nota privada de quien publicó (refugio o particular): un solo texto editable, sin
+  // historial ni autoría. Nunca viaja al solicitante.
+  notaInterna String? @map("solicitud_nota_interna")
+
   // Período ofrecido cuando el tipo es "Transito". Nulos en una solicitud de adopción:
   // no hay período que declarar. Van en Solicitud y no en Hogar porque son de ESTA
   // solicitud — el hogar es el perfil del usuario y lo comparten todas.
@@ -632,6 +671,11 @@ model Solicitud {
   // a HU-7.1 no tienen hogar.
   hogarId Int? @map("hogar_id")
 
+  // La mascota propia que nació al aprobarse una adopción: la que pasa a ser del adoptante.
+  // Sin esto no hay forma de volver de la solicitud a su mascota. Nula en tránsito, en las
+  // no aprobadas y en las aprobadas antes de que existiera esta columna.
+  mascotaAdoptadaId Int? @map("mascota_adoptada_id")
+
   usuarioAlta         Int       @map("solicitud_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("solicitud_fecha_alta")
   usuarioModificacion Int?      @map("solicitud_usuario_modificacion")
@@ -644,12 +688,15 @@ model Solicitud {
   tipoSolicitud TipoSolicitud @relation(fields: [tipoSolicitudId], references: [id])
   hogar         Hogar?        @relation(fields: [hogarId], references: [id])
 
+  mascotaAdoptada Mascota? @relation("MascotaAdoptada", fields: [mascotaAdoptadaId], references: [id])
+
   historicoEstados     SolicitudEstado[]
   seguimientos         Seguimiento[]
   preguntasSeguimiento PreguntaSeguimiento[]
   chats                Chat[]
   mensajes             Mensaje[]
   resenas              Resena[]
+  respuestas           SolicitudRespuesta[]
 
   @@map("solicitud")
 }
@@ -658,6 +705,9 @@ model SolicitudEstado {
   id                Int @id @default(autoincrement()) @map("solicitud_estado_id")
   solicitudId       Int @map("solicitud_id")
   estadoSolicitudId Int @map("estado_solicitud_id")
+
+  // Solo en los estados finales Rechazada, Cancelada y Cerrada.
+  motivo MotivoSolicitud? @map("solicitud_estado_motivo")
 
   usuarioAlta         Int       @map("solicitud_estado_usuario_alta")
   fechaAlta           DateTime  @default(now()) @map("solicitud_estado_fecha_alta")
@@ -670,6 +720,63 @@ model SolicitudEstado {
   estadoSolicitud EstadoSolicitud @relation(fields: [estadoSolicitudId], references: [id])
 
   @@map("solicitud_estado")
+}
+
+// Pregunta propia de un refugio, que se suma al final del formulario de solicitud. Sin
+// `especieId` aplica a todas las mascotas del refugio; con él, solo a las de esa especie.
+// Una pregunta no se borra: se desactiva o se le da de baja, y las respuestas ya dadas
+// conservan su texto (ver SolicitudRespuesta).
+model PreguntaAdopcion {
+  id          Int                  @id @default(autoincrement()) @map("pregunta_adopcion_id")
+  refugioId   Int                  @map("refugio_id")
+  especieId   Int?                 @map("especie_id")
+  texto       String               @map("pregunta_adopcion_texto")
+  tipo        TipoPreguntaAdopcion @default(TEXTO) @map("pregunta_adopcion_tipo")
+  // Solo en el tipo OPCIONES.
+  opciones    String[]             @map("pregunta_adopcion_opciones")
+  obligatoria Boolean              @default(false) @map("pregunta_adopcion_obligatoria")
+  orden       Int                  @default(0) @map("pregunta_adopcion_orden")
+  activa      Boolean              @default(true) @map("pregunta_adopcion_activa")
+
+  usuarioAlta         Int       @map("pregunta_adopcion_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("pregunta_adopcion_fecha_alta")
+  usuarioModificacion Int?      @map("pregunta_adopcion_usuario_modificacion")
+  fechaModificacion   DateTime? @map("pregunta_adopcion_fecha_modificacion")
+  usuarioBaja         Int?      @map("pregunta_adopcion_usuario_baja")
+  fechaBaja           DateTime? @map("pregunta_adopcion_fecha_baja")
+
+  refugio Refugio  @relation(fields: [refugioId], references: [id])
+  especie Especie? @relation(fields: [especieId], references: [id])
+
+  respuestas SolicitudRespuesta[]
+
+  @@index([refugioId])
+  @@map("pregunta_adopcion")
+}
+
+// Lo que respondió quien solicita a una pregunta del refugio. `preguntaTexto` es una COPIA
+// de lo que se le preguntó: si el refugio edita o desactiva la pregunta después, la
+// solicitud sigue mostrando exactamente lo que esa persona leyó y respondió.
+model SolicitudRespuesta {
+  id                 Int    @id @default(autoincrement()) @map("solicitud_respuesta_id")
+  solicitudId        Int    @map("solicitud_id")
+  preguntaAdopcionId Int?   @map("pregunta_adopcion_id")
+  preguntaTexto      String @map("solicitud_respuesta_pregunta_texto")
+  respuesta          String @map("solicitud_respuesta_respuesta")
+  orden              Int    @default(0) @map("solicitud_respuesta_orden")
+
+  usuarioAlta         Int       @map("solicitud_respuesta_usuario_alta")
+  fechaAlta           DateTime  @default(now()) @map("solicitud_respuesta_fecha_alta")
+  usuarioModificacion Int?      @map("solicitud_respuesta_usuario_modificacion")
+  fechaModificacion   DateTime? @map("solicitud_respuesta_fecha_modificacion")
+  usuarioBaja         Int?      @map("solicitud_respuesta_usuario_baja")
+  fechaBaja           DateTime? @map("solicitud_respuesta_fecha_baja")
+
+  solicitud        Solicitud         @relation(fields: [solicitudId], references: [id])
+  preguntaAdopcion PreguntaAdopcion? @relation(fields: [preguntaAdopcionId], references: [id])
+
+  @@index([solicitudId])
+  @@map("solicitud_respuesta")
 }
 
 // ─────────────── HISTORIA CLÍNICA ───────────────

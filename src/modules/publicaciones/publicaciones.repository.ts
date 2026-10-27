@@ -3,6 +3,7 @@ import { prisma } from '../../shared/prisma';
 import { datosAlta, datosBaja, datosModificacion } from '../../shared/auditoria';
 import { distanciaKm, resolverCoordenadasDeMapsUrl } from '../../shared/geo';
 import { SELECT_VACUNA } from '../../shared/vacunas';
+import { ESTADO_SOLICITUD, ESTADOS_SOLICITUD_ABIERTA } from '../../shared/requestStates';
 import { restarAnios, finDelDia } from '../../shared/validation/dates';
 import {
   ESTADO_PUBLICACION,
@@ -20,7 +21,6 @@ export interface DatosNuevaPublicacion {
   longitud: number | null;
   requisitos: string[];
   personalidad: string[];
-  desparasitado: boolean;
   /** En orden: la primera es la portada. */
   imagenes: string[];
   mascotaId: number;
@@ -156,7 +156,8 @@ export function buscarEnCursoDeMascota(mascotaId: number) {
       fechaBaja: null,
       historicoEstados: conEstadoVigente({ nombre: { not: ESTADO_PUBLICACION.FINALIZADA } }),
     },
-    include: { historicoEstados: ESTADO_VIGENTE },
+    // El nombre sirve para los avisos que la mascota dispara al cambiar de estado.
+    include: { historicoEstados: ESTADO_VIGENTE, mascota: { select: { nombre: true } } },
     orderBy: { fechaAlta: 'desc' },
   });
 }
@@ -181,7 +182,6 @@ export interface DatosEdicionPublicacion {
   longitud: number | null;
   requisitos: string[];
   personalidad: string[];
-  desparasitado: boolean;
   /** En orden: la primera es la portada. */
   imagenes: string[];
 }
@@ -417,6 +417,22 @@ function condicionesFeed(
     fechaBaja: null,
     mascota,
     historicoEstados: conEstadoVigente({ nombre: ESTADO_PUBLICACION.ACTIVA }),
+    // Lo que ya pidió, o le aprobaron, no vuelve a salir: no se puede pedir dos veces. Una
+    // retirada, rechazada o cerrada sí, porque puede volver a intentar.
+    solicitudes: {
+      none: {
+        usuarioId,
+        fechaBaja: null,
+        historicoEstados: {
+          some: {
+            fechaBaja: null,
+            estadoSolicitud: {
+              nombre: { in: [...ESTADOS_SOLICITUD_ABIERTA, ESTADO_SOLICITUD.APROBADA] },
+            },
+          },
+        },
+      },
+    },
   };
 
   // Perfiles públicos (spec 023). Una persona lista solo lo que publicó a título personal:

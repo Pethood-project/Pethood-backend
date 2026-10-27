@@ -22,16 +22,43 @@ describe('resolverSolicitudSchema', () => {
     }
   });
 
-  it('acepta Rechazada con comentario', () => {
+  it('acepta Rechazada con motivo y comentario', () => {
     const resultado = resolverSolicitudSchema.safeParse({
       estado: 'Rechazada',
-      comentario: 'No cumple los requisitos',
+      motivo: 'NO_CUMPLE_REQUISITOS',
+      comentario: 'Buscamos una casa con patio cerrado',
     });
 
     expect(resultado.success).toBe(true);
     if (resultado.success) {
-      expect(resultado.data.comentario).toBe('No cumple los requisitos');
+      expect(resultado.data.motivo).toBe('NO_CUMPLE_REQUISITOS');
+      expect(resultado.data.comentario).toBe('Buscamos una casa con patio cerrado');
     }
+  });
+
+  it('rechazar exige un motivo', () => {
+    expect(primerErrorResolver({ estado: 'Rechazada' })).toBe('Elegí un motivo');
+    expect(primerErrorResolver({ estado: 'Rechazada', comentario: 'No' })).toBe('Elegí un motivo');
+  });
+
+  it.each(['NO_CUMPLE_REQUISITOS', 'MASCOTA_CON_HOGAR', 'SIN_CONTACTO', 'OTRO'])(
+    'acepta el motivo de rechazo %s',
+    (motivo) => {
+      expect(primerErrorResolver({ estado: 'Rechazada', motivo })).toBeUndefined();
+    },
+  );
+
+  it.each(['VENCIDA_SIN_RESPUESTA', 'RETIRADA_POR_SOLICITANTE', 'MASCOTA_FALLECIDA', 'cualquiera'])(
+    'no acepta %s como motivo de un rechazo: pertenece a otro estado',
+    (motivo) => {
+      expect(primerErrorResolver({ estado: 'Rechazada', motivo })).toBe('El motivo no es válido');
+    },
+  );
+
+  it('una aprobación no lleva motivo', () => {
+    expect(primerErrorResolver({ estado: 'Aprobada', motivo: 'OTRO' })).toBe(
+      'Una solicitud aprobada no lleva motivo',
+    );
   });
 
   it('un comentario vacío se guarda como null (igual que mascotas.dto.ts)', () => {
@@ -243,7 +270,7 @@ describe('crearSolicitudSchema (HU-7.1)', () => {
   it('exige una motivación de al menos 20 caracteres', () => {
     const resultado = parsear({ tipoSolicitud: 'Adopcion', motivacion: 'Lo quiero' });
 
-    expect(errorDe(resultado, 'motivacion')).toMatch(/entre 20 y 500 caracteres/);
+    expect(errorDe(resultado, 'motivacion')).toMatch(/entre 20 y 300 caracteres/);
   });
 
   it('solo admite los tres topes de horas del formulario', () => {

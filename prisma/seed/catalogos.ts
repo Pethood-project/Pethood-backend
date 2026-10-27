@@ -297,7 +297,7 @@ export async function seedCatalogos(): Promise<number> {
   await upsertPorNombre('estadoPublicacion', ['Activa', 'Pausada', 'Finalizada'], sistemaId);
   await upsertPorNombre(
     'estadoSolicitud',
-    ['Pendiente', 'En_Revision', 'Aprobada', 'Rechazada', 'Cancelada'],
+    ['Pendiente', 'En_Revision', 'Revisada', 'Aprobada', 'Rechazada', 'Cancelada', 'Cerrada'],
     sistemaId,
   );
   await upsertPorNombre(
